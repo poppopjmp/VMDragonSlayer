@@ -207,5 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # Java Based Exclusion
-.grade
+.gradle
 .settings
+.classpath
+.antProperties.xml
+.project

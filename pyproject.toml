@@ -1,0 +1,317 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vmdragonslayer"
+version = "2.0.0"
+description = "Advanced VM detection and analysis library for binary reverse engineering"
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+authors = [
+    {name = "van1sh", email = "contact@vmdragonslayer.dev"}
+]
+maintainers = [
+    {name = "van1sh", email = "contact@vmdragonslayer.dev"}
+]
+keywords = [
+    "reverse-engineering",
+    "binary-analysis", 
+    "vm-detection",
+    "malware-analysis",
+    "security",
+    "deobfuscation",
+    "pattern-analysis",
+    "symbolic-execution"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring"
+]
+requires-python = ">=3.8"
+dependencies = [
+    # Core dependencies
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
+    "pydantic>=2.0.0",
+    
+    # Cryptography and security
+    "cryptography>=3.4.8",
+    
+    # Optional ML dependencies (will be imported conditionally)
+    "scikit-learn>=1.1.0",
+    "joblib>=1.1.0",
+    
+    # Configuration and validation
+    "pyyaml>=6.0",
+    
+    # System utilities
+    "psutil>=5.8.0",
+    
+    # Networking (for API functionality)
+    "httpx>=0.24.0",
+    "requests>=2.28.0"
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# Development dependencies
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0", 
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.3.0",
+    "bandit>=1.7.5",
+    "pip-audit>=2.6.0"
+]
+
+# Machine Learning dependencies
+ml = [
+    "torch>=2.0.0",
+    "tensorflow>=2.13.0",
+    "scikit-learn>=1.3.0",
+    "joblib>=1.3.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "networkx>=3.0"
+]
+
+# Web API dependencies
+web = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "websockets>=11.0.0",
+    "aiohttp>=3.8.0",
+    "jinja2>=3.1.0"
+]
+
+# Visualization dependencies
+viz = [
+    "dash>=2.10.0",
+    "plotly>=5.14.0",
+    "dash-bootstrap-components>=1.4.0"
+]
+
+# Enterprise/Production dependencies  
+enterprise = [
+    "redis>=4.5.0",
+    "pika>=1.3.0",
+    "graphene>=3.2.0",
+    "schedule>=1.2.0"
+]
+
+# GPU acceleration dependencies
+gpu = [
+    "cupy-cuda12x>=12.0.0",
+    "pynvml>=11.5.0"
+]
+
+# All optional dependencies
+all = [
+    "vmdragonslayer[dev,ml,web,viz,enterprise,gpu]"
+]
+
+[project.urls]
+Homepage = "https://github.com/poppopjmp/vmdragonslayer"
+Repository = "https://github.com/poppopjmp/vmdragonslayer"
+Documentation = "https://vmdragonslayer.readthedocs.io/"
+"Bug Reports" = "https://github.com/poppopjmp/vmdragonslayer/issues"
+"Security Policy" = "https://github.com/poppopjmp/vmdragonslayer/blob/main/SECURITY.md"
+Changelog = "https://github.com/poppopjmp/vmdragonslayer/blob/main/CHANGELOG.md"
+
+[project.scripts]
+vmdragonslayer = "dragonslayer.cli:main"
+vmdslayer = "dragonslayer.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["dragonslayer*"]
+exclude = ["tests*", "docs*", "plugins*"]
+
+[tool.setuptools.package-data]
+"dragonslayer" = [
+    "data/*.json",
+    "data/*.db", 
+    "templates/*.html",
+    "static/*"
+]
+
+# Exclude large model files from package
+[tool.setuptools.exclude-package-data]
+"*" = [
+    "data/models/pretrained/*.pkl",
+    "data/models/pretrained/*.pt",
+    "data/models/pretrained/*.pth"
+]
+
+# Black configuration
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # Exclude plugin directories as they may have different standards
+  plugins/
+  | data/
+  | build/
+  | dist/
+)/
+'''
+
+# isort configuration
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+src_paths = ["dragonslayer", "tests"]
+
+# Ruff configuration
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit (security)
+]
+ignore = [
+    "E501",   # line too long (handled by black)
+    "S101",   # assert used (common in tests)
+    "S603",   # subprocess call (needed for plugin builds)
+    "S607",   # starting process with partial executable path
+]
+exclude = [
+    "plugins/",
+    "data/",
+    "build/",
+    "dist/",
+]
+
+[tool.ruff.per-file-ignores]
+"tests/*" = ["S101", "S106", "S608"]  # Allow assert, hardcoded passwords in tests
+"dragonslayer/ml/*" = ["S301", "S302", "S310"]  # Allow pickle usage (with warnings)
+
+# MyPy configuration
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+# Handle optional dependencies gracefully
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "tensorflow.*", 
+    "sklearn.*",
+    "joblib.*",
+    "cupy.*",
+    "pynvml.*",
+    "dash.*",
+    "plotly.*",
+    "pika.*",
+    "redis.*",
+    "wmi.*",
+    "winreg.*"
+]
+ignore_missing_imports = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "--strict-markers",
+    "--strict-config", 
+    "--verbose",
+    "--tb=short"
+]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "gpu: marks tests that require GPU",
+    "ml: marks tests that require ML dependencies"
+]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning:pkg_resources.*",
+    "ignore::PendingDeprecationWarning"
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["dragonslayer"]
+omit = [
+    "*/tests/*",
+    "*/plugins/*",
+    "*/data/*",
+    "*/__init__.py"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod"
+]
+show_missing = true
+skip_covered = false
+fail_under = 70
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# Bandit security configuration
+[tool.bandit]
+exclude_dirs = ["tests", "plugins", "data"]
+skips = ["B101", "B601"]  # Allow assert usage, shell commands in specific contexts
+
+[tool.bandit.assert_used]
+skips = ["*/tests/*"]
+
+# Pre-commit hook configuration will be in .pre-commit-config.yaml
