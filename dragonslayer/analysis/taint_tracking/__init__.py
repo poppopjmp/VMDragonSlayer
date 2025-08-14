@@ -1,3 +1,19 @@
+# VMDragonSlayer - Advanced VM detection and analysis library
+# Copyright (C) 2025 van1sh
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """
 Taint Tracking Module
 ====================
@@ -12,28 +28,23 @@ This module provides comprehensive taint tracking capabilities including:
 - Optimized DTT execution
 """
 
+from .analyzer import TaintAnalysisResult, VMHandlerSignature, VMTaintAnalyzer
 from .tracker import (
-    TaintTracker,
-    TaintInfo,
-    TaintType,
-    TaintScope,
+    EnhancedVMTaintTracker,  # Backwards compatibility alias
     OperationType,
     TaintEvent,
-    TaintPropagation,
     TaintEventAnalyzer,
-    EnhancedVMTaintTracker  # Backwards compatibility alias
-)
-
-from .analyzer import (
-    VMTaintAnalyzer,
-    VMHandlerSignature,
-    TaintAnalysisResult
+    TaintInfo,
+    TaintPropagation,
+    TaintScope,
+    TaintTracker,
+    TaintType,
 )
 
 # Import VM taint tracker and DTT executor
 try:
-    from .vm_taint_tracker import VMTaintTracker
     from .dtt_executor import OptimizedDTTExecutor
+    from .vm_taint_tracker import VMTaintTracker
 except ImportError:
     # Graceful fallback if dependencies are missing
     VMTaintTracker = None
@@ -44,21 +55,18 @@ __all__ = [
     "TaintTracker",
     "TaintInfo",
     "TaintType",
-    "TaintScope", 
+    "TaintScope",
     "OperationType",
     "TaintEvent",
     "TaintPropagation",
     "TaintEventAnalyzer",
-    
     # Analysis
     "VMTaintAnalyzer",
     "VMHandlerSignature",
     "TaintAnalysisResult",
-    
     # VM taint tracking (if available)
     "VMTaintTracker",
     "OptimizedDTTExecutor",
-    
     # Backwards compatibility
-    "EnhancedVMTaintTracker"
+    "EnhancedVMTaintTracker",
 ]

@@ -1,3 +1,19 @@
+# VMDragonSlayer - Advanced VM detection and analysis library
+# Copyright (C) 2025 van1sh
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """
 Pattern Analysis Module
 ======================
@@ -10,17 +26,17 @@ This module provides:
 - Pattern classification and matching
 """
 
-from .recognizer import PatternRecognizer, SemanticPattern, PatternMatch
-from .database import PatternDatabase, PatternType, PatternSample
-from .classifier import PatternClassifier, ClassificationResult
+from .classifier import ClassificationResult, PatternClassifier
+from .database import PatternDatabase, PatternSample, PatternType
+from .recognizer import PatternMatch, PatternRecognizer, SemanticPattern
 
 __all__ = [
-    'PatternRecognizer',
-    'SemanticPattern', 
-    'PatternMatch',
-    'PatternDatabase',
-    'PatternType',
-    'PatternSample',
-    'PatternClassifier',
-    'ClassificationResult'
+    "PatternRecognizer",
+    "SemanticPattern",
+    "PatternMatch",
+    "PatternDatabase",
+    "PatternType",
+    "PatternSample",
+    "PatternClassifier",
+    "ClassificationResult",
 ]

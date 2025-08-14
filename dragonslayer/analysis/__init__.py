@@ -1,3 +1,19 @@
+# VMDragonSlayer - Advanced VM detection and analysis library
+# Copyright (C) 2025 van1sh
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """
 Analysis Module
 ==============
@@ -12,93 +28,96 @@ This module provides various analysis engines for binary analysis including:
 - Anti-analysis detection
 """
 
-from .vm_discovery import VMDetector, VMType, HandlerType, VMHandler, VMStructure
 from .pattern_analysis import (
-    PatternRecognizer,
-    PatternDatabase,
-    PatternClassifier,
-    SemanticPattern,
-    PatternSample,
-    PatternMatch,
     ClassificationResult,
-    PatternType
+    PatternClassifier,
+    PatternDatabase,
+    PatternMatch,
+    PatternRecognizer,
+    PatternSample,
+    PatternType,
+    SemanticPattern,
 )
 from .symbolic_execution import (
-    SymbolicExecutor,
-    HandlerLifter,
     ConstraintSolver,
     ExecutionContext,
-    SymbolicValue,
+    HandlerLifter,
     Instruction,
-    InstructionType
+    InstructionType,
+    SymbolicExecutor,
+    SymbolicValue,
 )
 from .taint_tracking import (
-    TaintTracker,
-    VMTaintAnalyzer,
-    TaintInfo,
-    TaintType,
+    EnhancedVMTaintTracker,
     OperationType,
-    EnhancedVMTaintTracker
+    TaintInfo,
+    TaintTracker,
+    TaintType,
+    VMTaintAnalyzer,
 )
+from .vm_discovery import HandlerType, VMDetector, VMHandler, VMStructure, VMType
 
 # Anti-evasion components
 try:
     from .anti_evasion import (
-        EnvironmentNormalizer,
+        AnalysisEnvironment,
+        CountermeasureResult,
+        CountermeasureType,
         DebuggerDetectionBypass,
-        VMDetectionBypass,
+        EnvironmentNormalizer,
         SandboxEvasionBypass,
         SelfModificationTracker,
-        AnalysisEnvironment,
-        CountermeasureType,
-        CountermeasureResult
+        VMDetectionBypass,
     )
+
     ANTI_EVASION_AVAILABLE = True
 except ImportError:
     ANTI_EVASION_AVAILABLE = False
 
 __all__ = [
     # VM Discovery
-    'VMDetector',
-    'VMType',
-    'HandlerType', 
-    'VMHandler',
-    'VMStructure',
+    "VMDetector",
+    "VMType",
+    "HandlerType",
+    "VMHandler",
+    "VMStructure",
     # Pattern Analysis
-    'PatternRecognizer',
-    'PatternDatabase', 
-    'PatternClassifier',
-    'SemanticPattern',
-    'PatternSample',
-    'PatternMatch',
-    'ClassificationResult',
-    'PatternType',
+    "PatternRecognizer",
+    "PatternDatabase",
+    "PatternClassifier",
+    "SemanticPattern",
+    "PatternSample",
+    "PatternMatch",
+    "ClassificationResult",
+    "PatternType",
     # Symbolic Execution
-    'SymbolicExecutor',
-    'HandlerLifter',
-    'ConstraintSolver',
-    'ExecutionContext',
-    'SymbolicValue',
-    'Instruction',
-    'InstructionType',
+    "SymbolicExecutor",
+    "HandlerLifter",
+    "ConstraintSolver",
+    "ExecutionContext",
+    "SymbolicValue",
+    "Instruction",
+    "InstructionType",
     # Taint Tracking
-    'TaintTracker',
-    'VMTaintAnalyzer',
-    'TaintInfo',
-    'TaintType',
-    'OperationType',
-    'EnhancedVMTaintTracker'
+    "TaintTracker",
+    "VMTaintAnalyzer",
+    "TaintInfo",
+    "TaintType",
+    "OperationType",
+    "EnhancedVMTaintTracker",
 ]
 
 # Add anti-evasion components if available
 if ANTI_EVASION_AVAILABLE:
-    __all__.extend([
-        'EnvironmentNormalizer',
-        'DebuggerDetectionBypass', 
-        'VMDetectionBypass',
-        'SandboxEvasionBypass',
-        'SelfModificationTracker',
-        'AnalysisEnvironment',
-        'CountermeasureType',
-        'CountermeasureResult'
-    ])
+    __all__.extend(
+        [
+            "EnvironmentNormalizer",
+            "DebuggerDetectionBypass",
+            "VMDetectionBypass",
+            "SandboxEvasionBypass",
+            "SelfModificationTracker",
+            "AnalysisEnvironment",
+            "CountermeasureType",
+            "CountermeasureResult",
+        ]
+    )

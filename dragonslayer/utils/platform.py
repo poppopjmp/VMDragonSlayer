@@ -1,3 +1,19 @@
+# VMDragonSlayer - Advanced VM detection and analysis library
+# Copyright (C) 2025 van1sh
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """
 Platform Utilities
 =================
@@ -6,20 +22,21 @@ Platform detection and system information utilities.
 Consolidates platform-specific functionality from across the VMDragonSlayer codebase.
 """
 
-import platform
-import sys
-import os
-import subprocess
 import logging
-from typing import Dict, List, Optional, Tuple
+import os
+import platform
+import subprocess
+import sys
 from dataclasses import dataclass
 from enum import Enum
+from typing import List
 
 logger = logging.getLogger(__name__)
 
 
 class Architecture(Enum):
     """System architecture types"""
+
     X86 = "x86"
     X64 = "x64"
     ARM = "arm"
@@ -29,6 +46,7 @@ class Architecture(Enum):
 
 class OperatingSystem(Enum):
     """Operating system types"""
+
     WINDOWS = "windows"
     LINUX = "linux"
     MACOS = "macos"
@@ -38,6 +56,7 @@ class OperatingSystem(Enum):
 @dataclass
 class PlatformInfo:
     """Complete platform information"""
+
     os_type: OperatingSystem
     os_version: str
     architecture: Architecture
@@ -52,7 +71,7 @@ class PlatformInfo:
 def get_platform_info() -> PlatformInfo:
     """
     Get comprehensive platform information.
-    
+
     Returns:
         PlatformInfo object with system details
     """
@@ -66,7 +85,7 @@ def get_platform_info() -> PlatformInfo:
         os_type = OperatingSystem.MACOS
     else:
         os_type = OperatingSystem.UNKNOWN
-    
+
     # Detect architecture
     machine = platform.machine().lower()
     if machine in ["x86_64", "amd64"]:
@@ -79,14 +98,15 @@ def get_platform_info() -> PlatformInfo:
         arch = Architecture.ARM
     else:
         arch = Architecture.UNKNOWN
-    
+
     # Get memory info
     try:
         import psutil
+
         total_memory = psutil.virtual_memory().total / (1024**3)  # GB
     except ImportError:
         total_memory = 0.0
-    
+
     # Get CPU features
     cpu_features = []
     try:
@@ -98,13 +118,13 @@ def get_platform_info() -> PlatformInfo:
             cpu_features = _get_macos_cpu_features()
     except Exception as e:
         logger.warning(f"Failed to get CPU features: {e}")
-    
+
     # Check for Pin tool
     has_pin = _check_pin_availability()
-    
+
     # Check for Docker
     has_docker = _check_docker_availability()
-    
+
     return PlatformInfo(
         os_type=os_type,
         os_version=platform.platform(),
@@ -114,7 +134,7 @@ def get_platform_info() -> PlatformInfo:
         python_version=sys.version,
         cpu_features=cpu_features,
         has_pin=has_pin,
-        has_docker=has_docker
+        has_docker=has_docker,
     )
 
 
@@ -150,7 +170,9 @@ def _get_windows_cpu_features() -> List[str]:
         # Try to use wmic to get CPU info
         result = subprocess.run(
             ["wmic", "cpu", "get", "Name,Description,Family"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             # Parse basic info
@@ -158,20 +180,21 @@ def _get_windows_cpu_features() -> List[str]:
                 features.append("intel")
             if "AMD" in result.stdout:
                 features.append("amd")
-        
+
         # Check for common features through Python
         import cpuinfo
+
         info = cpuinfo.get_cpu_info()
-        if 'flags' in info:
-            features.extend(info['flags'])
-        
+        if "flags" in info:
+            features.extend(info["flags"])
+
     except Exception:
         # Fallback to basic detection
         if "64" in platform.machine():
             features.append("x64")
         else:
             features.append("x86")
-    
+
     return features
 
 
@@ -179,25 +202,25 @@ def _get_linux_cpu_features() -> List[str]:
     """Get CPU features on Linux"""
     features = []
     try:
-        with open('/proc/cpuinfo', 'r') as f:
+        with open("/proc/cpuinfo") as f:
             content = f.read()
-            
+
         # Extract flags
-        for line in content.split('\n'):
-            if line.startswith('flags'):
-                flags = line.split(':')[1].strip().split()
+        for line in content.split("\n"):
+            if line.startswith("flags"):
+                flags = line.split(":")[1].strip().split()
                 features.extend(flags)
                 break
-                
+
         # Extract other info
-        if 'Intel' in content:
-            features.append('intel')
-        if 'AMD' in content:
-            features.append('amd')
-            
+        if "Intel" in content:
+            features.append("intel")
+        if "AMD" in content:
+            features.append("amd")
+
     except Exception as e:
         logger.warning(f"Failed to read /proc/cpuinfo: {e}")
-        
+
     return features
 
 
@@ -208,22 +231,26 @@ def _get_macos_cpu_features() -> List[str]:
         # Use sysctl to get CPU info
         result = subprocess.run(
             ["sysctl", "-n", "machdep.cpu.features"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             features.extend(result.stdout.strip().split())
-        
+
         # Check for Apple Silicon
         result = subprocess.run(
             ["sysctl", "-n", "machdep.cpu.brand_string"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0 and "Apple" in result.stdout:
             features.append("apple_silicon")
-            
+
     except Exception as e:
         logger.warning(f"Failed to get macOS CPU features: {e}")
-        
+
     return features
 
 
@@ -231,37 +258,28 @@ def _check_pin_availability() -> bool:
     """Check if Intel Pin is available"""
     try:
         # Check for pin executable in common locations
-        pin_paths = [
-            "pin",
-            "/opt/pin/pin",
-            "/usr/local/bin/pin",
-            "C:\\pin\\pin.exe"
-        ]
-        
+        pin_paths = ["pin", "/opt/pin/pin", "/usr/local/bin/pin", "C:\\pin\\pin.exe"]
+
         for pin_path in pin_paths:
             try:
                 result = subprocess.run(
-                    [pin_path, "-h"],
-                    capture_output=True, timeout=5
+                    [pin_path, "-h"], capture_output=True, timeout=5
                 )
                 if result.returncode == 0:
                     return True
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
-                
-    except Exception:
-        pass
-        
+
+    except Exception as e:
+        logger.debug(f"Pin availability check error ignored: {e}")
+
     return False
 
 
 def _check_docker_availability() -> bool:
     """Check if Docker is available"""
     try:
-        result = subprocess.run(
-            ["docker", "--version"],
-            capture_output=True, timeout=5
-        )
+        result = subprocess.run(["docker", "--version"], capture_output=True, timeout=5)
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
@@ -270,22 +288,28 @@ def _check_docker_availability() -> bool:
 # Additional utility functions
 def get_temp_directory() -> str:
     """Get platform-appropriate temporary directory"""
-    if is_windows():
-        return os.environ.get('TEMP', 'C:\\temp')
-    else:
-        return '/tmp'
+    try:
+        import tempfile
+
+        return tempfile.gettempdir()
+    except Exception:
+        # Fallbacks
+        if is_windows():
+            return os.environ.get("TEMP", "C:\\temp")
+        # As a safe fallback on Unix-like systems, still prefer tempfile when available
+        return "/var/tmp"
 
 
 def get_executable_extension() -> str:
     """Get platform-appropriate executable extension"""
-    return '.exe' if is_windows() else ''
+    return ".exe" if is_windows() else ""
 
 
 def get_library_extension() -> str:
     """Get platform-appropriate library extension"""
     if is_windows():
-        return '.dll'
+        return ".dll"
     elif is_macos():
-        return '.dylib'
+        return ".dylib"
     else:
-        return '.so'
+        return ".so"

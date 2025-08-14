@@ -145,6 +145,16 @@ repos:
             setup\.py$
           )$
 
+  # Enforce GPL headers using project script (covers dragonslayer/ and plugins/)
+  - repo: local
+    hooks:
+      - id: license-headers
+        name: Enforce GPL license headers (project script)
+        entry: python tools/add_license_headers.py --check --include-tests
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
   # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.9.0.5

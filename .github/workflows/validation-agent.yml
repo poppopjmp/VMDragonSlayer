@@ -1,0 +1,64 @@
+name: Validation Agent
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    env:
+      PYTHONHASHSEED: "0"
+      VMDS_LOG_LEVEL: "INFO"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Lint (ruff)
+        run: |
+          mkdir evidence
+          ruff check dragonslayer/analysis/pattern_analysis dragonslayer/analysis/vm_discovery dragonslayer/core --output-format junit --output-file evidence/ruff.xml
+      - name: Typecheck (mypy)
+        run: |
+          mypy dragonslayer/core/orchestrator.py dragonslayer/analysis/pattern_analysis/recognizer.py --junit-xml evidence/mypy.xml
+      - name: Unit tests with coverage
+        run: |
+          pytest -q --junitxml=evidence/pytest.xml --cov=dragonslayer --cov-branch --cov-report=xml:evidence/coverage.xml --cov-report=term
+      - name: Coverage gates
+        run: |
+          python tools/coverage_gate.py
+      - name: Security scan (bandit)
+        run: |
+          bandit -r dragonslayer -f xml -o evidence/bandit.xml
+      - name: Dependency scan (pip-audit)
+        run: |
+          pip-audit -f json -o evidence/pip_audit.json || true
+      - name: pip-audit gate
+        run: |
+          python tools/pip_audit_gate.py || true
+      - name: Bandit gates
+        run: |
+          python tools/bandit_gate.py
+      - name: Schema validation (if artifacts exist)
+        run: |
+          if (Test-Path artifacts) { python tools/schema_validate.py --targets "artifacts/**/*.json" --schemas "data/schemas/*.json" --out evidence/schema_validation.json } else { echo "no artifacts dir" }
+      - name: Determinism check
+        run: |
+          python tools/determinism_runner.py --analysis vm_discovery --size 2048 --seed 123 --out evidence/determinism_report.json || true
+      - name: Record SCM revision
+        run: |
+          git rev-parse HEAD | Out-File -FilePath evidence/SCM_REVISION.txt -Encoding ascii
+      - name: Evidence pack manifest
+        run: |
+          python tools/evidence_pack.py --out evidence
+      - name: Archive evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence/**

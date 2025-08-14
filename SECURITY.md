@@ -180,18 +180,6 @@ safety check
 - **OWASP Guidelines**: Following OWASP Top 10
 - **Industry Standards**: Researching malware analysis security standards
 
-## Contact Information
-
-### Security Team
-- **Lead**: @poppopjmp
-- **Email**: security@vmdragonslayer.dev
-- **Response Hours**: Monday-Friday, 9 AM - 5 PM EST
-
-### Emergency Contact
-For critical vulnerabilities requiring immediate attention:
-- **Emergency Email**: critical-security@vmdragonslayer.dev
-- **Response Time**: 24/7 monitoring for critical issues
-
 ---
 
 **Last Updated**: August 14, 2025  

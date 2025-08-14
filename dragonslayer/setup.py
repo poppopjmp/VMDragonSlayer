@@ -1,20 +1,39 @@
+# VMDragonSlayer - Advanced VM detection and analysis library
+# Copyright (C) 2025 van1sh
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """
 Setup script for VMDragonSlayer refactored library.
 """
 
-from setuptools import setup, find_packages
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 # Read the contents of README file
 this_directory = Path(__file__).parent
-long_description = (this_directory / "../README.md").read_text(encoding='utf-8')
+long_description = (this_directory / "../README.md").read_text(encoding="utf-8")
 
 # Read requirements
 requirements = []
 requirements_path = this_directory / "requirements.txt"
 if requirements_path.exists():
-    with open(requirements_path, 'r', encoding='utf-8') as f:
-        requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    with open(requirements_path, encoding="utf-8") as f:
+        requirements = [
+            line.strip() for line in f if line.strip() and not line.startswith("#")
+        ]
 
 setup(
     name="vmdragonslayer",
@@ -83,7 +102,7 @@ setup(
     },
     keywords=[
         "reverse-engineering",
-        "binary-analysis", 
+        "binary-analysis",
         "vm-detection",
         "malware-analysis",
         "security",
