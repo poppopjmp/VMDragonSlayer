@@ -1,0 +1,56 @@
+{
+  "version": "1.0.0",
+  "created": "2025-01-01T00:00:00Z",
+  "description": "Development pattern database with reduced complexity",
+  "categories": {
+    "vm_bytecodes": {
+      "description": "Basic VM bytecode patterns for development",
+      "patterns": [
+        {
+          "id": "vm_add_simple",
+          "name": "Simple VM Add",
+          "type": "arithmetic",
+          "confidence": 0.80,
+          "bytecode_signature": "0x01",
+          "handler_patterns": [
+            "\\x8B\\x45\\xFC\\x03\\x45\\xF8"
+          ],
+          "description": "Simple addition pattern",
+          "frequency": 0.90
+        },
+        {
+          "id": "vm_load_simple",
+          "name": "Simple VM Load",
+          "type": "memory",
+          "confidence": 0.85,
+          "bytecode_signature": "0x10", 
+          "handler_patterns": [
+            "\\x8B\\x45\\xFC\\x8B\\x00"
+          ],
+          "description": "Simple load pattern",
+          "frequency": 0.95
+        }
+      ]
+    },
+    "simple_dispatcher": {
+      "description": "Basic dispatcher patterns",
+      "patterns": [
+        {
+          "id": "basic_switch",
+          "name": "Basic Switch Dispatcher",
+          "type": "dispatcher",
+          "confidence": 0.75,
+          "assembly_patterns": [
+            "\\xFF\\x24\\x85"
+          ],
+          "description": "Basic switch table",
+          "frequency": 0.60
+        }
+      ]
+    }
+  },
+  "statistics": {
+    "total_patterns": 3,
+    "categories": 2
+  }
+}

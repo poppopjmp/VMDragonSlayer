@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://www.nsa.gov/ghidra/plugin"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.nsa.gov/ghidra/plugin plugin.xsd">
+    
+    <name>VMDragonSlayer</name>
+    <description>Advanced VM analysis plugin with AI-powered pattern detection</description>
+    <version>1.0.0</version>
+    <author>van1sh</author>
+    <category>Analysis</category>
+    
+    <dependencies>
+        <dependency>Base</dependency>
+        <dependency>ProgramAPI</dependency>
+        <dependency>PluginAPI</dependency>
+    </dependencies>
+    
+    <main-class>vmdragonslayer.VMDragonSlayerPlugin</main-class>
+    
+    <services>
+        <provides>Analysis</provides>
+        <consumes>ProgramManager</consumes>
+    </services>
+    
+    <features>
+        <feature>Real-time Analysis</feature>
+        <feature>WebSocket Communication</feature>
+        <feature>AI Decision Dashboard</feature>
+        <feature>Pattern Recognition</feature>
+        <feature>Performance Monitoring</feature>
+    </features>
+    
+</plugin>

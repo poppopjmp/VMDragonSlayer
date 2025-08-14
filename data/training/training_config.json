@@ -1,0 +1,207 @@
+{
+  "training_datasets": {
+    "bytecode_classification": {
+      "description": "Training data for VM bytecode pattern classification",
+      "data_path": "data/training/bytecode_classification/",
+      "features_file": "features.npy",
+      "labels_file": "labels.npy",
+      "metadata_file": "metadata.json",
+      "sample_count": 50000,
+      "feature_count": 256,
+      "class_distribution": {
+        "vm_add": 8500,
+        "vm_sub": 7800,
+        "vm_mul": 6200,
+        "vm_div": 4100,
+        "vm_load": 9500,
+        "vm_store": 8900,
+        "vm_jmp": 5000
+      },
+      "validation_split": 0.2,
+      "test_split": 0.1,
+      "preprocessing": {
+        "normalization": "standard_scaler",
+        "feature_selection": "select_k_best",
+        "k_features": 200
+      }
+    },
+    "vm_detection": {
+      "description": "Training data for VM presence detection",
+      "data_path": "data/training/vm_detection/",
+      "features_file": "vm_features.npy", 
+      "labels_file": "vm_labels.npy",
+      "metadata_file": "vm_metadata.json",
+      "sample_count": 20000,
+      "feature_count": 128,
+      "class_distribution": {
+        "vm_protected": 12000,
+        "not_vm_protected": 8000
+      },
+      "validation_split": 0.2,
+      "test_split": 0.15,
+      "preprocessing": {
+        "normalization": "min_max_scaler",
+        "feature_selection": false
+      }
+    },
+    "handler_classification": {
+      "description": "Training data for VM handler type classification",
+      "data_path": "data/training/handler_classification/",
+      "features_file": "handler_features.npy",
+      "labels_file": "handler_labels.npy", 
+      "metadata_file": "handler_metadata.json",
+      "sample_count": 35000,
+      "feature_count": 512,
+      "class_distribution": {
+        "arithmetic": 8000,
+        "memory": 7500,
+        "control_flow": 6000,
+        "logical": 5500,
+        "stack": 4000,
+        "comparison": 4000
+      },
+      "validation_split": 0.2,
+      "test_split": 0.1,
+      "preprocessing": {
+        "normalization": "robust_scaler",
+        "feature_selection": "recursive_feature_elimination",
+        "k_features": 300
+      }
+    }
+  },
+  "feature_extractors": {
+    "opcode_ngrams": {
+      "description": "N-gram features from assembly opcodes",
+      "n_gram_size": [1, 2, 3],
+      "max_features": 1000,
+      "min_df": 2,
+      "max_df": 0.95,
+      "binary": false
+    },
+    "structural_features": {
+      "description": "Structural features of code blocks",
+      "features": [
+        "instruction_count",
+        "basic_block_count", 
+        "branch_count",
+        "call_count",
+        "loop_count",
+        "cyclomatic_complexity"
+      ]
+    },
+    "byte_histogram": {
+      "description": "Histogram of byte values",
+      "bins": 256,
+      "normalize": true
+    },
+    "entropy_features": {
+      "description": "Entropy-based features",
+      "window_sizes": [16, 32, 64, 128],
+      "calculate_local_entropy": true
+    }
+  },
+  "model_configurations": {
+    "random_forest_classifier": {
+      "n_estimators": 100,
+      "max_depth": 15,
+      "min_samples_split": 5,
+      "min_samples_leaf": 2,
+      "max_features": "sqrt",
+      "bootstrap": true,
+      "class_weight": "balanced"
+    },
+    "gradient_boosting_classifier": {
+      "n_estimators": 150,
+      "learning_rate": 0.1,
+      "max_depth": 8,
+      "min_samples_split": 10,
+      "min_samples_leaf": 4,
+      "subsample": 0.8
+    },
+    "svm_classifier": {
+      "kernel": "rbf",
+      "C": 1.0,
+      "gamma": "scale",
+      "class_weight": "balanced",
+      "probability": true
+    },
+    "neural_network_classifier": {
+      "hidden_layer_sizes": [128, 64, 32],
+      "activation": "relu",
+      "solver": "adam",
+      "alpha": 0.001,
+      "batch_size": 32,
+      "learning_rate": "adaptive",
+      "max_iter": 500,
+      "early_stopping": true,
+      "validation_fraction": 0.1
+    }
+  },
+  "ensemble_configurations": {
+    "voting_classifier": {
+      "voting": "soft",
+      "models": [
+        "random_forest_classifier",
+        "gradient_boosting_classifier", 
+        "svm_classifier"
+      ],
+      "weights": [2, 2, 1]
+    },
+    "stacking_classifier": {
+      "base_models": [
+        "random_forest_classifier",
+        "gradient_boosting_classifier",
+        "svm_classifier"
+      ],
+      "meta_model": "neural_network_classifier",
+      "cv_folds": 5
+    }
+  },
+  "evaluation_metrics": {
+    "classification_metrics": [
+      "accuracy",
+      "precision_macro",
+      "recall_macro", 
+      "f1_macro",
+      "precision_weighted",
+      "recall_weighted",
+      "f1_weighted",
+      "roc_auc_ovr"
+    ],
+    "cross_validation": {
+      "cv_folds": 5,
+      "stratified": true,
+      "shuffle": true,
+      "random_state": 42
+    }
+  },
+  "hyperparameter_tuning": {
+    "search_method": "grid_search",
+    "cv_folds": 3,
+    "scoring": "f1_macro",
+    "n_jobs": -1,
+    "parameter_grids": {
+      "random_forest_classifier": {
+        "n_estimators": [50, 100, 200],
+        "max_depth": [10, 15, 20, null],
+        "min_samples_split": [2, 5, 10],
+        "max_features": ["sqrt", "log2"]
+      },
+      "gradient_boosting_classifier": {
+        "n_estimators": [100, 150, 200],
+        "learning_rate": [0.05, 0.1, 0.15],
+        "max_depth": [6, 8, 10]
+      }
+    }
+  },
+  "data_augmentation": {
+    "enabled": true,
+    "techniques": [
+      "noise_injection",
+      "feature_dropout",
+      "synthetic_sample_generation"
+    ],
+    "augmentation_ratio": 0.2,
+    "noise_level": 0.01
+  }
+}

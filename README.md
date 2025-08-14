@@ -1,3 +1,4 @@
+# Note: Repository Work in Progress - Porting here all the needed feature ready be 15th August 2025
 # VMDragonSlayer
 Automated multi-engine framework for unpacking, analyzing, and devirtualizing binaries protected by commercial and custom Virtual Machine (VM) based protectors (e.g., VMProtect 2.x/3.x, Themida) and bespoke malware VMs. Combines Dynamic Taint Tracking (DTT), Symbolic Execution (SE), Pattern & Semantic Classification, and Machine Learning–driven prioritization to dramatically reduce manual reverse engineering time.
 

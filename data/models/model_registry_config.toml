@@ -1,0 +1,126 @@
+# VMDragonSlayer Model Registry Configuration
+# SQLite database schema for model management
+
+[models]
+# Model metadata table
+table_name = model_registry
+schema = """
+CREATE TABLE IF NOT EXISTS model_registry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id TEXT UNIQUE NOT NULL,
+    model_name TEXT NOT NULL,
+    model_type TEXT NOT NULL,  -- 'classifier', 'detector', 'ensemble'
+    version TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER,
+    created_date TEXT NOT NULL,
+    last_updated TEXT NOT NULL,
+    accuracy REAL,
+    precision_score REAL,
+    recall REAL,
+    f1_score REAL,
+    training_samples INTEGER,
+    validation_samples INTEGER,
+    feature_count INTEGER,
+    model_parameters TEXT,  -- JSON string
+    training_config TEXT,   -- JSON string
+    metadata TEXT,          -- JSON string
+    status TEXT DEFAULT 'active',  -- 'active', 'deprecated', 'testing'
+    checksum TEXT,
+    created_by TEXT DEFAULT 'system'
+);
+"""
+
+[performance_metrics]
+# Performance tracking table
+table_name = model_performance
+schema = """
+CREATE TABLE IF NOT EXISTS model_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id TEXT NOT NULL,
+    test_date TEXT NOT NULL,
+    test_dataset_size INTEGER,
+    accuracy REAL,
+    precision_score REAL,
+    recall REAL,
+    f1_score REAL,
+    inference_time_ms REAL,
+    memory_usage_mb REAL,
+    test_config TEXT,  -- JSON string
+    notes TEXT,
+    FOREIGN KEY (model_id) REFERENCES model_registry (model_id)
+);
+"""
+
+[training_history]
+# Training history table  
+table_name = training_history
+schema = """
+CREATE TABLE IF NOT EXISTS training_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id TEXT NOT NULL,
+    training_start TEXT NOT NULL,
+    training_end TEXT,
+    training_duration_seconds INTEGER,
+    epochs_completed INTEGER,
+    final_loss REAL,
+    final_accuracy REAL,
+    best_epoch INTEGER,
+    early_stopping BOOLEAN DEFAULT 0,
+    training_config TEXT,  -- JSON string
+    training_log_path TEXT,
+    status TEXT DEFAULT 'completed',  -- 'running', 'completed', 'failed', 'cancelled'
+    error_message TEXT,
+    FOREIGN KEY (model_id) REFERENCES model_registry (model_id)
+);
+"""
+
+[model_versions]
+# Model version tracking
+table_name = model_versions
+schema = """
+CREATE TABLE IF NOT EXISTS model_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    parent_version TEXT,
+    is_current BOOLEAN DEFAULT 0,
+    change_description TEXT,
+    created_date TEXT NOT NULL,
+    FOREIGN KEY (model_id) REFERENCES model_registry (model_id),
+    UNIQUE(model_name, version)
+);
+"""
+
+[initialization]
+# Default models to register
+default_models = [
+    {
+        model_id = "bytecode_classifier_v1"
+        model_name = "Bytecode Pattern Classifier"
+        model_type = "classifier"
+        version = "1.0.0"
+        file_path = "data/models/pretrained/bytecode_classifier_v1.pkl"
+        description = "Pre-trained classifier for VM bytecode patterns"
+        status = "active"
+    },
+    {
+        model_id = "vm_detector_v1"
+        model_name = "VM Detection Model"
+        model_type = "detector"
+        version = "1.0.0"
+        file_path = "data/models/pretrained/vm_detector_v1.pkl"
+        description = "Binary classifier for VM presence detection"
+        status = "active"
+    },
+    {
+        model_id = "handler_classifier_v1"
+        model_name = "Handler Classification Model"
+        model_type = "classifier"
+        version = "1.0.0"
+        file_path = "data/models/pretrained/handler_classifier_v1.pkl"
+        description = "Multi-class classifier for VM handler types"
+        status = "active"
+    }
+]

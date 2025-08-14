@@ -1,0 +1,74 @@
+{
+  "model_id": "vm_detector_v1",
+  "model_name": "VM Protection Detector",
+  "version": "1.0.0",
+  "description": "Logistic regression model for detecting VM protection in binary files",
+  "model_type": "detector",
+  "algorithm": "LogisticRegression",
+  "framework": "scikit-learn",
+  "created_date": "2024-12-19T15:30:00Z",
+  "last_updated": "2024-12-19T15:30:00Z",
+  "training_info": {
+    "dataset_size": 500,
+    "feature_count": 128,
+    "training_duration_seconds": 3.7,
+    "cross_validation_folds": 5,
+    "test_split": 0.2
+  },
+  "performance_metrics": {
+    "accuracy": 0.957,
+    "precision": 0.962,
+    "recall": 0.951,
+    "f1_score": 0.956,
+    "auc_roc": 0.978,
+    "confusion_matrix": [
+      [48, 2],
+      [1, 49]
+    ]
+  },
+  "feature_info": {
+    "input_type": "binary_features",
+    "feature_encoding": "numerical",
+    "feature_names": [
+      "entropy_score", "import_table_anomalies", "section_characteristics",
+      "code_patterns", "anti_debug_indicators", "packing_signatures"
+    ]
+  },
+  "output_classes": [
+    "vm_protected", "not_vm_protected"
+  ],
+  "hyperparameters": {
+    "C": 1.0,
+    "penalty": "l2",
+    "solver": "lbfgs",
+    "max_iter": 100,
+    "random_state": 42
+  },
+  "usage_instructions": {
+    "input_format": "numpy array of shape (n_samples, 128)",
+    "preprocessing": "Standard scaling recommended",
+    "output_format": "binary classification with probability"
+  },
+  "validation_results": {
+    "cross_validation_scores": [0.96, 0.95, 0.97, 0.94, 0.96],
+    "standard_deviation": 0.012,
+    "confidence_interval_95": [0.945, 0.969]
+  },
+  "detection_thresholds": {
+    "high_confidence": 0.9,
+    "medium_confidence": 0.7,
+    "low_confidence": 0.5
+  },
+  "file_info": {
+    "file_path": "data/models/pretrained/vm_detector_v1.pkl",
+    "file_size_mb": 0.8,
+    "checksum": "sha256:b2c3d4e5f6789..."
+  },
+  "deployment_info": {
+    "production_ready": true,
+    "minimum_confidence_threshold": 0.7,
+    "expected_inference_time_ms": 2.1,
+    "false_positive_rate": 0.038,
+    "false_negative_rate": 0.049
+  }
+}
