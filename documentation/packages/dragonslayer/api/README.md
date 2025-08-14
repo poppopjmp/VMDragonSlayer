@@ -18,5 +18,5 @@ print(result["success"])
 
 ## Related
 - Source: `dragonslayer/api/`
-- See [APIs](../../../../04-apis.md)
-- Back to [Modules](../../../../03-modules.md)
+- See [APIs](../../../04-apis.md)
+- Back to [Modules](../../../03-modules.md)
