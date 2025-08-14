@@ -6,7 +6,7 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 
 > **Goal**: Transform complex protected binary analysis from weeks/months of manual work into structured, automated analysis with explainable results.
 
-## 🎯 Key Features
+## Key Features
 
 - **Multi-Engine Analysis**: Combines static, dynamic, and hybrid analysis techniques
 - **VM Detection**: Automated detection of commercial and custom VM protectors  
@@ -30,7 +30,7 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | Schemas / Validation | `data/schemas/` | JSON schema–validated analysis output & pattern formats |
 
 ---
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 VMDragonSlayer uses a modular architecture where multiple analysis engines work together:
 
@@ -92,7 +92,7 @@ VMDragonSlayer uses a modular architecture where multiple analysis engines work 
 - **Models**: Basic proof-of-concept models for research and education
 - **Components**: Feature extraction, model training, ensemble prediction
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 VMDragonSlayer/
@@ -129,7 +129,7 @@ VMDragonSlayer/
 └── LICENSE                        # GPL v3 License
 ```
 
-## 🔌 Plugin Ecosystem
+## Plugin Ecosystem
 
 VMDragonSlayer integrates with major reverse engineering tools:
 
@@ -148,7 +148,7 @@ VMDragonSlayer integrates with major reverse engineering tools:
 - **Features**: Native Binary Ninja API integration
 - **Status**: Basic integration implemented
 
-## 🧠 Machine Learning Components
+## Machine Learning Components
 
 **Note**: The included ML models are basic proof-of-concept implementations designed for research and educational purposes.
 
