@@ -1,0 +1,67 @@
+name: Sync Documentation to GitHub Wiki
+
+on:
+  push:
+    paths:
+      - 'documentation/**'
+      - '.github/workflows/sync-wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check Markdown links in documentation
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: --no-progress --verbose documentation/**/*.md
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git user
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Clone wiki repository
+        env:
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git clone "https://x-access-token:${TOKEN}@github.com/${REPO}.wiki.git" wiki
+
+      - name: Sync documentation -> wiki
+        run: |
+          set -e
+          # Clean wiki (except .git)
+          find wiki -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          # Copy docs into wiki
+          mkdir -p wiki
+          if [ -d documentation ]; then
+            cp -r documentation/* wiki/ || true
+          fi
+          # Ensure Home.md exists; fallback to README.md
+          if [ ! -f wiki/Home.md ] && [ -f wiki/README.md ]; then
+            mv wiki/README.md wiki/Home.md
+          fi
+
+      - name: Commit and push if changed
+        run: |
+          set -e
+          cd wiki
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "docs: sync from repository documentation ($(date -u +'%Y-%m-%dT%H:%M:%SZ')) [skip ci]"
+            # Try pushing to typical wiki default branches
+            git push origin HEAD:master || git push origin HEAD:main || git push
+          else
+            echo "No changes to commit."
+          fi
