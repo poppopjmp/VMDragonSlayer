@@ -110,10 +110,17 @@ def test_configuration():
         config_manager = ConfigManager()
         print("✓ ConfigManager available")
         
-        # Test default config
-        config = config_manager.get_default_config()
-        print("✓ Default configuration loaded")
+        # Test config property (correct method)
+        config = config_manager.config
+        print("✓ Configuration loaded via .config property")
         
+        # Test section access
+        if hasattr(config, 'analysis'):
+            print("✓ Analysis configuration section available")
+        
+        if hasattr(config, 'ml'):
+            print("✓ ML configuration section available")
+            
         return True
     except Exception as e:
         print(f"ℹ Configuration system: {e}")

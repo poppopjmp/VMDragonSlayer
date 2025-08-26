@@ -51,9 +51,9 @@ def demonstrate_config_manager():
         # Initialize config manager
         config_manager = ConfigManager()
         
-        # Load default configuration
-        config = config_manager.get_default_config()
-        print("✓ Default configuration loaded via ConfigManager")
+        # Load configuration via .config property
+        config = config_manager.config
+        print("✓ Configuration loaded via ConfigManager")
         
         # Display some configuration sections
         if hasattr(config, 'analysis'):
@@ -62,8 +62,12 @@ def demonstrate_config_manager():
         if hasattr(config, 'ml'):
             print(f"ML config available: {hasattr(config.ml, 'device_preference')}")
         
-        if hasattr(config, 'vm_discovery'):
-            print(f"VM Discovery config available: True")
+        # Test section access
+        try:
+            analysis_section = config_manager.get_section('analysis')
+            print("✓ Analysis section accessible via get_section")
+        except Exception as e:
+            print(f"ℹ Section access: {e}")
         
         return config
         
