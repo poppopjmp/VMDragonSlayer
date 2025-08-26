@@ -312,8 +312,8 @@ class IDADragonSlayerClient:
             return False
         try:
             # Test connection with a ping or health check
-            response = self.api_client.get("/health")
-            return response.get("status") == "ok"
+            response = self.api_client.get_health()
+            return response.get("status") == "healthy"
         except Exception:
             return False
 
@@ -396,7 +396,7 @@ class IDADragonSlayerClient:
 
         try:
             # Prepare binary transfer
-            transfer_data = self.binary_transfer.prepare_transfer(binary_data)
+            transfer_data = self.binary_transfer.encode_binary(binary_data)
             
             # Submit to API
             payload = {
@@ -406,7 +406,7 @@ class IDADragonSlayerClient:
                 "priority": "normal"
             }
             
-            response = self.api_client.post("/api/v1/analysis/submit", json=payload)
+            response = self.api_client.analyze_binary_data(transfer_data, metadata=metadata)
             return response.get("analysis_id")
 
         except Exception as e:
@@ -419,7 +419,7 @@ class IDADragonSlayerClient:
         
         while time.time() - start_time < timeout:
             try:
-                response = self.api_client.get(f"/api/v1/analysis/{analysis_id}")
+                response = self.api_client.get_status()
                 status = response.get("status")
                 
                 if status == "completed":

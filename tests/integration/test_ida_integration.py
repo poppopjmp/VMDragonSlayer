@@ -41,6 +41,10 @@ class MockIDAAPI:
     """Mock IDA API for testing"""
     def __init__(self):
         self.plugin_t = Mock()
+        # Add missing constants that the plugin uses
+        self.PLUGIN_UNL = 0x0001
+        self.PLUGIN_PROC = 0x0002
+        self.PLUGIN_MOD = 0x0004
         
 mock_idaapi = MockIDAAPI()
 mock_idautils = Mock()
@@ -94,8 +98,15 @@ class TestIDAPluginIntegration(unittest.TestCase):
         self.mock_binary_transfer = Mock(spec=BinaryTransfer)
         
         # Setup mock responses
-        self.mock_api_client.get.return_value = {"status": "ok"}
-        self.mock_binary_transfer.prepare_transfer.return_value = b"compressed_data"
+        self.mock_api_client.get_status.return_value = {"status": "ok"}
+        self.mock_api_client.get_health.return_value = {"status": "healthy"}
+        self.mock_api_client.get_metrics.return_value = {"metrics": {}}
+        self.mock_api_client.get_analysis_types.return_value = {"types": ["hybrid"]}
+        self.mock_api_client.analyze_binary_data.return_value = {"analysis_id": "test_123", "status": "submitted"}
+        self.mock_api_client.analyze_file.return_value = {"analysis_id": "test_123", "status": "submitted"}
+        self.mock_binary_transfer.encode_binary.return_value = "encoded_data"
+        self.mock_binary_transfer.decode_binary.return_value = b"compressed_data"
+        self.mock_binary_transfer.validate_transfer.return_value = True
         
         # Setup IDA mocks
         mock_ida_nalt.get_imagebase.return_value = 0x400000
@@ -134,10 +145,10 @@ class TestIDAPluginIntegration(unittest.TestCase):
             
             # Test successful connection
             self.assertTrue(client.is_connected())
-            self.mock_api_client.get.assert_called_with("/health")
+            self.mock_api_client.get_health.assert_called()
             
             # Test failed connection
-            self.mock_api_client.get.side_effect = Exception("Connection failed")
+            self.mock_api_client.get_health.side_effect = Exception("Connection failed")
             self.assertFalse(client.is_connected())
             
     def test_binary_data_extraction(self):
@@ -185,13 +196,13 @@ class TestIDAPluginIntegration(unittest.TestCase):
              patch('vmdragonslayer_ida.BinaryTransfer', return_value=self.mock_binary_transfer):
             
             # Setup API response
-            self.mock_api_client.post.return_value = {"analysis_id": "test_123"}
+            self.mock_api_client.analyze_binary_data.return_value = {"analysis_id": "test_123"}
             
             client = IDADragonSlayerClient()
             analysis_id = client._submit_binary_for_analysis(b"test_data", {"filename": "test.exe"})
             
             self.assertEqual(analysis_id, "test_123")
-            self.mock_api_client.post.assert_called_once()
+            self.mock_api_client.analyze_binary_data.assert_called_once()
             
     def test_analysis_results_polling(self):
         """Test polling for analysis results"""
@@ -209,7 +220,7 @@ class TestIDAPluginIntegration(unittest.TestCase):
                 {"status": "processing"},
                 {"status": "completed", "results": {"vm_handlers": [], "confidence": 0.8}}
             ]
-            self.mock_api_client.get.side_effect = responses
+            self.mock_api_client.get_status.side_effect = responses
             
             client = IDADragonSlayerClient()
             results = client._poll_analysis_results("test_123", timeout=30)
@@ -243,8 +254,7 @@ class TestIDAPluginIntegration(unittest.TestCase):
         if not CoreServicesManager:
             self.skipTest("Core services manager not available")
             
-        with patch('vmdragonslayer_ida.UNIFIED_API_AVAILABLE', False), \
-             patch('vmdragonslayer_ida.LEGACY_COMPONENTS_AVAILABLE', True):
+        with patch('vmdragonslayer_ida.UNIFIED_API_AVAILABLE', False):
             
             manager = CoreServicesManager()
             
@@ -260,6 +270,14 @@ class TestIDAPluginMockAPIServer(unittest.TestCase):
         """Set up mock API server"""
         self.mock_server_responses = {
             "/health": {"status": "ok"},
+            "/status": {"status": "completed", "results": {
+                "vm_handlers": [
+                    {"address": 0x401000, "type": "dispatch", "confidence": 0.9},
+                    {"address": 0x401050, "type": "handler", "confidence": 0.8}
+                ],
+                "confidence_score": 0.85
+            }},
+            "/analyze": {"analysis_id": "mock_123"},
             "/api/v1/analysis/submit": {"analysis_id": "mock_123"},
             "/api/v1/analysis/mock_123": {"status": "completed", "results": {
                 "vm_handlers": [
@@ -269,6 +287,14 @@ class TestIDAPluginMockAPIServer(unittest.TestCase):
                 "confidence_score": 0.85
             }}
         }
+        
+        # Setup IDA mocks - needed for binary extraction
+        mock_ida_nalt.get_imagebase.return_value = 0x400000
+        mock_idc.get_inf_attr.return_value = 0x400010  # Small range for testing
+        mock_ida_bytes.get_byte.return_value = 0x90
+        mock_ida_nalt.get_root_filename.return_value = "test.exe"
+        mock_ida_pro.get_inf_structure.return_value.procname = "metapc"
+        mock_ida_pro.get_kernel_version.return_value = "7.5"
         
     def mock_api_call(self, method, url, **kwargs):
         """Mock API call handler"""
@@ -289,8 +315,9 @@ class TestIDAPluginMockAPIServer(unittest.TestCase):
             
             # Setup mock client
             mock_client = Mock()
-            mock_client.get.side_effect = lambda url: self.mock_api_call("GET", url)
-            mock_client.post.side_effect = lambda url, **kwargs: self.mock_api_call("POST", url, **kwargs)
+            mock_client.get_status.side_effect = lambda: self.mock_api_call("GET", "/status")
+            mock_client.get_health.side_effect = lambda: self.mock_api_call("GET", "/health")
+            mock_client.analyze_binary_data.side_effect = lambda data, **kwargs: self.mock_api_call("POST", "/analyze", data=data, **kwargs)
             mock_client_class.return_value = mock_client
             
             client = IDADragonSlayerClient()

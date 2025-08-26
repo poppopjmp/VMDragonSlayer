@@ -101,8 +101,10 @@ class AnalysisRequest(BaseModel):
         default_factory=dict, description="Sample metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    # Accept extra fields to maintain compatibility with plugins sending additional keys
+    model_config = {
+        "extra": "allow",
+        "json_schema_extra": {
             "example": {
                 "sample_data": "UEsDBAoAAAAAAA==",
                 "analysis_type": "hybrid",
@@ -110,9 +112,7 @@ class AnalysisRequest(BaseModel):
                 "metadata": {"filename": "sample.exe"},
             }
         }
-
-    # Accept extra fields to maintain compatibility with plugins sending additional keys
-    model_config = {"extra": "allow"}
+    }
 
 
 class AnalysisResponse(BaseModel):

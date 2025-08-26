@@ -133,8 +133,15 @@ class TestBinaryNinjaPluginIntegration(unittest.TestCase):
         self.mock_binary_view = MockBinaryView()
         
         # Setup mock responses
-        self.mock_api_client.get.return_value = {"status": "ok"}
-        self.mock_binary_transfer.prepare_transfer.return_value = b"compressed_data"
+        self.mock_api_client.get_status.return_value = {"status": "ok"}
+        self.mock_api_client.get_health.return_value = {"status": "healthy"}
+        self.mock_api_client.get_metrics.return_value = {"metrics": {}}
+        self.mock_api_client.get_analysis_types.return_value = {"types": ["hybrid"]}
+        self.mock_api_client.analyze_binary_data.return_value = {"analysis_id": "test_123", "status": "submitted"}
+        self.mock_api_client.analyze_file.return_value = {"analysis_id": "test_123", "status": "submitted"}
+        self.mock_binary_transfer.encode_binary.return_value = "encoded_data"
+        self.mock_binary_transfer.decode_binary.return_value = b"compressed_data"
+        self.mock_binary_transfer.validate_transfer.return_value = True
         
     def test_binja_client_initialization(self):
         """Test Binary Ninja client initialization"""
@@ -165,10 +172,10 @@ class TestBinaryNinjaPluginIntegration(unittest.TestCase):
             
             # Test successful connection
             self.assertTrue(client.is_connected())
-            self.mock_api_client.get.assert_called_with("/health")
+            self.mock_api_client.get_health.assert_called()
             
             # Test failed connection
-            self.mock_api_client.get.side_effect = Exception("Connection failed")
+            self.mock_api_client.get_health.side_effect = Exception("Connection failed")
             self.assertFalse(client.is_connected())
             
     def test_binary_data_extraction_from_binaryview(self):
@@ -240,8 +247,8 @@ class TestBinaryNinjaPluginIntegration(unittest.TestCase):
             client = BinaryNinjaDragonSlayerClient()
             
             # Setup mock responses for background task
-            self.mock_api_client.post.return_value = {"analysis_id": "bg_test_123"}
-            self.mock_api_client.get.return_value = {
+            self.mock_api_client.analyze_binary_data.return_value = {"analysis_id": "bg_test_123"}
+            self.mock_api_client.get_status.return_value = {
                 "status": "completed",
                 "results": {"vm_handlers": [], "confidence": 0.7}
             }
@@ -268,8 +275,8 @@ class TestBinaryNinjaPluginIntegration(unittest.TestCase):
              patch('vmdragonslayer_bn.BinaryTransfer', return_value=self.mock_binary_transfer):
             
             # Setup API responses
-            self.mock_api_client.post.return_value = {"analysis_id": "bg_workflow_123"}
-            self.mock_api_client.get.return_value = {
+            self.mock_api_client.analyze_binary_data.return_value = {"analysis_id": "bg_workflow_123"}
+            self.mock_api_client.get_status.return_value = {
                 "status": "completed",
                 "results": {
                     "vm_handlers": [
@@ -301,12 +308,12 @@ class TestBinaryNinjaPluginIntegration(unittest.TestCase):
              patch('time.sleep'):  # Mock sleep to speed up test
             
             # Setup API responses
-            self.mock_api_client.post.return_value = {"analysis_id": "sync_test_123"}
+            self.mock_api_client.analyze_binary_data.return_value = {"analysis_id": "sync_test_123"}
             responses = [
                 {"status": "processing"},
                 {"status": "completed", "results": {"vm_handlers": [], "confidence": 0.9}}
             ]
-            self.mock_api_client.get.side_effect = responses
+            self.mock_api_client.get_status.side_effect = responses
             
             client = BinaryNinjaDragonSlayerClient()
             
@@ -380,7 +387,22 @@ class TestBinaryNinjaPluginMockAPIServer(unittest.TestCase):
         
     def mock_api_call(self, method, url, **kwargs):
         """Mock API call handler"""
-        if url in self.mock_server_responses:
+        # Handle the actual APIClient method calls
+        if url == "/analyze" or method == "analyze_binary_data":
+            return {"analysis_id": "bn_mock_123"}
+        elif url == "/status" or method == "get_status":
+            return {"status": "completed", "results": {
+                "vm_handlers": [
+                    {"address": 0x401000, "type": "dispatch", "confidence": 0.95},
+                    {"address": 0x401050, "type": "handler", "confidence": 0.85},
+                    {"address": 0x401100, "type": "exit", "confidence": 0.75}
+                ],
+                "confidence_score": 0.88,
+                "analysis_time": 45.2
+            }}
+        elif url == "/health" or method == "get_health":
+            return {"status": "ok"}
+        elif url in self.mock_server_responses:
             return self.mock_server_responses[url]
         else:
             raise Exception(f"Unknown endpoint: {url}")
@@ -397,8 +419,9 @@ class TestBinaryNinjaPluginMockAPIServer(unittest.TestCase):
             
             # Setup mock client
             mock_client = Mock()
-            mock_client.get.side_effect = lambda url: self.mock_api_call("GET", url)
-            mock_client.post.side_effect = lambda url, **kwargs: self.mock_api_call("POST", url, **kwargs)
+            mock_client.get_status.side_effect = lambda: self.mock_api_call("GET", "/status")
+            mock_client.get_health.side_effect = lambda: self.mock_api_call("GET", "/health")
+            mock_client.analyze_binary_data.side_effect = lambda data, **kwargs: self.mock_api_call("POST", "/analyze", data=data, **kwargs)
             mock_client_class.return_value = mock_client
             
             client = BinaryNinjaDragonSlayerClient()
