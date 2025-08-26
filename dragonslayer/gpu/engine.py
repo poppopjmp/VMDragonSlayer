@@ -68,10 +68,11 @@ try:
     import pynvml
 
     NVML_AVAILABLE = True
-    pynvml.nvmlInit()
-    logger.info("NVIDIA ML available for GPU monitoring")
+    # Don't initialize here - do it lazily when needed
+    logger.info("NVIDIA ML library available")
 except ImportError:
     NVML_AVAILABLE = False
+    pynvml = None
     logger.info("NVIDIA ML not available")
 
 

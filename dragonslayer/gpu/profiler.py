@@ -38,9 +38,12 @@ try:
     import pynvml
 
     NVML_AVAILABLE = True
-    pynvml.nvmlInit()
+    # Don't initialize here - do it lazily to handle missing drivers
+    logger.info("NVIDIA ML library available")
 except ImportError:
     NVML_AVAILABLE = False
+    pynvml = None
+    logger.info("NVIDIA ML library not available")
 
 try:
     import psutil
@@ -90,8 +93,10 @@ class GPUProfiler:
         """Initialize GPU monitoring capabilities."""
         self.nvml_handle = None
 
-        if NVML_AVAILABLE:
+        if NVML_AVAILABLE and pynvml:
             try:
+                # Initialize NVML here where we can handle errors gracefully
+                pynvml.nvmlInit()
                 device_count = pynvml.nvmlDeviceGetCount()
                 if self.device_id < device_count:
                     self.nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(self.device_id)
@@ -101,7 +106,7 @@ class GPUProfiler:
                         f"GPU {self.device_id} not found, max devices: {device_count}"
                     )
             except Exception as e:
-                logger.error(f"Failed to initialize NVML: {e}")
+                logger.info(f"NVML initialization failed (no GPU drivers?): {e}")
                 self.nvml_handle = None
 
         if not self.nvml_handle:

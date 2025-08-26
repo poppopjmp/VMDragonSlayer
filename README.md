@@ -192,11 +192,99 @@ VMDragonSlayer/
   - IDA Pro 7.0+ (for IDA plugin) 
   - Binary Ninja (for Binary Ninja plugin)
 
+## Hardware Requirements
+
+### Minimum Requirements
+- **CPU**: Modern x64 processor
+- **RAM**: 8GB minimum, 16GB recommended
+- **Storage**: 5GB free space
+- **OS**: Windows 10/11, Linux (Ubuntu 20.04+), macOS 11+
+
+### GPU Requirements (Optional but Recommended)
+- **NVIDIA GPU**: GTX 1060 or newer for optimal performance
+- **CUDA**: Version 11.8 or 12.1+ (installed automatically with PyTorch)
+- **VRAM**: 4GB minimum for ML models
+
+### Important Limitations
+- **Virtual Machines**: GPU-accelerated features require direct hardware access and may not work in VMs
+- **WSL**: Some GPU features may have limited functionality in WSL environments
+- **Remote Servers**: Ensure CUDA drivers are properly installed for headless GPU access
+
+## Current Status (Fixed Issues)
+
+### Verified Working Examples
+
+```python
+# This now works perfectly:
+from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
+
+orchestrator = Orchestrator()
+result = orchestrator.analyze_binary("your_binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
+
+# Results are properly structured:
+vmd = result.get("vm_discovery", {})
+print(f"VM detected: {vmd.get('vm_detected', False)}")
+print(f"Handlers found: {len(vmd.get('handlers_found', []))}")
+```
+
+### 📁 Working Examples Available
+
+- `examples/01_basic_usage.py` - Basic framework usage with error handling
+- `examples/02_vmprotect_detection.py` - VMProtect-specific detection
+- `examples/03_configuration.py` - Configuration system usage  
+- `examples/04_batch_analysis.py` - Batch processing multiple files
+- `verify_installation.py` - Complete installation verification
+
+### 🚀 Quick Start (Updated)
+
+```bash
+# 1. Install with all dependencies
+pip install -r requirements.txt
+pip install -e .
+
+# 2. Verify installation
+python verify_installation.py
+
+# 3. Run examples
+python examples/01_basic_usage.py
+```
+
 ### Core Framework
 ```bash
 # Clone repository
 git clone https://github.com/poppopjmp/VMDragonSlayer.git
 cd VMDragonSlayer
+
+# 🆕 UPDATED INSTALLATION (All Issues Fixed)
+# Install all required dependencies including z3-solver
+pip install -r requirements.txt
+
+# Install framework in development mode
+pip install -e .
+
+# ✅ Verify installation works
+python verify_installation.py
+
+# 🎯 Run working examples
+python examples/01_basic_usage.py
+```
+
+### Installation for Different Hardware
+```bash
+# CPU-only installation (basic functionality)
+pip install -r requirements.txt
+pip install -e .
+
+# NVIDIA GPU with CUDA 12.x (RTX 30xx/40xx series) 
+pip install -r requirements.txt
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -e .
+
+# NVIDIA GPU with CUDA 11.8 (older GPUs)
+pip install -r requirements.txt  
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install -e .
+```
 
 # Create virtual environment
 python -m venv venv
@@ -243,18 +331,44 @@ cp -r plugins/binaryninja/ $BN_USER_DIR/plugins/vmdragonslayer/
 
 ### 1. Basic Framework Usage
 ```python
-from dragonslayer.core.orchestrator import AnalysisOrchestrator
-from dragonslayer.core.config import Config
+from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
 
-# Initialize with default configuration
-config = Config()
-orchestrator = AnalysisOrchestrator(config)
+# Initialize orchestrator (loads default configuration automatically)
+orchestrator = Orchestrator()
 
 # Analyze a binary
-result = orchestrator.analyze_binary("path/to/protected_binary.exe")
-print(f"VM Protection Detected: {result.vm_detected}")
-print(f"Handler Count: {len(result.handlers)}")
+result = orchestrator.analyze_binary("path/to/protected_binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
+
+# Extract VM discovery results
+vmd = result.get("vm_discovery", {})
+print(f"VM Protection Detected: {vmd.get('vm_detected', False)}")
+print(f"Handler Count: {len(vmd.get('handlers_found', []))}")
+print(f"Analysis Success: {result.get('success', False)}")
 ```
+
+## Plugin Status
+
+### Reverse Engineering Tool Integrations
+
+| Tool | Status | ETA | Notes |
+|------|---------|-----|-------|
+| **Direct API** | ✅ Stable | Available Now | Recommended approach |
+| **Ghidra Plugin** | 🔄 In Progress | October 2025 | Basic functionality available |
+| **IDA Pro Plugin** | 🚧 Under Development | November 2025 | Work in progress - not functional |
+| **Binary Ninja Plugin** | 🚧 Under Development | November 2025 | Work in progress - not functional |
+
+### Current Recommendation
+For immediate use, we recommend using the **Direct API** approach:
+
+```python
+from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
+
+orchestrator = Orchestrator()
+result = orchestrator.analyze_binary("your_binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
+```
+
+### Plugin Installation (When Available)
+Plugin installation instructions will be updated when plugins reach stable status.
 
 ### 2. Plugin Usage (Ghidra Example)
 1. Open Ghidra and load your binary

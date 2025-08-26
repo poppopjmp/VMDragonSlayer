@@ -1,3 +1,56 @@
+# IDA Pro Plugin - Development Status
+
+⚠️ **WARNING: This plugin is currently under development and non-functional**
+
+## Known Issues
+- Missing PLUGIN_ENTRY function
+- Import errors for 'lib' and 'dragonslayer' modules
+- Plugin registration not working
+- Module path resolution issues
+
+## Current Status
+- **Status**: Work in progress
+- **ETA**: November 2025
+- **Completion**: ~30%
+
+## Error Messages You Might See
+```
+Warning: Could not import VMDragonSlayer unified API: No module named 'lib'
+Warning: Could not import legacy VMDragonSlayer modules: No module named 'dragonslayer'
+C:\IDA9\plugins\vmdragonslayer_ida.py: undefined function __plugins__vmdragonslayer_ida.PLUGIN_ENTRY
+```
+
+## Alternative: Use Direct API
+
+Until the plugin is ready, use the VMDragonSlayer API directly:
+
+### In IDA Python Console
+```python
+# In IDA Python console or external script
+import sys
+sys.path.append('/path/to/vmdragonslayer')
+
+from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
+
+# Get current binary data from IDA
+ea_start = get_inf_attr(INF_MIN_EA)
+ea_end = get_inf_attr(INF_MAX_EA)
+binary_data = get_bytes(ea_start, ea_end - ea_start)
+
+# Analyze with VMDragonSlayer
+orchestrator = Orchestrator()
+result = orchestrator.analyze_binary(get_input_file_path(), analysis_type=AnalysisType.VM_DISCOVERY)
+
+# Process results
+vmd = result.get('vm_discovery', {})
+print(f"VM detected: {vmd.get('vm_detected', False)}")
+for handler in vmd.get('handlers_found', []):
+    handler_addr = handler.get('address', 0)
+    print(f"Handler at 0x{handler_addr:x}")
+    # Create IDA comment or bookmark
+    set_cmt(handler_addr, f"VMDragonSlayer: VM Handler", 1)
+```
+
 # VMDragonSlayer IDA Pro Plugin
 
 A sophisticated IDA Pro plugin for analyzing VM-based protectors and automated handler detection.
