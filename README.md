@@ -34,35 +34,29 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 
 VMDragonSlayer uses a modular architecture where multiple analysis engines work together:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   VMDragonSlayer Framework              │
-│                                                         │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐ │
-│  │ VM Discovery │──▶│ Pattern/ML   │──▶│ Symbolic SE  │ │
-│  │              │   │ Classifier   │   │ Engine       │ │
-│  └──────────────┘   └──────────────┘   └──────────────┘ │
-│          ▲                   │                 │        │
-│          │             ┌──────────┐            │        │
-│          │             │ Dynamic  │────────────┘        │
-│          │             │ Taint    │ (seeds SE paths)    │
-│          │             │ Tracker  │                     │
-│          │             └──────────┘                     │
-│          │                    │                         │
-│     ┌───────────────┐   ┌───────────────┐               │
-│     │ Pattern       │   │ ML Models     │               │
-│     │ Database      │   │ (PoC)         │               │
-│     └───────────────┘   └───────────────┘               │
-│                │                │                       │
-│           ┌──────────── Orchestrator ──────────┐        │
-│           │ Workflow Management & Coordination │        │
-│           └────────────────────────────────────┘        │
-│                 │                 │                     │
-│         ┌────────────┐    ┌────────────┐                │
-│         │ REST API   │    │  Plugins   │                │
-│         │ Server     │    │ (RE Tools) │                │
-│         └────────────┘    └────────────┘                │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A[VM Discovery Engine] --> B[Pattern/ML Classifier]
+    B --> C[Symbolic Execution Engine]
+    B --> D[Dynamic Taint Tracker]
+    D --> C
+    subgraph Data Sources
+        E[Pattern Database]
+        F[ML Models (PoC)]
+    end
+    E --> B
+    F --> B
+    subgraph Coordination
+        G[Orchestrator<br/>(Workflow Management & Coordination)]
+    end
+    A --> G
+    B --> G
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+    G --> H[REST API Server]
+    G --> I[Plugins (RE Tools)]
 ```
 
 ### Core Analysis Engines
