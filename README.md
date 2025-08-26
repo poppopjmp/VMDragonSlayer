@@ -40,15 +40,18 @@ graph TD
     B --> C[Symbolic Execution Engine]
     B --> D[Dynamic Taint Tracker]
     D --> C
-    subgraph Data Sources
+    
+    subgraph DataSources ["Data Sources"]
         E[Pattern Database]
-        F[ML Models (PoC)]
+        F[ML Models - PoC]
     end
+    
+    subgraph Coordination
+        G[Orchestrator - Workflow Management & Coordination]
+    end
+    
     E --> B
     F --> B
-    subgraph Coordination
-        G[Orchestrator (Workflow Management & Coordination)]
-    end
     A --> G
     B --> G
     C --> G
@@ -56,7 +59,7 @@ graph TD
     E --> G
     F --> G
     G --> H[REST API Server]
-    G --> I[Plugins (RE Tools)]
+    G --> I[Plugins - RE Tools]
 ```
 
 ### Core Analysis Engines
