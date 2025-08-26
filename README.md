@@ -262,7 +262,7 @@ pip install -e .
 # Verify installation works
 python verify_installation.py
 
-# 🎯 Run working examples
+# Run working examples
 python examples/01_basic_usage.py
 ```
 
