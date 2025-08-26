@@ -368,21 +368,11 @@ class MLModel:
                 except Exception as e:
                     logger.debug(f"joblib.load not a sklearn bundle: {e}")
 
-            # SECURITY WARNING: Pickle deserialization can be dangerous
-            # Only load pickle files from trusted sources
-            # Consider using joblib or JSON for safer serialization
-            try:
-                # Verify file size is reasonable (< 100MB)
-                if file_path.stat().st_size > 100 * 1024 * 1024:
-                    raise MLError(f"Model file too large: {file_path}")
-                
-                with open(file_path, "rb") as f:
-                    data = pickle.load(f)  # WARNING: Only use with trusted data
-                    if isinstance(data, dict) and "model" in data:
-                        return cls._load_pickle(file_path, data)
-            except Exception as e:
-                logger.warning(f"Pickle loading failed for {file_path}: {e}")
-                raise MLError(f"Failed to load potentially unsafe pickle file: {file_path}")
+            # Try pickle
+            with open(file_path, "rb") as f:
+                data = pickle.load(f)
+                if isinstance(data, dict) and "model" in data:
+                    return cls._load_pickle(file_path, data)
 
             raise MLError(f"Could not determine format of model file {file_path}")
 

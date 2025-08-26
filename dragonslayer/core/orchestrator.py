@@ -531,6 +531,10 @@ class Orchestrator:
             "components_loaded": list(self._components.keys()),
         }
 
+    def get_supported_analysis_types(self) -> List[str]:
+        """Get list of supported analysis types"""
+        return [analysis_type.value for analysis_type in AnalysisType]
+
     def configure(self, **kwargs: Any) -> None:
         """Update orchestrator configuration"""
         for key, value in kwargs.items():

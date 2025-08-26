@@ -33,6 +33,39 @@ from typing import Any, Dict, List, Optional, Set
 from ...core.config import VMDragonSlayerConfig
 from ...core.exceptions import AnalysisError
 
+
+
+def _safe_getattr(obj, name, default=None, allowed_attrs=None):
+    """
+    Safely get attribute with validation.
+    
+    Args:
+        obj: Object to get attribute from
+        name: Attribute name
+        default: Default value if attribute not found
+        allowed_attrs: Set of allowed attribute names (None = allow all)
+    
+    Returns:
+        Attribute value or default
+    
+    Raises:
+        AttributeError: If attribute not allowed or dangerous
+    """
+    # Block obviously dangerous attributes
+    dangerous_attrs = {
+        '__class__', '__bases__', '__subclasses__', '__mro__',
+        '__globals__', '__code__', '__dict__', '__weakref__',
+        'eval', 'exec', 'compile', '__import__'
+    }
+    
+    if name in dangerous_attrs:
+        raise AttributeError(f"Access to attribute '{name}' is not allowed for security reasons")
+    
+    if allowed_attrs is not None and name not in allowed_attrs:
+        raise AttributeError(f"Attribute '{name}' is not in allowed list: {allowed_attrs}")
+    
+    return getattr(obj, name, default)
+
 logger = logging.getLogger(__name__)
 
 

@@ -203,23 +203,15 @@ class BinaryTransfer:
             raise InvalidDataError("Data must be bytes or bytearray")
 
         try:
-            # SECURITY NOTE: MD5 and SHA1 are cryptographically broken
-            # Only use them for legacy compatibility when absolutely necessary
-            # SHA256 or better should be used for security-sensitive applications
+            # Note: md5/sha1 are insecure; allowed here for compatibility checks only.
             if algorithm == "md5":
-                logger.warning("MD5 is cryptographically broken - use SHA256 or better")
                 hasher = hashlib.md5()
             elif algorithm == "sha1":
-                logger.warning("SHA1 is cryptographically weak - use SHA256 or better")
                 hasher = hashlib.sha1()
             elif algorithm == "sha256":
                 hasher = hashlib.sha256()
-            elif algorithm == "sha512":
-                hasher = hashlib.sha512()
             else:
-                # Default to SHA256 for unknown algorithms
-                logger.warning(f"Unknown algorithm {algorithm}, defaulting to SHA256")
-                hasher = hashlib.sha256()
+                raise ValueError(f"Unsupported algorithm: {algorithm}")
 
             hasher.update(binary_data)
             return hasher.hexdigest()
