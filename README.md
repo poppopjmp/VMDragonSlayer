@@ -47,7 +47,7 @@ graph TD
     E --> B
     F --> B
     subgraph Coordination
-        G[Orchestrator<br/>(Workflow Management & Coordination)]
+        G[Orchestrator (Workflow Management & Coordination)]
     end
     A --> G
     B --> G
