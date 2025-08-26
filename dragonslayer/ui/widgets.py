@@ -438,7 +438,7 @@ class AlertWidget(BaseWidget):
                                 "critical": "🚨",
                                 "warning": "⚠️",
                                 "info": "ℹ️",
-                                "success": "✅",
+                                "success": "",
                             }.get(severity, "📢"),
                         },
                         {

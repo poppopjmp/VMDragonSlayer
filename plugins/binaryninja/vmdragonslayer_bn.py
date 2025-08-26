@@ -49,6 +49,19 @@ plugin_dir = Path(__file__).parent
 lib_path = plugin_dir.parent / "lib"
 sys.path.insert(0, str(lib_path))
 
+# Add dragonslayer module path
+dragonslayer_path = plugin_dir.parent.parent / "dragonslayer"
+sys.path.insert(0, str(dragonslayer_path))
+
+# API Client imports for plugin integration
+try:
+    from dragonslayer.api.client import APIClient
+    from dragonslayer.api.transfer import BinaryTransfer
+    API_CLIENT_AVAILABLE = True
+except ImportError as api_e:
+    API_CLIENT_AVAILABLE = False
+    log_warn(f"Warning: Could not import API client modules: {api_e}")
+
 # UI components import
 try:
     from .ui import (
@@ -65,6 +78,16 @@ try:
 except ImportError as e:
     UI_AVAILABLE = False
     print(f"UI components not available: {e}")
+
+# Import main UI components
+try:
+    from dragonslayer.ui.dashboard import Dashboard
+    from dragonslayer.ui.interface import Interface
+    from dragonslayer.ui.widgets import Widget
+    MAIN_UI_AVAILABLE = True
+except ImportError as e:
+    MAIN_UI_AVAILABLE = False
+    print(f"Main UI components not available: {e}")
 
 # Core services imports
 try:
@@ -203,6 +226,301 @@ class BinaryNinjaCoreServicesManager:
                 self.logger.info(f"✓ {service_name} shutdown successfully")
             except Exception as e:
                 self.logger.error(f"✗ {service_name} shutdown failed: {e}")
+
+
+class BinaryNinjaDragonSlayerClient:
+    """
+    Binary Ninja specific API client with integrated binary transfer
+    and background analysis capabilities
+    """
+    
+    def __init__(self, api_url: str = "http://localhost:8080", api_key: str = None):
+        """
+        Initialize Binary Ninja DragonSlayer API client
+        
+        Args:
+            api_url: Base URL for the VMDragonSlayer API  
+            api_key: Optional API key for authentication
+        """
+        self.api_url = api_url
+        self.api_key = api_key
+        self.api_client = None
+        self.binary_transfer = None
+        self.background_tasks = []
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize API components if available
+        if API_CLIENT_AVAILABLE:
+            try:
+                self.api_client = APIClient(base_url=api_url, api_key=api_key)
+                self.binary_transfer = BinaryTransfer(
+                    chunk_size=2*1024*1024,  # 2MB chunks for large binaries
+                    enable_compression=True
+                )
+                self.logger.info("✓ Binary Ninja DragonSlayer API client initialized")
+            except Exception as e:
+                self.logger.error(f"✗ Failed to initialize API client: {e}")
+                self.api_client = None
+                self.binary_transfer = None
+        else:
+            self.logger.warning("⚠ API client not available - running in offline mode")
+
+    def is_connected(self) -> bool:
+        """Check if API client is connected and ready"""
+        if not self.api_client:
+            return False
+        try:
+            response = self.api_client.get("/health")
+            return response.get("status") == "ok"
+        except Exception:
+            return False
+
+    def analyze_binary_view(self, bv: "bn.BinaryView", background: bool = True) -> Optional[str]:
+        """
+        Analyze a Binary Ninja BinaryView
+        
+        Args:
+            bv: Binary Ninja BinaryView object
+            background: Run analysis in background thread
+            
+        Returns:
+            Analysis ID if submitted successfully, None otherwise
+        """
+        if not self.api_client or not self.binary_transfer:
+            self.logger.error("API client not available")
+            return None
+
+        try:
+            # Extract binary data from BinaryView  
+            binary_data = self._extract_binary_data(bv)
+            if not binary_data:
+                self.logger.error("Failed to extract binary data from BinaryView")
+                return None
+
+            # Get binary metadata
+            metadata = self._get_binary_metadata(bv)
+            
+            if background:
+                # Start background analysis
+                task = BackgroundAnalysisTask(self, binary_data, metadata, bv)
+                task.start()
+                self.background_tasks.append(task)
+                return task.analysis_id
+            else:
+                # Synchronous analysis
+                analysis_id = self._submit_binary_for_analysis(binary_data, metadata)
+                if analysis_id:
+                    results = self._poll_analysis_results(analysis_id)
+                    if results:
+                        self._display_results_in_ui(bv, results)
+                return analysis_id
+
+        except Exception as e:
+            self.logger.error(f"Analysis failed: {e}")
+            return None
+
+    def _extract_binary_data(self, bv: "bn.BinaryView") -> Optional[bytes]:
+        """Extract binary data from BinaryView"""
+        try:
+            # Get all segments/sections and extract data
+            binary_data = bytearray()
+            
+            # Handle large binaries efficiently
+            if len(bv) > 100 * 1024 * 1024:  # >100MB
+                self.logger.warning(f"Large binary detected ({len(bv)} bytes), using chunked extraction")
+            
+            # Read data in chunks to handle large binaries
+            chunk_size = 1024 * 1024  # 1MB chunks
+            for offset in range(0, len(bv), chunk_size):
+                try:
+                    end_offset = min(offset + chunk_size, len(bv))
+                    chunk = bv.read(offset, end_offset - offset)
+                    binary_data.extend(chunk)
+                except Exception as e:
+                    self.logger.error(f"Failed to read chunk at offset {offset}: {e}")
+                    # Fill with zeros for unmapped regions
+                    binary_data.extend(b'\x00' * (end_offset - offset))
+            
+            return bytes(binary_data)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to extract binary data: {e}")
+            return None
+
+    def _get_binary_metadata(self, bv: "bn.BinaryView") -> Dict[str, Any]:
+        """Get metadata about the BinaryView"""
+        try:
+            return {
+                "filename": bv.file.filename,
+                "architecture": str(bv.arch),
+                "platform": str(bv.platform),
+                "entry_point": hex(bv.entry_point),
+                "file_size": len(bv),
+                "function_count": len(bv.functions),
+                "sections": [
+                    {
+                        "name": section.name,
+                        "start": hex(section.start),
+                        "length": section.length,
+                        "semantics": str(section.semantics)
+                    }
+                    for section in bv.sections
+                ],
+                "analysis_time": time.time(),
+                "binja_version": bn.core_version()
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to get binary metadata: {e}")
+            return {}
+
+    def _submit_binary_for_analysis(self, binary_data: bytes, metadata: Dict[str, Any]) -> Optional[str]:
+        """Submit binary data to API for analysis"""
+        if not self.binary_transfer:
+            return None
+
+        try:
+            # Prepare binary transfer with compression
+            transfer_data = self.binary_transfer.prepare_transfer(binary_data)
+            
+            payload = {
+                "binary_data": transfer_data,
+                "metadata": metadata,
+                "analysis_type": "vm_detection",
+                "priority": "normal",
+                "source": "binaryninja"
+            }
+            
+            response = self.api_client.post("/api/v1/analysis/submit", json=payload)
+            return response.get("analysis_id")
+
+        except Exception as e:
+            self.logger.error(f"Failed to submit binary: {e}")
+            return None
+
+    def _poll_analysis_results(self, analysis_id: str, timeout: int = 300) -> Optional[Dict[str, Any]]:
+        """Poll for analysis results"""
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                response = self.api_client.get(f"/api/v1/analysis/{analysis_id}")
+                status = response.get("status")
+                
+                if status == "completed":
+                    return response.get("results")
+                elif status == "failed":
+                    self.logger.error(f"Analysis failed: {response.get('error')}")
+                    return None
+                elif status in ["queued", "processing"]:
+                    self.logger.info(f"Analysis status: {status}")
+                    time.sleep(10)
+                else:
+                    self.logger.warning(f"Unknown status: {status}")
+                    return None
+                    
+            except Exception as e:
+                self.logger.error(f"Error polling results: {e}")
+                return None
+        
+        self.logger.warning("Analysis timeout reached")
+        return None
+
+    def _display_results_in_ui(self, bv: "bn.BinaryView", results: Dict[str, Any]):
+        """Display analysis results in Binary Ninja UI"""
+        try:
+            # Display VM handlers in the UI
+            if "vm_handlers" in results:
+                for handler in results["vm_handlers"]:
+                    addr = handler.get("address")
+                    if addr:
+                        # Add comment or tag to mark VM handlers
+                        bv.set_comment_at(addr, f"VM Handler: {handler.get('type', 'unknown')}")
+            
+            # Show summary in log
+            self.logger.info(f"Analysis complete: Found {len(results.get('vm_handlers', []))} VM handlers")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to display results: {e}")
+
+    def get_active_tasks(self) -> List[str]:
+        """Get list of active background analysis tasks"""
+        active_tasks = []
+        for task in self.background_tasks[:]:
+            if task.is_alive():
+                active_tasks.append(task.analysis_id)
+            else:
+                self.background_tasks.remove(task)
+        return active_tasks
+
+    def cancel_task(self, analysis_id: str) -> bool:
+        """Cancel a background analysis task"""
+        for task in self.background_tasks:
+            if task.analysis_id == analysis_id:
+                task.cancel()
+                self.background_tasks.remove(task)
+                return True
+        return False
+
+
+class BackgroundAnalysisTask:
+    """Background thread for non-blocking analysis"""
+    
+    def __init__(self, client: BinaryNinjaDragonSlayerClient, binary_data: bytes, 
+                 metadata: Dict[str, Any], bv: "bn.BinaryView"):
+        self.client = client
+        self.binary_data = binary_data
+        self.metadata = metadata
+        self.bv = bv
+        self.analysis_id = None
+        self.thread = None
+        self.cancelled = False
+        self.logger = logging.getLogger(__name__)
+
+    def start(self):
+        """Start the background analysis"""
+        import threading
+        self.thread = threading.Thread(target=self._run_analysis, daemon=True)
+        self.thread.start()
+
+    def _run_analysis(self):
+        """Run the analysis in background"""
+        try:
+            if self.cancelled:
+                return
+                
+            # Submit for analysis
+            self.analysis_id = self.client._submit_binary_for_analysis(
+                self.binary_data, self.metadata
+            )
+            
+            if not self.analysis_id:
+                self.logger.error("Failed to submit binary for background analysis")
+                return
+                
+            self.logger.info(f"Background analysis started: {self.analysis_id}")
+            
+            # Poll for results
+            results = self.client._poll_analysis_results(self.analysis_id)
+            
+            if results and not self.cancelled:
+                # Display results in UI (on main thread)
+                self.client._display_results_in_ui(self.bv, results)
+                self.logger.info(f"Background analysis completed: {self.analysis_id}")
+            elif self.cancelled:
+                self.logger.info(f"Background analysis cancelled: {self.analysis_id}")
+            else:
+                self.logger.error(f"Background analysis failed: {self.analysis_id}")
+                
+        except Exception as e:
+            self.logger.error(f"Background analysis error: {e}")
+
+    def cancel(self):
+        """Cancel the background analysis"""
+        self.cancelled = True
+
+    def is_alive(self) -> bool:
+        """Check if the background thread is still running"""
+        return self.thread and self.thread.is_alive()
 
 
 class VMDragonSlayerConfig:

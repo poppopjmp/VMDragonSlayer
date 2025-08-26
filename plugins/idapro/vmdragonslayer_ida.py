@@ -32,11 +32,25 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Dict, List, Optional, Any
 
 # Add VMDragonSlayer lib path
 plugin_dir = Path(__file__).parent
 lib_path = plugin_dir.parent / "lib"
 sys.path.insert(0, str(lib_path))
+
+# Add dragonslayer module path
+dragonslayer_path = plugin_dir.parent.parent / "dragonslayer"
+sys.path.insert(0, str(dragonslayer_path))
+
+# API Client imports for plugin integration
+try:
+    from dragonslayer.api.client import APIClient
+    from dragonslayer.api.transfer import BinaryTransfer
+    API_CLIENT_AVAILABLE = True
+except ImportError as api_e:
+    print(f"Warning: Could not import API client modules: {api_e}")
+    API_CLIENT_AVAILABLE = False
 
 try:
     # Import unified API for optimized components
@@ -254,6 +268,234 @@ class VMDragonSlayerResults:
         self.confidence_score = 0.0
         self.analysis_time = 0.0
         self.metadata = {}
+
+
+class IDADragonSlayerClient:
+    """
+    IDA Pro specific API client that extends APIClient functionality
+    with IDA Pro integration features for VM analysis
+    """
+
+    def __init__(self, api_url: str = "http://localhost:8080", api_key: str = None):
+        """
+        Initialize IDA DragonSlayer API client
+        
+        Args:
+            api_url: Base URL for the VMDragonSlayer API
+            api_key: Optional API key for authentication
+        """
+        self.api_url = api_url
+        self.api_key = api_key
+        self.api_client = None
+        self.binary_transfer = None
+        self.analysis_hooks = []
+        
+        # Initialize API components if available
+        if API_CLIENT_AVAILABLE:
+            try:
+                self.api_client = APIClient(base_url=api_url, api_key=api_key)
+                self.binary_transfer = BinaryTransfer(
+                    chunk_size=1024*1024,  # 1MB chunks for large binaries
+                    enable_compression=True
+                )
+                print("✓ IDA DragonSlayer API client initialized")
+            except Exception as e:
+                print(f"✗ Failed to initialize API client: {e}")
+                self.api_client = None
+                self.binary_transfer = None
+        else:
+            print("⚠ API client not available - running in offline mode")
+
+    def is_connected(self) -> bool:
+        """Check if API client is connected and ready"""
+        if not self.api_client:
+            return False
+        try:
+            # Test connection with a ping or health check
+            response = self.api_client.get("/health")
+            return response.get("status") == "ok"
+        except Exception:
+            return False
+
+    def analyze_current_binary(self) -> Optional[Dict]:
+        """
+        Analyze the currently loaded binary in IDA Pro
+        
+        Returns:
+            Analysis results dictionary or None if failed
+        """
+        if not self.api_client:
+            print("API client not available")
+            return None
+
+        try:
+            # Get binary data from IDA
+            binary_data = self._extract_binary_data()
+            if not binary_data:
+                print("Failed to extract binary data from IDA")
+                return None
+
+            # Get binary metadata
+            metadata = self._get_binary_metadata()
+            
+            # Transfer binary for analysis
+            analysis_id = self._submit_binary_for_analysis(binary_data, metadata)
+            if not analysis_id:
+                print("Failed to submit binary for analysis")
+                return None
+
+            # Poll for results
+            print(f"Analysis submitted with ID: {analysis_id}")
+            return self._poll_analysis_results(analysis_id)
+
+        except Exception as e:
+            print(f"Analysis failed: {e}")
+            return None
+
+    def _extract_binary_data(self) -> Optional[bytes]:
+        """Extract binary data from current IDA database"""
+        try:
+            # Get the binary start and end addresses
+            start_ea = ida_nalt.get_imagebase()
+            end_ea = idc.get_inf_attr(idc.INF_MAX_EA)
+            
+            # Extract bytes from the loaded image
+            binary_data = bytearray()
+            for ea in range(start_ea, end_ea):
+                try:
+                    byte_val = ida_bytes.get_byte(ea)
+                    binary_data.append(byte_val)
+                except:
+                    # Handle unmapped areas
+                    binary_data.append(0)
+            
+            return bytes(binary_data)
+        except Exception as e:
+            print(f"Failed to extract binary data: {e}")
+            return None
+
+    def _get_binary_metadata(self) -> Dict:
+        """Get metadata about the current binary"""
+        try:
+            return {
+                "filename": ida_nalt.get_root_filename(),
+                "architecture": ida_pro.get_inf_structure().procname,
+                "entry_point": hex(ida_nalt.get_imagebase()),
+                "file_size": idc.get_inf_attr(idc.INF_MAX_EA) - idc.get_inf_attr(idc.INF_MIN_EA),
+                "ida_version": ida_pro.get_kernel_version(),
+                "analysis_time": time.time()
+            }
+        except Exception as e:
+            print(f"Failed to get binary metadata: {e}")
+            return {}
+
+    def _submit_binary_for_analysis(self, binary_data: bytes, metadata: Dict) -> Optional[str]:
+        """Submit binary data to API for analysis"""
+        if not self.binary_transfer:
+            return None
+
+        try:
+            # Prepare binary transfer
+            transfer_data = self.binary_transfer.prepare_transfer(binary_data)
+            
+            # Submit to API
+            payload = {
+                "binary_data": transfer_data,
+                "metadata": metadata,
+                "analysis_type": "vm_detection",
+                "priority": "normal"
+            }
+            
+            response = self.api_client.post("/api/v1/analysis/submit", json=payload)
+            return response.get("analysis_id")
+
+        except Exception as e:
+            print(f"Failed to submit binary: {e}")
+            return None
+
+    def _poll_analysis_results(self, analysis_id: str, timeout: int = 300) -> Optional[Dict]:
+        """Poll for analysis results"""
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                response = self.api_client.get(f"/api/v1/analysis/{analysis_id}")
+                status = response.get("status")
+                
+                if status == "completed":
+                    return response.get("results")
+                elif status == "failed":
+                    print(f"Analysis failed: {response.get('error')}")
+                    return None
+                elif status in ["queued", "processing"]:
+                    print(f"Analysis status: {status}")
+                    time.sleep(10)  # Wait 10 seconds before next poll
+                else:
+                    print(f"Unknown status: {status}")
+                    return None
+                    
+            except Exception as e:
+                print(f"Error polling results: {e}")
+                return None
+        
+        print("Analysis timeout reached")
+        return None
+
+    def install_analysis_hooks(self):
+        """Install IDA Pro hooks for automatic VM detection"""
+        try:
+            # Hook for binary load events
+            hook = IDABinaryLoadHook(self)
+            if hook.hook():
+                self.analysis_hooks.append(hook)
+                print("✓ Binary load hook installed")
+            else:
+                print("✗ Failed to install binary load hook")
+                
+        except Exception as e:
+            print(f"Failed to install analysis hooks: {e}")
+
+    def uninstall_analysis_hooks(self):
+        """Uninstall all analysis hooks"""
+        for hook in self.analysis_hooks:
+            try:
+                hook.unhook()
+            except Exception as e:
+                print(f"Failed to uninstall hook: {e}")
+        self.analysis_hooks.clear()
+        print("Analysis hooks uninstalled")
+
+
+class IDABinaryLoadHook(ida_kernwin.UI_Hooks):
+    """Hook for detecting binary load events in IDA Pro"""
+    
+    def __init__(self, client: IDADragonSlayerClient):
+        super().__init__()
+        self.client = client
+        
+    def ready_to_run(self):
+        """Called when IDA is ready to run"""
+        print("Binary loaded - triggering automatic VM analysis")
+        
+        # Run analysis in background thread to avoid blocking IDA
+        import threading
+        analysis_thread = threading.Thread(
+            target=self._run_background_analysis,
+            daemon=True
+        )
+        analysis_thread.start()
+        
+    def _run_background_analysis(self):
+        """Run VM analysis in background"""
+        try:
+            results = self.client.analyze_current_binary()
+            if results:
+                print("Automatic VM analysis completed")
+                # Could display results in IDA UI here
+            else:
+                print("Automatic VM analysis failed")
+        except Exception as e:
+            print(f"Background analysis error: {e}")
 
 
 class VMHandlerAnalyzer:

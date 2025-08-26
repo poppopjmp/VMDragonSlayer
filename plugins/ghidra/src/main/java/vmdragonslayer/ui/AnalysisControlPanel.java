@@ -246,7 +246,7 @@ public class AnalysisControlPanel extends JPanel {
     private void updateEngineDisplay(EngineStatus status) {
         if (status.isAvailable()) {
             engineStatusLabel.setText(String.format(
-                "✅ Engines Available (%d active)", 
+                " Engines Available (%d active)", 
                 status.getAvailableEngines().size()
             ));
             engineStatusLabel.setForeground(Color.GREEN.darker());

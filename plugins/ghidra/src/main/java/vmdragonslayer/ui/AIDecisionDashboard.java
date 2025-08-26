@@ -368,7 +368,7 @@ public class AIDecisionDashboard extends JPanel {
                 decision.getSelectedEngine(),
                 String.format("%.2f", decision.getConfidence()),
                 decision.getReasoning(),
-                decision.isSuccessful() ? "✅ Success" : "❌ Failed"
+                decision.isSuccessful() ? " Success" : " Failed"
             };
             decisionHistoryModel.addRow(row);
         }
