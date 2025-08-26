@@ -150,36 +150,6 @@ VMDragonSlayer integrates with major reverse engineering tools:
 **Note**: The included ML models are basic proof-of-concept implementations designed for research and educational purposes.
 
 ---
-## Repository Structure
-
-```
-VMDragonSlayer/
-├── dragonslayer/               # Core framework
-│   ├── analysis/              # Analysis engines
-│   │   ├── vm_discovery/      # VM detection heuristics
-│   │   ├── taint_tracking/    # Dynamic taint analysis
-│   │   ├── pattern_analysis/  # Pattern recognition
-│   │   ├── symbolic_execution/# Symbolic analysis
-│   │   └── anti_evasion/      # Environment normalization
-│   ├── ml/                    # Machine learning components
-│   ├── core/                  # Framework core
-│   ├── api/                   # REST API interface
-│   ├── ui/                    # Dashboard and visualization
-│   ├── gpu/                   # GPU acceleration (experimental)
-│   └── workflows/             # Analysis orchestration
-├── plugins/                   # Disassembler integrations
-│   ├── ghidra/               # Ghidra plugin
-│   ├── idapro/               # IDA Pro plugin
-│   └── binaryninja/          # Binary Ninja plugin
-├── data/                     # Configuration and models
-│   ├── models/               # Pre-trained ML models
-│   ├── patterns/             # Pattern databases
-│   ├── samples/              # Sample configurations
-│   └── schemas/              # Data schemas
-└── docs/                     # Documentation (this README)
-```
-
----
 ## Installation
 
 ### Prerequisites
