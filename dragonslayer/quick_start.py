@@ -101,7 +101,7 @@ def main():
     # Check core dependencies
     print("📦 Checking core dependencies...")
     if not check_and_install_core_deps():
-        print("❌ Failed to install core dependencies")
+        print(" Failed to install core dependencies")
         return 1
 
     # Check enterprise dependencies
@@ -114,18 +114,18 @@ def main():
         import dragonslayer
         from dragonslayer import get_api
 
-        print("✅ VMDragonSlayer loaded successfully!")
+        print(" VMDragonSlayer loaded successfully!")
 
         # Get API instance
         get_api()
-        print("✅ API instance created")
+        print(" API instance created")
 
         # Show available modules
         print("\n📋 Available modules:")
 
         try:
             if hasattr(dragonslayer, "GPU_AVAILABLE") and dragonslayer.GPU_AVAILABLE:
-                print("  ✅ GPU Acceleration")
+                print("   GPU Acceleration")
             else:
                 print("  ⚠️ GPU Acceleration (install cupy for CUDA support)")
         except Exception:
@@ -136,7 +136,7 @@ def main():
                 hasattr(dragonslayer, "ANALYTICS_AVAILABLE")
                 and dragonslayer.ANALYTICS_AVAILABLE
             ):
-                print("  ✅ Analytics Dashboard")
+                print("   Analytics Dashboard")
             else:
                 print("  ⚠️ Analytics Dashboard (install plotly, dash)")
         except Exception:
@@ -147,7 +147,7 @@ def main():
                 hasattr(dragonslayer, "ANTI_EVASION_AVAILABLE")
                 and dragonslayer.ANTI_EVASION_AVAILABLE
             ):
-                print("  ✅ Anti-Evasion")
+                print("   Anti-Evasion")
             else:
                 print("  ⚠️ Anti-Evasion")
         except Exception:
@@ -158,7 +158,7 @@ def main():
                 hasattr(dragonslayer, "ENTERPRISE_AVAILABLE")
                 and dragonslayer.ENTERPRISE_AVAILABLE
             ):
-                print("  ✅ Enterprise Integration")
+                print("   Enterprise Integration")
             else:
                 print("  ⚠️ Enterprise Integration (install redis, pika)")
         except Exception:
@@ -174,10 +174,10 @@ def main():
         return 0
 
     except ImportError as e:
-        print(f"❌ Failed to import dragonslayer: {e}")
+        print(f" Failed to import dragonslayer: {e}")
         return 1
     except Exception as e:
-        print(f"❌ Startup error: {e}")
+        print(f" Startup error: {e}")
         return 1
 
 

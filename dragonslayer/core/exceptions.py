@@ -238,6 +238,12 @@ class ComponentNotFoundError(ComponentError):
     pass
 
 
+class UIError(VMDragonSlayerError):
+    """Errors related to user interface components"""
+
+    pass
+
+
 class ComponentInitializationError(ComponentError):
     """Component initialization failed"""
 

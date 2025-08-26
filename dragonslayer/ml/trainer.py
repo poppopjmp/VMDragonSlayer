@@ -866,7 +866,7 @@ class GPUTrainer:
             total_training_time, best_val_accuracy, epochs, training_results
         )
 
-        logger.info(f"✅ Advanced training completed in {total_training_time:.2f}s")
+        logger.info(f" Advanced training completed in {total_training_time:.2f}s")
         logger.info(f"🏆 Best validation accuracy: {best_val_accuracy:.4f}")
 
         return training_report

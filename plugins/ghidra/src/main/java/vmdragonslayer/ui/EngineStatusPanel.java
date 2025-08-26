@@ -162,7 +162,7 @@ public class EngineStatusPanel extends JPanel {
                     Msg.error(EngineStatusPanel.this, 
                         "Failed to refresh status: " + e.getMessage(), e);
                     
-                    overallStatusLabel.setText("❌ Failed to refresh status");
+                    overallStatusLabel.setText(" Failed to refresh status");
                     overallStatusLabel.setForeground(Color.RED);
                 } finally {
                     refreshButton.setEnabled(true);
@@ -193,7 +193,7 @@ public class EngineStatusPanel extends JPanel {
         Color statusColor;
         
         if (standardMode && totalEngines >= 5) {
-            statusText = String.format("✅ Standard Mode Active - %d engines operational", totalEngines);
+            statusText = String.format(" Standard Mode Active - %d engines operational", totalEngines);
             statusColor = Color.GREEN.darker();
         } else if (standardMode && totalEngines >= 3) {
             statusText = String.format("⚠️ Standard Mode Partial - %d engines available", totalEngines);
@@ -315,7 +315,7 @@ public class EngineStatusPanel extends JPanel {
         
         private void updateStatus() {
             if (isStandard) {
-                statusLabel.setText("✅ Standard Active");
+                statusLabel.setText(" Standard Active");
                 statusLabel.setForeground(Color.GREEN.darker());
             } else {
                 statusLabel.setText("🔄 Fallback Mode");
