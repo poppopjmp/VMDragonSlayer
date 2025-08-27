@@ -44,7 +44,7 @@ import java.util.function.Consumer;
  * - Real-time WebSocket streaming
  * - Intelligent analysis orchestration
  */
-public class AgenticAPIClient {
+public class VMDSAPIClient {
     
     private static final String USER_AGENT = "VMDragonSlayer-Ghidra-Plugin/1.0";
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
@@ -54,6 +54,7 @@ public class AgenticAPIClient {
     private final String authToken;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final boolean useSimulatedPhase4Features;
     
     // WebSocket connection for real-time updates
     private WebSocket webSocket;
@@ -63,7 +64,7 @@ public class AgenticAPIClient {
     private boolean isConnected = false;
     private EngineStatus lastEngineStatus;
     
-    public AgenticAPIClient(String baseUrl, String authToken) {
+    public VMDSAPIClient(String baseUrl, String authToken) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.authToken = authToken;
         
@@ -71,7 +72,7 @@ public class AgenticAPIClient {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
             
-        this.objectMapper = new ObjectMapper();
+    this.objectMapper = new ObjectMapper();
         // Configure ObjectMapper to exclude null values and empty collections
         this.objectMapper.setDefaultPropertyInclusion(
             com.fasterxml.jackson.annotation.JsonInclude.Value.construct(
@@ -79,8 +80,13 @@ public class AgenticAPIClient {
                 com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY
             )
         );
+    // Be resilient to missing/extra properties
+    this.objectMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+    // Default: do not use simulated Phase 4 features unless explicitly enabled via system property
+    this.useSimulatedPhase4Features = Boolean.parseBoolean(System.getProperty("vmds.simulatePhase4", "false"));
         
-        Msg.info(this, "AgenticAPIClient initialized for: " + this.baseUrl);
+        Msg.info(this, "VMDSAPIClient initialized for: " + this.baseUrl);
     }
     
     /**
@@ -99,19 +105,20 @@ public class AgenticAPIClient {
             
             if (response.statusCode() == 200) {
                 JsonNode healthData = objectMapper.readTree(response.body());
-                String status = healthData.get("status").asText();
-                isConnected = "healthy".equals(status);
+                String status = healthData.path("status").asText("unknown");
+                isConnected = "healthy".equalsIgnoreCase(status) || "active".equalsIgnoreCase(status);
                 
                 Msg.info(this, "API health check: " + status);
                 return isConnected;
             }
+            Msg.warn(this, "Health check non-200: " + response.statusCode() + ", body: " + safeBody(response.body()));
             
         } catch (Exception e) {
             Msg.error(this, "Connection test failed: " + e.getMessage(), e);
             isConnected = false;
         }
         
-        return false;
+        return isConnected;
     }
     
     /**
@@ -126,7 +133,7 @@ public class AgenticAPIClient {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/analysis-types"))
-                .header("Authorization", "Bearer " + authToken)
+                .header("Authorization", bearer())
                 .header("User-Agent", USER_AGENT)
                 .timeout(REQUEST_TIMEOUT)
                 .GET()
@@ -138,7 +145,7 @@ public class AgenticAPIClient {
                 JsonNode responseData = objectMapper.readTree(response.body());
                 return objectMapper.convertValue(responseData, Map.class);
             } else {
-                Msg.warn(this, "Failed to get analysis types: " + response.statusCode());
+                Msg.warn(this, "Failed to get analysis types: " + response.statusCode() + ", body: " + safeBody(response.body()));
                 
                 // Return default analysis types
                 Map<String, Object> defaultTypes = new HashMap<>();
@@ -165,7 +172,7 @@ public class AgenticAPIClient {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/status"))
-                .header("Authorization", "Bearer " + authToken)
+                .header("Authorization", bearer())
                 .header("User-Agent", USER_AGENT)
                 .timeout(REQUEST_TIMEOUT)
                 .GET()
@@ -176,8 +183,8 @@ public class AgenticAPIClient {
             if (response.statusCode() == 200) {
                 JsonNode data = objectMapper.readTree(response.body());
                 
-                boolean standardEnginesAvailable = "active".equals(data.get("status").asText());
-                List<String> availableEngines = Arrays.asList("hybrid", "vm_discovery", "pattern_analysis");
+                boolean standardEnginesAvailable = "active".equalsIgnoreCase(data.path("status").asText("unknown"));
+                List<String> availableEngines = Arrays.asList("hybrid", "vm_discovery", "pattern_analysis", "taint_tracking", "symbolic_execution");
                 
                 lastEngineStatus = new EngineStatus(standardEnginesAvailable, availableEngines);
                 
@@ -185,6 +192,8 @@ public class AgenticAPIClient {
                     standardEnginesAvailable, String.join(", ", availableEngines)));
                 
                 return lastEngineStatus;
+            } else {
+                Msg.warn(this, "Status fetch failed: " + response.statusCode() + ", body: " + safeBody(response.body()));
             }
             
         } catch (Exception e) {
@@ -201,7 +210,7 @@ public class AgenticAPIClient {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/metrics"))
-                .header("Authorization", "Bearer " + authToken)
+                .header("Authorization", bearer())
                 .header("User-Agent", USER_AGENT)
                 .timeout(REQUEST_TIMEOUT)
                 .GET()
@@ -213,11 +222,13 @@ public class AgenticAPIClient {
                 JsonNode data = objectMapper.readTree(response.body());
                 
                 return new SystemStatistics(
-                    data.get("active_analyses").asInt(0),
-                    data.get("total_analyses").asInt(0),
-                    data.get("uptime_seconds").asDouble(0.0),
+                    data.path("api_active_analyses").asInt(data.path("active_analyses").asInt(0)),
+                    data.path("api_total_analyses").asInt(data.path("total_analyses").asInt(0)),
+                    data.path("api_uptime_seconds").asDouble(data.path("uptime_seconds").asDouble(0.0)),
                     true // Standard engines available
                 );
+            } else {
+                Msg.warn(this, "Metrics fetch failed: " + response.statusCode() + ", body: " + safeBody(response.body()));
             }
             
         } catch (Exception e) {
@@ -231,8 +242,11 @@ public class AgenticAPIClient {
      * Get AI agent decision history (simulated for now)
      */
     public List<AIDecision> getAIDecisionHistory(int limit) {
-        // Since the dragonslayer API doesn't have this endpoint yet,
-        // return simulated decision history
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "AI decision history endpoint not available; simulation disabled");
+            return Collections.emptyList();
+        }
+        // Simulated fallback (feature-flagged)
         List<AIDecision> decisions = new ArrayList<>();
         
         decisions.add(new AIDecision(
@@ -249,7 +263,7 @@ public class AgenticAPIClient {
             new java.util.Date().toString()
         ));
         
-        Msg.info(this, "Returned simulated AI decision history");
+    Msg.info(this, "Returned simulated AI decision history (feature-flag)");
         return decisions;
     }
     
@@ -263,7 +277,7 @@ public class AgenticAPIClient {
                 
                 HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/analyze"))
-                    .header("Authorization", "Bearer " + authToken)
+                    .header("Authorization", bearer())
                     .header("Content-Type", "application/json")
                     .header("User-Agent", USER_AGENT)
                     .timeout(REQUEST_TIMEOUT)
@@ -274,7 +288,12 @@ public class AgenticAPIClient {
                 
                 if (response.statusCode() == 200) {
                     JsonNode data = objectMapper.readTree(response.body());
-                    String taskId = data.get("request_id").asText();
+                    String taskId = data.path("request_id").asText(null);
+                    if (taskId == null || taskId.isEmpty()) {
+                        String msg = "Missing request_id in response: " + safeBody(response.body());
+                        Msg.error(this, msg);
+                        throw new RuntimeException(msg);
+                    }
                     
                     Msg.info(this, "Started analysis task: " + taskId);
                     return taskId;
@@ -283,8 +302,10 @@ public class AgenticAPIClient {
                     String responseBody = response.body();
                     Msg.error(this, "Validation error (422): " + responseBody);
                     throw new RuntimeException("Validation error: " + responseBody);
-                } else if (response.statusCode() == 401) {
-                    throw new RuntimeException("Authentication failed: Invalid token");
+                } else if (response.statusCode() == 401 || response.statusCode() == 403) {
+                    throw new RuntimeException("Authentication/Authorization failed (" + response.statusCode() + "): " + safeBody(response.body()));
+                } else if (response.statusCode() == 404) {
+                    throw new RuntimeException("Endpoint not found: /analyze");
                 } else {
                     String responseBody = response.body();
                     String errorMsg = String.format("Analysis request failed with status %d: %s", 
@@ -306,9 +327,10 @@ public class AgenticAPIClient {
     public CompletableFuture<AnalysisResult> getAnalysisResult(String taskId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
+                String url = baseUrl + "/status" + (taskId != null && !taskId.isEmpty() ? ("?task_id=" + encode(taskId)) : "");
                 HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/status"))
-                    .header("Authorization", "Bearer " + authToken)
+                    .uri(URI.create(url))
+                    .header("Authorization", bearer())
                     .header("User-Agent", USER_AGENT)
                     .timeout(REQUEST_TIMEOUT)
                     .GET()
@@ -319,22 +341,23 @@ public class AgenticAPIClient {
                 if (response.statusCode() == 200) {
                     JsonNode data = objectMapper.readTree(response.body());
                     
-                    String status = data.get("status").asText();
-                    double progress = 1.0; // Status endpoint doesn't provide progress, assume complete
+                    String status = data.path("status").asText("unknown");
+                    double progress = data.path("progress").asDouble("active".equalsIgnoreCase(status) ? 0.5 : ("complete".equalsIgnoreCase(status) ? 1.0 : 0.0));
                     
                     AnalysisResult result = new AnalysisResult(taskId, status, progress);
                     
                     // Parse status information
-                    if (data.has("active_analyses")) {
+                    if (data.has("active_analyses") || data.has("api_active_analyses")) {
                         result.setAnalysisType("standard");
                         result.setConfidence(0.8); // Default confidence
-                        result.setExecutionTime(data.get("uptime_seconds").asDouble());
+                        result.setExecutionTime(data.path("uptime_seconds").asDouble(0.0));
                     }
                     
                     return result;
+                } else {
+                    Msg.warn(this, "Get result failed: " + response.statusCode() + ", body: " + safeBody(response.body()));
+                    throw new RuntimeException("Failed to get analysis result: " + response.statusCode());
                 }
-                
-                throw new RuntimeException("Failed to get analysis result: " + response.statusCode());
                 
             } catch (Exception e) {
                 Msg.error(this, "Failed to get analysis result: " + e.getMessage(), e);
@@ -350,10 +373,12 @@ public class AgenticAPIClient {
         this.analysisUpdateHandler = updateHandler;
         
         try {
-            URI wsUri = new URI(baseUrl.replace("http://", "ws://").replace("https://", "wss://") + "/ws");
+            URI wsUri = new URI(
+                baseUrl.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+            );
             
             WebSocket.Builder wsBuilder = httpClient.newWebSocketBuilder()
-                .header("Authorization", "Bearer " + authToken)
+                .header("Authorization", bearer())
                 .connectTimeout(WEBSOCKET_TIMEOUT);
             
             return wsBuilder.buildAsync(wsUri, new WebSocketListener())
@@ -380,8 +405,39 @@ public class AgenticAPIClient {
      * Update AI context with program information
      */
     public void updateAIContext(ProgramContext context) {
-        // Implementation for updating AI context
-        Msg.info(this, "AI context updated for program: " + context.getName());
+        // No-op unless backend exposes /context; keep lightweight debounce via hash
+        try {
+            String payload = objectMapper.writeValueAsString(Map.of(
+                "name", context.getName(),
+                "path", context.getPath(),
+                "format", context.getFormat(),
+                "language", context.getLanguage(),
+                "address_size", context.getAddressSize()
+            ));
+
+            // Attempt POST to /context when available
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/context"))
+                .header("Authorization", bearer())
+                .header("Content-Type", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .timeout(REQUEST_TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build();
+
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenAccept(resp -> {
+                    if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                        Msg.info(this, "AI context updated for program: " + context.getName());
+                    } else if (resp.statusCode() == 404) {
+                        Msg.info(this, "/context not supported by backend; ignoring");
+                    } else {
+                        Msg.warn(this, "AI context update non-2xx: " + resp.statusCode());
+                    }
+                });
+        } catch (Exception e) {
+            Msg.debug(this, "AI context update skipped: " + e.getMessage());
+        }
     }
     
     /**
@@ -409,7 +465,7 @@ public class AgenticAPIClient {
                 }
                 
             } catch (Exception e) {
-                Msg.error(AgenticAPIClient.this, "WebSocket message parsing error: " + e.getMessage(), e);
+                Msg.error(VMDSAPIClient.this, "WebSocket message parsing error: " + e.getMessage(), e);
             }
             
             return WebSocket.Listener.super.onText(webSocket, data, last);
@@ -417,19 +473,19 @@ public class AgenticAPIClient {
         
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
-            Msg.error(AgenticAPIClient.this, "WebSocket error: " + error.getMessage(), error);
+            Msg.error(VMDSAPIClient.this, "WebSocket error: " + error.getMessage(), error);
         }
     }
     
     private AnalysisUpdate parseAnalysisUpdate(JsonNode message) {
-        String type = message.get("type").asText();
-        JsonNode data = message.get("data");
+        String type = message.path("type").asText("unknown");
+        JsonNode data = message.path("data");
         
         return new AnalysisUpdate(
             type,
-            data.has("progress") ? data.get("progress").asDouble() : 0.0,
-            data.has("status") ? data.get("status").asText() : "unknown",
-            data.has("message") ? data.get("message").asText() : ""
+            data.path("progress").asDouble(0.0),
+            data.path("status").asText("unknown"),
+            data.path("message").asText("")
         );
     }
     
@@ -437,12 +493,13 @@ public class AgenticAPIClient {
      * Get agent decision history for AI dashboard (simulated)
      */
     public AgentDecisionHistory getAgentDecisionHistory() {
-        // Since the dragonslayer API doesn't have this endpoint yet,
-        // return simulated decision history
-        AgentDecisionHistory history = new AgentDecisionHistory();
-        
-        Msg.info(this, "Returned simulated agent decision history");
-        return history;
+        // Feature-flagged simulation
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Agent decision history not supported; simulation disabled");
+            return new AgentDecisionHistory();
+        }
+        Msg.info(this, "Returned simulated agent decision history (feature-flag)");
+        return new AgentDecisionHistory();
     }
     
     /**
@@ -452,7 +509,7 @@ public class AgenticAPIClient {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/metrics"))
-                .header("Authorization", "Bearer " + authToken)
+                .header("Authorization", bearer())
                 .header("User-Agent", USER_AGENT)
                 .timeout(REQUEST_TIMEOUT)
                 .GET()
@@ -464,7 +521,7 @@ public class AgenticAPIClient {
                 JsonNode responseData = objectMapper.readTree(response.body());
                 return objectMapper.convertValue(responseData, SystemStats.class);
             } else {
-                Msg.warn(this, "Failed to get system stats: " + response.statusCode());
+                Msg.warn(this, "Failed to get system stats: " + response.statusCode() + ", body: " + safeBody(response.body()));
                 return new SystemStats();
             }
             
@@ -479,12 +536,35 @@ public class AgenticAPIClient {
      */
     public CompletableFuture<AnalysisStatus> getAnalysisStatus(String taskId) {
         return CompletableFuture.supplyAsync(() -> {
-            // Since the dragonslayer API doesn't have task tracking yet,
-            // return simulated status
-            AnalysisStatus status = new AnalysisStatus();
-            
-            Msg.info(this, "Returned simulated analysis status for task: " + taskId);
-            return status;
+            if (!useSimulatedPhase4Features) {
+                // Attempt to query status with optional taskId
+                try {
+                    String url = baseUrl + "/status" + (taskId != null && !taskId.isEmpty() ? ("?task_id=" + encode(taskId)) : "");
+                    HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Authorization", bearer())
+                        .header("User-Agent", USER_AGENT)
+                        .timeout(REQUEST_TIMEOUT)
+                        .GET()
+                        .build();
+
+                    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                    if (response.statusCode() == 200) {
+                        JsonNode data = objectMapper.readTree(response.body());
+                        String s = data.path("status").asText("unknown");
+                        double p = data.path("progress").asDouble("active".equalsIgnoreCase(s) ? 0.5 : 1.0);
+                        return new AnalysisStatus(s, p);
+                    } else {
+                        Msg.warn(this, "Analysis status non-200: " + response.statusCode());
+                        return new AnalysisStatus("unknown", 0.0);
+                    }
+                } catch (Exception e) {
+                    Msg.error(this, "Analysis status fetch error: " + e.getMessage(), e);
+                    return new AnalysisStatus("error", 0.0);
+                }
+            }
+            Msg.info(this, "Returned simulated analysis status (feature-flag) for task: " + taskId);
+            return new AnalysisStatus("running", 0.5);
         });
     }
     
@@ -492,11 +572,15 @@ public class AgenticAPIClient {
      * Get collaboration requests (simulated for Phase 4 features)
      */
     public Object getCollaborationRequests(boolean includeResolved) {
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Collaboration requests not supported; simulation disabled");
+            return Map.of("requests", Collections.emptyList(), "total", 0);
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("requests", new ArrayList<>());
         response.put("total", 0);
         
-        Msg.info(this, "Returned simulated collaboration requests");
+        Msg.info(this, "Returned simulated collaboration requests (feature-flag)");
         return response;
     }
     
@@ -504,12 +588,16 @@ public class AgenticAPIClient {
      * Get advanced orchestrator status (simulated for Phase 4 features)
      */
     public Object getAdvancedOrchestratorStatus() {
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Advanced orchestrator status not supported; simulation disabled");
+            return Map.of("status", "inactive");
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("status", "active");
         response.put("orchestrator_version", "1.0.0");
         response.put("agents_connected", 0);
         
-        Msg.info(this, "Returned simulated orchestrator status");
+        Msg.info(this, "Returned simulated orchestrator status (feature-flag)");
         return response;
     }
     
@@ -517,11 +605,15 @@ public class AgenticAPIClient {
      * Get meta learning history (simulated for Phase 4 features)
      */
     public Object getMetaLearningHistory(int limit) {
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Meta learning history not supported; simulation disabled");
+            return Map.of("history", Collections.emptyList(), "total_optimizations", 0);
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("history", new ArrayList<>());
         response.put("total_optimizations", 0);
         
-        Msg.info(this, "Returned simulated meta learning history");
+        Msg.info(this, "Returned simulated meta learning history (feature-flag)");
         return response;
     }
     
@@ -529,11 +621,15 @@ public class AgenticAPIClient {
      * Get contextual insights (simulated for Phase 4 features)
      */
     public Object getContextualInsights(int limit) {
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Contextual insights not supported; simulation disabled");
+            return Map.of("insights", Collections.emptyList(), "total", 0);
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("insights", new ArrayList<>());
         response.put("total", 0);
         
-        Msg.info(this, "Returned simulated contextual insights");
+        Msg.info(this, "Returned simulated contextual insights (feature-flag)");
         return response;
     }
     
@@ -541,6 +637,10 @@ public class AgenticAPIClient {
      * Submit collaboration response (simulated for Phase 4 features)
      */
     public Object submitCollaborationResponse(String requestId, String optionId, String explanation) {
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Submit collaboration response not supported; simulation disabled");
+            return Map.of("status", "unsupported");
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("status", "accepted");
         response.put("request_id", requestId);
@@ -553,6 +653,10 @@ public class AgenticAPIClient {
      * Trigger meta learning optimization (simulated for Phase 4 features)
      */
     public Object triggerMetaLearningOptimization() {
+        if (!useSimulatedPhase4Features) {
+            Msg.info(this, "Trigger meta learning optimization not supported; simulation disabled");
+            return Map.of("status", "unsupported");
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("status", "started");
         response.put("optimization_id", "opt_" + System.currentTimeMillis());
@@ -566,4 +670,23 @@ public class AgenticAPIClient {
     public boolean isConnected() { return isConnected; }
     public String getBaseUrl() { return baseUrl; }
     public EngineStatus getLastEngineStatus() { return lastEngineStatus; }
+
+    // Helpers
+    private String bearer() {
+        return (authToken == null || authToken.isEmpty()) ? "" : ("Bearer " + authToken);
+    }
+
+    private String safeBody(String body) {
+        if (body == null) return "";
+        // Do not log tokens; scrub if accidentally present
+        return body.replace(authToken != null ? authToken : "", "***");
+    }
+
+    private String encode(String s) {
+        try {
+            return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return s;
+        }
+    }
 }

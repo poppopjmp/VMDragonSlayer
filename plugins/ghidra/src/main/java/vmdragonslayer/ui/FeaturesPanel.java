@@ -19,7 +19,7 @@
 package vmdragonslayer.ui;
 
 import ghidra.util.Msg;
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.api.AnalysisUpdate;
 
 import javax.swing.*;
@@ -44,7 +44,7 @@ public class FeaturesPanel extends JPanel {
     
     private static final long serialVersionUID = 1L;
     
-    private final AgenticAPIClient apiClient;
+    private final VMDSAPIClient apiClient;
     
     // Collaboration Components
     private JList<CollaborationRequest> collaborationRequestsList;
@@ -76,7 +76,7 @@ public class FeaturesPanel extends JPanel {
     private Timer refreshTimer;
     private JCheckBox autoRefreshCheckbox;
     
-    public FeaturesPanel(AgenticAPIClient apiClient) {
+    public FeaturesPanel(VMDSAPIClient apiClient) {
         this.apiClient = apiClient;
         initializeComponents();
         layoutComponents();

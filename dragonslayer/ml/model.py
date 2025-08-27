@@ -390,26 +390,208 @@ class MLModel:
             raise MLError(f"Failed to load model from {file_path}: {e}") from e
 
     @classmethod
+    def _reconstruct_pytorch_model(cls, architecture: Dict) -> Any:
+        """Reconstruct PyTorch model from architecture specification."""
+        if not TORCH_AVAILABLE:
+            raise MLError("PyTorch not available")
+        
+        model_type = architecture.get("type", "sequential")
+        
+        if model_type == "sequential":
+            return cls._build_sequential_model(architecture)
+        elif model_type == "custom":
+            return cls._build_custom_model(architecture)
+        elif model_type == "transformer":
+            return cls._build_transformer_model(architecture)
+        else:
+            raise MLError(f"Unsupported PyTorch model type: {model_type}")
+    
+    @classmethod
+    def _build_sequential_model(cls, architecture: Dict) -> Any:
+        """Build sequential PyTorch model."""
+        import torch.nn as nn
+        
+        layers = []
+        layer_configs = architecture.get("layers", [])
+        
+        for layer_config in layer_configs:
+            layer_type = layer_config.get("type")
+            params = layer_config.get("params", {})
+            
+            if layer_type == "linear":
+                layers.append(nn.Linear(**params))
+            elif layer_type == "relu":
+                layers.append(nn.ReLU())
+            elif layer_type == "sigmoid":
+                layers.append(nn.Sigmoid())
+            elif layer_type == "tanh":
+                layers.append(nn.Tanh())
+            elif layer_type == "dropout":
+                layers.append(nn.Dropout(**params))
+            elif layer_type == "batch_norm":
+                layers.append(nn.BatchNorm1d(**params))
+            elif layer_type == "conv1d":
+                layers.append(nn.Conv1d(**params))
+            elif layer_type == "conv2d":
+                layers.append(nn.Conv2d(**params))
+            elif layer_type == "max_pool1d":
+                layers.append(nn.MaxPool1d(**params))
+            elif layer_type == "max_pool2d":
+                layers.append(nn.MaxPool2d(**params))
+            elif layer_type == "flatten":
+                layers.append(nn.Flatten())
+            else:
+                logger.warning(f"Unknown layer type: {layer_type}, skipping")
+        
+        return nn.Sequential(*layers)
+    
+    @classmethod 
+    def _build_custom_model(cls, architecture: Dict) -> Any:
+        """Build custom PyTorch model from class specification."""
+        import torch.nn as nn
+        
+        class CustomVMClassifier(nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.input_size = config.get("input_size", 1024)
+                self.hidden_sizes = config.get("hidden_sizes", [512, 256, 128])
+                self.num_classes = config.get("num_classes", 10)
+                self.dropout_rate = config.get("dropout_rate", 0.5)
+                
+                # Build layers
+                layers = []
+                in_features = self.input_size
+                
+                for hidden_size in self.hidden_sizes:
+                    layers.extend([
+                        nn.Linear(in_features, hidden_size),
+                        nn.ReLU(),
+                        nn.BatchNorm1d(hidden_size),
+                        nn.Dropout(self.dropout_rate)
+                    ])
+                    in_features = hidden_size
+                
+                layers.append(nn.Linear(in_features, self.num_classes))
+                self.classifier = nn.Sequential(*layers)
+            
+            def forward(self, x):
+                return self.classifier(x)
+        
+        config = architecture.get("config", {})
+        return CustomVMClassifier(config)
+    
+    @classmethod
+    def _build_transformer_model(cls, architecture: Dict) -> Any:
+        """Build transformer-based PyTorch model."""
+        import torch
+        import torch.nn as nn
+        
+        class TransformerVMClassifier(nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.embed_dim = config.get("embed_dim", 512)
+                self.num_heads = config.get("num_heads", 8)
+                self.num_layers = config.get("num_layers", 6)
+                self.num_classes = config.get("num_classes", 10)
+                self.max_seq_len = config.get("max_seq_len", 1024)
+                
+                # Embedding layer
+                self.embedding = nn.Linear(1, self.embed_dim)
+                self.pos_encoding = nn.Parameter(torch.randn(self.max_seq_len, self.embed_dim))
+                
+                # Transformer layers
+                encoder_layer = nn.TransformerEncoderLayer(
+                    d_model=self.embed_dim,
+                    nhead=self.num_heads,
+                    dim_feedforward=self.embed_dim * 4,
+                    dropout=0.1,
+                    batch_first=True
+                )
+                self.transformer = nn.TransformerEncoder(
+                    encoder_layer, 
+                    num_layers=self.num_layers
+                )
+                
+                # Classification head
+                self.classifier = nn.Linear(self.embed_dim, self.num_classes)
+                
+            def forward(self, x):
+                # x shape: (batch_size, seq_len)
+                seq_len = x.size(1)
+                
+                # Embedding
+                x = x.unsqueeze(-1)  # (batch_size, seq_len, 1)
+                x = self.embedding(x)  # (batch_size, seq_len, embed_dim)
+                
+                # Add positional encoding
+                x = x + self.pos_encoding[:seq_len, :]
+                
+                # Transformer encoding
+                x = self.transformer(x)  # (batch_size, seq_len, embed_dim)
+                
+                # Global average pooling
+                x = x.mean(dim=1)  # (batch_size, embed_dim)
+                
+                # Classification
+                return self.classifier(x)
+        
+        config = architecture.get("config", {})
+        return TransformerVMClassifier(config)
+
+    @classmethod
     def _load_pytorch(cls, file_path: Path, data: Dict) -> "MLModel":
-        """Load PyTorch model."""
+        """Load PyTorch model with architecture reconstruction."""
+        if not TORCH_AVAILABLE:
+            raise MLError("PyTorch not available for model loading")
+            
         metadata = ModelMetadata.from_dict(data["metadata"])
-
-        # Note: In a real implementation, we would need to reconstruct the model
-        # architecture. For now, we'll create a placeholder.
-        logger.warning("PyTorch model loading requires architecture reconstruction")
-
-        model_wrapper = cls.__new__(cls)
-        model_wrapper.model = None  # Would need architecture
-        model_wrapper.model_id = metadata.model_id
-        model_wrapper.name = metadata.name
-        model_wrapper.version = metadata.version
-        model_wrapper.model_type = metadata.model_type
-        model_wrapper.description = metadata.description
-        model_wrapper.tags = metadata.tags
-        model_wrapper.status = metadata.status
-        model_wrapper.metadata = metadata
-
-        return model_wrapper
+        
+        try:
+            # Get model architecture info from metadata
+            training_config = metadata.training_config
+            architecture = training_config.get("architecture", {})
+            
+            if not architecture:
+                raise MLError("Model architecture not found in metadata")
+            
+            # Reconstruct model architecture
+            model = cls._reconstruct_pytorch_model(architecture)
+            
+            # Load state dict if available
+            if "state_dict_path" in data:
+                state_dict_path = file_path.parent / data["state_dict_path"]
+                if state_dict_path.exists():
+                    state_dict = torch.load(state_dict_path, map_location='cpu')
+                    model.load_state_dict(state_dict)
+                    logger.info(f"Loaded PyTorch model state from {state_dict_path}")
+            elif "model_data" in data:
+                # Direct state dict in data
+                state_dict = data["model_data"]
+                model.load_state_dict(state_dict)
+                logger.info("Loaded PyTorch model state from metadata")
+            else:
+                logger.warning("No state dict found, using randomly initialized model")
+            
+            # Set model to evaluation mode
+            model.eval()
+            
+            model_wrapper = cls.__new__(cls)
+            model_wrapper.model = model
+            model_wrapper.model_id = metadata.model_id
+            model_wrapper.name = metadata.name
+            model_wrapper.version = metadata.version
+            model_wrapper.model_type = metadata.model_type
+            model_wrapper.description = metadata.description
+            model_wrapper.tags = metadata.tags
+            model_wrapper.status = metadata.status
+            model_wrapper.metadata = metadata
+            
+            logger.info(f"Successfully loaded PyTorch model: {metadata.name} v{metadata.version}")
+            return model_wrapper
+            
+        except Exception as e:
+            logger.error(f"Failed to load PyTorch model: {e}")
+            raise MLError(f"PyTorch model loading failed: {e}") from e
 
     @classmethod
     def _load_sklearn_joblib(cls, file_path: Path, data: Dict) -> "MLModel":

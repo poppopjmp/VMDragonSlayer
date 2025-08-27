@@ -29,7 +29,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
 import java.util.Map;
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.api.AnalysisResult;
 import vmdragonslayer.api.AnalysisUpdate;
 import vmdragonslayer.api.AIDecision;
@@ -42,7 +42,7 @@ import vmdragonslayer.api.AIDecision;
  * Provides interactive result exploration and confidence-based highlighting.
  */
 public class ResultsViewer extends JPanel {
-    private final AgenticAPIClient apiClient;
+    private final VMDSAPIClient apiClient;
     
     // Results Display Components
     private JTree resultsTree;
@@ -87,7 +87,7 @@ public class ResultsViewer extends JPanel {
     // Current Results
     private AnalysisResult currentResults;
     
-    public ResultsViewer(AgenticAPIClient apiClient) {
+    public ResultsViewer(VMDSAPIClient apiClient) {
         this.apiClient = apiClient;
         initializeComponents();
         setupLayout();

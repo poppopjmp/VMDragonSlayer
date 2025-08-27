@@ -163,7 +163,8 @@ exclude = ["tests*", "docs*", "plugins*"]
 "*" = [
     "data/models/pretrained/*.pkl",
     "data/models/pretrained/*.pt",
-    "data/models/pretrained/*.pth"
+    "data/models/pretrained/*.pth",
+    "**/*.security_backup"
 ]
 
 # Black configuration

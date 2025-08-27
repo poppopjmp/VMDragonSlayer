@@ -131,7 +131,6 @@ class SimilarityClassifier:
         # Find pattern matches
         matches = []
         try:
-            # This would be async in real implementation
             import asyncio
 
             if asyncio.iscoroutinefunction(self.pattern_database.match_patterns):

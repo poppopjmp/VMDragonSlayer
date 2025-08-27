@@ -610,9 +610,17 @@ class MLPipeline:
                 X_processed = self.scaler.transform(X_processed)
 
             # Load and use model for prediction
-            # Note: In a real implementation, this would load the actual model
-            # For now, we'll use a simple heuristic
-            predictions = self._predict_with_heuristics(X_processed)
+            model_metadata = self.model_registry.get_model(model_name)
+            if not model_metadata:
+                raise MLError(f"Model not found: {model_name}")
+            
+            # Load the actual model
+            loaded_model = self._load_model_for_inference(model_metadata)
+            if not loaded_model:
+                logger.warning(f"Failed to load model {model_name}, using fallback heuristics")
+                predictions = self._predict_with_heuristics(X_processed)
+            else:
+                predictions = self._predict_with_loaded_model(loaded_model, X_processed)
 
             return {
                 "success": True,
@@ -757,6 +765,87 @@ class MLPipeline:
             }
 
         return {"error": "No suitable model found"}
+
+    def _load_model_for_inference(self, model_metadata) -> Optional[Any]:
+        """Load model for inference from metadata."""
+        try:
+            # Get model file path
+            model_path = model_metadata.file_path
+            if not model_path or not Path(model_path).exists():
+                logger.error(f"Model file not found: {model_path}")
+                return None
+            
+            # Use MLModel.load to load the model
+            from .model import MLModel
+            ml_model = MLModel.load(model_path)
+            
+            if ml_model.model is None:
+                logger.error(f"Model object is None after loading: {model_path}")
+                return None
+            
+            logger.info(f"Successfully loaded model: {ml_model.name} v{ml_model.version}")
+            return ml_model
+            
+        except Exception as e:
+            logger.error(f"Failed to load model for inference: {e}")
+            return None
+    
+    def _predict_with_loaded_model(self, ml_model, features: np.ndarray) -> List[str]:
+        """Make predictions using loaded model."""
+        try:
+            # Make predictions using the MLModel wrapper
+            predictions = ml_model.predict(features)
+            
+            # Convert predictions to class names if needed
+            if hasattr(predictions, 'numpy'):
+                predictions = predictions.numpy()
+            
+            if hasattr(predictions, 'tolist'):
+                predictions = predictions.tolist()
+            
+            # Convert numeric predictions to class names
+            class_names = self._get_class_names(ml_model)
+            
+            if isinstance(predictions[0], (int, float)):
+                # Numeric predictions, convert to class names
+                result = []
+                for pred in predictions:
+                    if isinstance(pred, float):
+                        pred = int(round(pred))
+                    if 0 <= pred < len(class_names):
+                        result.append(class_names[pred])
+                    else:
+                        result.append("VM_UNKNOWN")
+                return result
+            else:
+                # String predictions, return as-is
+                return [str(p) for p in predictions]
+                
+        except Exception as e:
+            logger.error(f"Prediction with loaded model failed: {e}")
+            # Fallback to heuristics
+            return self._predict_with_heuristics(features)
+    
+    def _get_class_names(self, ml_model) -> List[str]:
+        """Get class names for model predictions."""
+        # Try to get class names from model metadata
+        if hasattr(ml_model, 'metadata') and ml_model.metadata:
+            training_config = ml_model.metadata.training_config
+            if isinstance(training_config, dict) and 'class_names' in training_config:
+                return training_config['class_names']
+        
+        # Try to get from sklearn model
+        if hasattr(ml_model.model, 'classes_'):
+            return ml_model.model.classes_.tolist()
+        
+        # Default VM operation class names
+        return [
+            "VM_ADD", "VM_SUB", "VM_MUL", "VM_DIV",
+            "VM_XOR", "VM_AND", "VM_OR", "VM_NOT",
+            "VM_LOAD", "VM_STORE", "VM_PUSH", "VM_POP",
+            "VM_JUMP", "VM_CALL", "VM_RET", "VM_CMP",
+            "VM_UNKNOWN"
+        ]
 
     def _predict_with_heuristics(self, features: np.ndarray) -> List[str]:
         """Simple heuristic-based prediction as fallback."""

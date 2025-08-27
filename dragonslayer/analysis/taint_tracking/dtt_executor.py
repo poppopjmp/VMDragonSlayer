@@ -239,8 +239,14 @@ class OptimizedParallelDTTExecutor:
 
             # Check if DTT tools are available
             if not Path(self.pin_executable).exists():
-                # Use mock DTT analysis for testing
-                return self._mock_dtt_analysis(config, task_id, start_time)
+                # Try alternative DTT approaches before falling back to mock
+                alternative_result = self._try_alternative_dtt_analysis(config, task_id, start_time, temp_dir)
+                if alternative_result["success"]:
+                    return alternative_result
+                else:
+                    # Use mock DTT analysis as final fallback
+                    logger.warning("No DTT tools available, using mock analysis")
+                    return self._mock_dtt_analysis(config, task_id, start_time)
 
             # Prepare DTT analysis command
             output_log = temp_dir / f"dtt_analysis_{task_id}.log"
@@ -333,6 +339,444 @@ class OptimizedParallelDTTExecutor:
         finally:
             # Cleanup temporary directory
             self._cleanup_temp_dir(temp_dir)
+
+    def _try_alternative_dtt_analysis(
+        self, config: Dict[str, Any], task_id: int, start_time: float, temp_dir: Path
+    ) -> Dict[str, Any]:
+        """Try alternative DTT analysis methods when Intel Pin is not available."""
+        try:
+            binary_path = config["target"]["binary_path"]
+            
+            # Method 1: Try built-in Python-based taint analysis
+            python_result = self._python_taint_analysis(binary_path, config, task_id, start_time)
+            if python_result["success"]:
+                logger.info(f"Worker {task_id}: Using Python-based taint analysis")
+                return python_result
+            
+            # Method 2: Try using GDB with Python scripting (Linux/Windows)
+            gdb_result = self._gdb_taint_analysis(binary_path, config, task_id, start_time, temp_dir)
+            if gdb_result["success"]:
+                logger.info(f"Worker {task_id}: Using GDB-based taint analysis")
+                return gdb_result
+            
+            # Method 3: Try using WinDbg (Windows only)
+            if hasattr(self, '_is_windows') and self._is_windows():
+                windbg_result = self._windbg_taint_analysis(binary_path, config, task_id, start_time, temp_dir)
+                if windbg_result["success"]:
+                    logger.info(f"Worker {task_id}: Using WinDbg-based taint analysis")
+                    return windbg_result
+            
+            # Method 4: Static analysis-based taint approximation
+            static_result = self._static_taint_approximation(binary_path, config, task_id, start_time)
+            if static_result["success"]:
+                logger.info(f"Worker {task_id}: Using static analysis taint approximation")
+                return static_result
+            
+            return {
+                "sample_id": config.get("sample_id", f"sample_{task_id}"),
+                "success": False,
+                "error": "All alternative DTT methods failed",
+                "analysis_time": time.time() - start_time,
+                "worker_id": task_id,
+            }
+            
+        except Exception as e:
+            logger.error(f"Alternative DTT analysis failed: {e}")
+            return {
+                "sample_id": config.get("sample_id", f"sample_{task_id}"),
+                "success": False,
+                "error": f"Alternative DTT analysis error: {e}",
+                "analysis_time": time.time() - start_time,
+                "worker_id": task_id,
+            }
+    
+    def _python_taint_analysis(
+        self, binary_path: str, config: Dict[str, Any], task_id: int, start_time: float
+    ) -> Dict[str, Any]:
+        """Python-based taint analysis using binary analysis libraries."""
+        try:
+            # Try using capstone for disassembly and basic taint tracking
+            try:
+                import capstone
+                
+                with open(binary_path, 'rb') as f:
+                    binary_data = f.read()
+                
+                # Initialize disassembler based on architecture
+                arch = config.get("target", {}).get("architecture", "x86_64")
+                if arch == "x86_64":
+                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+                elif arch == "x86":
+                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+                else:
+                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+                
+                md.detail = True
+                
+                # Simple taint tracking - look for data movement patterns
+                taint_candidates = []
+                taint_flows = []
+                
+                # Analyze first 64KB or entire file if smaller
+                analyze_size = min(len(binary_data), 65536)
+                base_address = config.get("target", {}).get("base_address", 0x400000)
+                
+                for insn in md.disasm(binary_data[:analyze_size], base_address):
+                    # Look for indirect jumps/calls (potential dispatchers)
+                    if insn.mnemonic in ['jmp', 'call'] and any(op.type == capstone.CS_OP_MEM for op in insn.operands):
+                        taint_candidates.append({
+                            "type": "indirect_jump",
+                            "address": f"0x{insn.address:x}",
+                            "instruction": f"{insn.mnemonic} {insn.op_str}",
+                            "confidence": 0.7,
+                        })
+                    
+                    # Look for data movement that might be VM operations
+                    if insn.mnemonic in ['mov', 'lea', 'xor', 'add', 'sub'] and len(insn.operands) >= 2:
+                        taint_flows.append({
+                            "address": f"0x{insn.address:x}",
+                            "operation": insn.mnemonic,
+                            "operands": insn.op_str,
+                            "size": insn.size,
+                        })
+                
+                analysis_time = time.time() - start_time
+                
+                return {
+                    "sample_id": config.get("sample_id", f"sample_{task_id}"),
+                    "success": True,
+                    "dtt_results": {
+                        "candidates": taint_candidates,
+                        "taint_flows": taint_flows,
+                        "analysis_method": "python_capstone",
+                    },
+                    "analysis_time": analysis_time,
+                    "worker_id": task_id,
+                }
+                
+            except ImportError:
+                logger.debug("Capstone not available for Python taint analysis")
+                return {"success": False, "error": "Capstone not available"}
+                
+        except Exception as e:
+            logger.error(f"Python taint analysis failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _gdb_taint_analysis(
+        self, binary_path: str, config: Dict[str, Any], task_id: int, start_time: float, temp_dir: Path
+    ) -> Dict[str, Any]:
+        """GDB-based taint analysis using Python scripting."""
+        try:
+            import shutil
+            import subprocess
+            
+            # Check if GDB is available
+            gdb_path = shutil.which("gdb")
+            if not gdb_path:
+                return {"success": False, "error": "GDB not found"}
+            
+            # Create GDB script for basic taint tracking
+            gdb_script = temp_dir / f"gdb_taint_{task_id}.py"
+            
+            script_content = '''
+import gdb
+
+class TaintTracker(gdb.Command):
+    def __init__(self):
+        super(TaintTracker, self).__init__("taint_track", gdb.COMMAND_USER)
+        self.taint_flows = []
+        self.candidates = []
+    
+    def invoke(self, arg, from_tty):
+        # Set up breakpoints on interesting instructions
+        try:
+            # Break on indirect jumps
+            gdb.execute("catch exec", to_string=True)
+            
+            # Run the program
+            gdb.execute("run", to_string=True)
+            
+            # Simple execution tracking
+            for i in range(1000):  # Limit iterations
+                try:
+                    # Step instruction
+                    gdb.execute("stepi", to_string=True)
+                    
+                    # Get current instruction
+                    pc = gdb.parse_and_eval("$pc")
+                    instr = gdb.execute("x/i $pc", to_string=True)
+                    
+                    # Check for indirect jumps/calls
+                    if "jmp" in instr and "*" in instr:
+                        self.candidates.append({
+                            "type": "indirect_jump",
+                            "address": str(pc),
+                            "instruction": instr.strip(),
+                            "confidence": 0.6
+                        })
+                    
+                    self.taint_flows.append({
+                        "address": str(pc),
+                        "instruction": instr.strip()
+                    })
+                    
+                except gdb.error:
+                    break
+            
+            # Write results
+            with open("/tmp/gdb_taint_results.txt", "w") as f:
+                f.write(f"CANDIDATES:{len(self.candidates)}\\n")
+                for candidate in self.candidates:
+                    f.write(f"CANDIDATE:{candidate}\\n")
+                f.write(f"FLOWS:{len(self.taint_flows)}\\n")
+                for flow in self.taint_flows:
+                    f.write(f"FLOW:{flow}\\n")
+                    
+        except Exception as e:
+            print(f"GDB taint tracking error: {e}")
+
+TaintTracker()
+'''
+            
+            with open(gdb_script, 'w') as f:
+                f.write(script_content)
+            
+            # Run GDB with the script
+            results_file = temp_dir / f"gdb_results_{task_id}.txt"
+            cmd = [
+                gdb_path,
+                "-batch",
+                "-x", str(gdb_script),
+                "-ex", "taint_track",
+                "-ex", "quit",
+                binary_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,  # 30 second timeout
+                cwd=temp_dir
+            )
+            
+            if result.returncode == 0 and results_file.exists():
+                # Parse results
+                candidates = []
+                taint_flows = []
+                
+                with open(results_file) as f:
+                    for line in f:
+                        if line.startswith("CANDIDATE:"):
+                            # Parse candidate info
+                            candidates.append({
+                                "type": "gdb_indirect_jump",
+                                "confidence": 0.6,
+                                "data": line[10:].strip()
+                            })
+                        elif line.startswith("FLOW:"):
+                            taint_flows.append({
+                                "type": "gdb_instruction",
+                                "data": line[5:].strip()
+                            })
+                
+                analysis_time = time.time() - start_time
+                
+                return {
+                    "sample_id": config.get("sample_id", f"sample_{task_id}"),
+                    "success": True,
+                    "dtt_results": {
+                        "candidates": candidates,
+                        "taint_flows": taint_flows,
+                        "analysis_method": "gdb_python",
+                    },
+                    "analysis_time": analysis_time,
+                    "worker_id": task_id,
+                }
+            
+            return {"success": False, "error": "GDB analysis produced no results"}
+            
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "GDB analysis timed out"}
+        except Exception as e:
+            logger.error(f"GDB taint analysis failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _is_windows(self) -> bool:
+        """Check if running on Windows."""
+        import platform
+        return platform.system() == "Windows"
+    
+    def _windbg_taint_analysis(
+        self, binary_path: str, config: Dict[str, Any], task_id: int, start_time: float, temp_dir: Path
+    ) -> Dict[str, Any]:
+        """WinDbg-based taint analysis (Windows only)."""
+        try:
+            import shutil
+            import subprocess
+            
+            # Check if WinDbg is available
+            windbg_paths = [
+                "cdb.exe",  # Console debugger
+                "windbg.exe",  # GUI debugger
+            ]
+            
+            windbg_path = None
+            for path in windbg_paths:
+                if shutil.which(path):
+                    windbg_path = path
+                    break
+            
+            if not windbg_path:
+                return {"success": False, "error": "WinDbg not found"}
+            
+            # Create WinDbg script for basic execution tracking
+            script_file = temp_dir / f"windbg_script_{task_id}.txt"
+            results_file = temp_dir / f"windbg_results_{task_id}.txt"
+            
+            script_content = f'''
+.logopen "{results_file}"
+bp kernel32!LoadLibraryA
+bp kernel32!GetProcAddress
+g
+!analyze -v
+.dump /ma /u "{temp_dir}\\dump_{task_id}.dmp"
+.logclose
+q
+'''
+            
+            with open(script_file, 'w') as f:
+                f.write(script_content)
+            
+            cmd = [
+                windbg_path,
+                "-c", f"$$<{script_file}",
+                binary_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=temp_dir
+            )
+            
+            if results_file.exists():
+                # Parse WinDbg output for taint information
+                candidates = []
+                taint_flows = []
+                
+                with open(results_file) as f:
+                    content = f.read()
+                    
+                    # Basic parsing for API calls and memory access
+                    if "LoadLibraryA" in content:
+                        candidates.append({
+                            "type": "api_call",
+                            "function": "LoadLibraryA",
+                            "confidence": 0.5
+                        })
+                    
+                    if "GetProcAddress" in content:
+                        candidates.append({
+                            "type": "api_call", 
+                            "function": "GetProcAddress",
+                            "confidence": 0.5
+                        })
+                
+                analysis_time = time.time() - start_time
+                
+                return {
+                    "sample_id": config.get("sample_id", f"sample_{task_id}"),
+                    "success": True,
+                    "dtt_results": {
+                        "candidates": candidates,
+                        "taint_flows": taint_flows,
+                        "analysis_method": "windbg",
+                    },
+                    "analysis_time": analysis_time,
+                    "worker_id": task_id,
+                }
+            
+            return {"success": False, "error": "WinDbg analysis produced no results"}
+            
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "WinDbg analysis timed out"}
+        except Exception as e:
+            logger.error(f"WinDbg taint analysis failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _static_taint_approximation(
+        self, binary_path: str, config: Dict[str, Any], task_id: int, start_time: float
+    ) -> Dict[str, Any]:
+        """Static analysis-based taint approximation."""
+        try:
+            # Use pattern matching to identify likely VM structures
+            with open(binary_path, 'rb') as f:
+                binary_data = f.read()
+            
+            candidates = []
+            taint_flows = []
+            
+            # Look for common VM patterns in binary
+            vm_patterns = [
+                b'\xFF\x24\x85',  # jmp dword ptr [eax*4+offset] - common dispatcher
+                b'\xFF\x14\x85',  # call dword ptr [eax*4+offset]  
+                b'\x8B\x04\x85',  # mov eax, dword ptr [eax*4+offset]
+            ]
+            
+            for pattern in vm_patterns:
+                offset = 0
+                while True:
+                    pos = binary_data.find(pattern, offset)
+                    if pos == -1:
+                        break
+                    
+                    candidates.append({
+                        "type": "static_pattern",
+                        "pattern": pattern.hex(),
+                        "address": f"0x{pos:x}",
+                        "confidence": 0.4
+                    })
+                    
+                    offset = pos + 1
+            
+            # Look for string references that might indicate VM
+            vm_strings = [b"handler", b"dispatch", b"opcode", b"bytecode", b"interpret"]
+            
+            for vm_string in vm_strings:
+                offset = 0
+                while True:
+                    pos = binary_data.find(vm_string, offset)
+                    if pos == -1:
+                        break
+                        
+                    taint_flows.append({
+                        "type": "string_reference",
+                        "string": vm_string.decode('ascii', errors='ignore'),
+                        "address": f"0x{pos:x}",
+                    })
+                    
+                    offset = pos + len(vm_string)
+            
+            analysis_time = time.time() - start_time
+            
+            return {
+                "sample_id": config.get("sample_id", f"sample_{task_id}"),
+                "success": True,
+                "dtt_results": {
+                    "candidates": candidates,
+                    "taint_flows": taint_flows,
+                    "analysis_method": "static_pattern_matching",
+                },
+                "analysis_time": analysis_time,
+                "worker_id": task_id,
+            }
+            
+        except Exception as e:
+            logger.error(f"Static taint approximation failed: {e}")
+            return {"success": False, "error": str(e)}
 
     def _mock_dtt_analysis(
         self, config: Dict[str, Any], task_id: int, start_time: float

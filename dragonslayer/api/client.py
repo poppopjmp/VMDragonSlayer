@@ -318,9 +318,18 @@ class APIClient:
             ) from e
 
     async def _get_async(self, endpoint: str) -> Dict[str, Any]:
-        """Make async GET request"""
+        """Make async GET request with fallback for missing httpx"""
         if not self._use_httpx:
-            raise NotImplementedError("Async requests require httpx")
+            # Fallback to synchronous requests in thread pool
+            import asyncio
+            import concurrent.futures
+            
+            def sync_get():
+                return self._get(endpoint)
+            
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                return await loop.run_in_executor(executor, sync_get)
 
         url = f"{self.base_url}{endpoint}"
 
@@ -338,9 +347,18 @@ class APIClient:
             ) from e
 
     async def _post_async(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Make async POST request"""
+        """Make async POST request with fallback for missing httpx"""
         if not self._use_httpx:
-            raise NotImplementedError("Async requests require httpx")
+            # Fallback to synchronous requests in thread pool
+            import asyncio
+            import concurrent.futures
+            
+            def sync_post():
+                return self._post(endpoint, data)
+            
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                return await loop.run_in_executor(executor, sync_post)
 
         url = f"{self.base_url}{endpoint}"
 
