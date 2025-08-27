@@ -25,16 +25,40 @@ See: `documentation/modules/dragonslayer/core/orchestrator.md` for API and types
 
 ## Files involved
 
-- `dragonslayer/core/orchestrator.py` — Orchestrator, `AnalysisType`, request/result models, async execution.
-- `dragonslayer/analysis/vm_discovery/detector.py` — VM detection primitives.
-- `dragonslayer/analysis/pattern_analysis/recognizer.py` — Pattern recognition.
-- `dragonslayer/analysis/taint_tracking/tracker.py` — Taint propagation.
-- `dragonslayer/analysis/symbolic_execution/executor.py` — Symbolic execution.
-- `dragonslayer/workflows/` — Higher-level workflow helpers (`integration.py`, `manager.py`, `pipeline.py`).
+- **`dragonslayer/unified_analysis.py`** — Main orchestration layer with feature management
+- **`dragonslayer/core/orchestrator.py`** — Core orchestrator with workflow strategies  
+- **`dragonslayer/analysis/pattern_analysis/extended_recognizer.py`** — Extended pattern engine
+- **`dragonslayer/ml/ml_detection.py`** — ML detection with ensemble methods
+- **`dragonslayer/analysis/symbolic_execution/symbolic_engine.py`** — Symbolic execution engine
+- **`dragonslayer/analysis/multi_arch/cross_platform_detector.py`** — Multi-architecture support
+- **`dragonslayer/analysis/anti_evasion/security_extensions.py`** — Security extensions
+- **`dragonslayer/realtime/analysis_engine.py`** — Real-time analysis engine
+- **`dragonslayer/workflows/`** — Higher-level workflow coordination
 
-## Result Contract
+## Enhanced Result Contract
 
-All workflows should conform to `data/schemas/analysis_result_schema.json`. Use `tools/schema_validate.py` during development to catch mismatches.
+Results now include extended metadata and confidence scoring conforming to `data/schemas/analysis_result_schema.json`. Use `tools/schema_validate.py` during development to catch mismatches.
+
+```json
+{
+  "analysis_engines": ["extended_patterns", "ml_detection", "symbolic"],
+  "confidence_scores": {
+    "pattern_analysis": 0.92,
+    "ml_detection": 0.87,
+    "symbolic_validation": 0.95,
+    "overall_confidence": 0.91
+  },
+  "multi_arch_results": {
+    "detected_architectures": ["x86", "x64"],
+    "cross_platform_correlation": true
+  },
+  "security_assessment": {
+    "anti_debugging": true,
+    "evasion_techniques": ["timing_checks", "environment_detection"],
+    "stealth_required": false
+  }
+}
+```
 
 ## Extending Workflows
 

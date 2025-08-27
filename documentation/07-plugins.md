@@ -1,20 +1,55 @@
 # Plugins
 
-VMDragonSlayer integrates with common reverse engineering tools via optional plugins. This page summarizes supported backends, API integration patterns, and how to build/install each plugin.
+VMDragonSlayer integrates with common reverse engineering tools via comprehensive plugins. This page summarizes supported backends, API integration patterns, and how to build/install each plugin.
 
-Supported backends:
+## Supported Platforms
 
-- Ghidra (Java/Kotlin extension)
-- IDA Pro (Python plugin)  
-- Binary Ninja (Python plugin)
+VMDragonSlayer provides full-featured plugins for three major reverse engineering platforms:
 
-Source locations: `plugins/ghidra`, `plugins/idapro`, `plugins/binaryninja`.
+### **Ghidra Plugin** (`plugins/ghidra/`)
+- **Language**: Java with Gradle build system
+- **Features**: 
+  - 5 integrated analysis engines (Hybrid, Parallel, DTT, Symbolic, ML)
+  - AI-driven decision making with confidence scoring
+  - Real-time monitoring and streaming analysis
+  - Native Ghidra UI integration with custom panels
+  - Comprehensive API client integration
+
+### **IDA Pro Plugin** (`plugins/idapro/`)
+- **Language**: Python with IDA Pro API
+- **Features**:
+  - Complete API client integration
+  - Binary transfer protocol for large files
+  - Interactive analysis workflows
+  - Custom IDA UI components and forms
+  - Event-driven analysis callbacks
+  - Seamless integration with VMDragonSlayer server
+
+### **Binary Ninja Plugin** (`plugins/binaryninja/`)
+- **Language**: Python with Binary Ninja API
+- **Features**:
+  - Full UI component suite with dock widgets
+  - Advanced pattern browsing and visualization
+  - VM structure explorer with interactive graphs  
+  - Real-time analysis dashboard
+  - Configuration editor for analysis settings
+  - Results viewer with detailed reporting
+
+## Plugin Architecture
+
+Each plugin implements a consistent architecture with these components:
+
+- **Core Integration**: Direct API client connectivity to VMDragonSlayer server
+- **UI Components**: Platform-native interface elements
+- **Analysis Workflows**: Interactive analysis pipelines
+- **Event Handling**: Real-time analysis progress and results
+- **Configuration Management**: Per-platform settings and preferences
 
 See also: `BUILD_PLUGINS.md` for a full step-by-step build/release guide.
 
-## API Client Usage Examples
+## API Client Integration
 
-All plugins now support API client integration for seamless analysis workflows.
+All plugins leverage the unified API client for seamless analysis workflows.
 
 ### Basic API Client Setup
 

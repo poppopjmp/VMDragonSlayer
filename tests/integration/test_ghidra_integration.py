@@ -196,7 +196,7 @@ class TestGhidraPluginIntegration(unittest.TestCase):
                 for handler in results.get("vm_handlers", []):
                     address = handler["address"]
                     handler_type = handler["type"]
-                    # In real implementation: create bookmark at address
+                    # In create bookmark at address
                     mock_ghidra.println(f"VM Handler at {address}: {handler_type}")
         
         # Test the script concept
