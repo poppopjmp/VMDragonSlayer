@@ -25,7 +25,7 @@ import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
 import vmdragonslayer.VMDragonSlayerPlugin;
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.integration.GhidraIntegration;
 import vmdragonslayer.api.AnalysisRequest;
 import vmdragonslayer.api.AnalysisResult;
@@ -51,7 +51,7 @@ import java.util.concurrent.CompletableFuture;
 public class VMDragonSlayerProvider extends ComponentProviderAdapter {
     
     private final VMDragonSlayerPlugin plugin;
-    private final AgenticAPIClient apiClient;
+    private final VMDSAPIClient apiClient;
     
     // UI Components
     private JPanel mainPanel;
@@ -77,7 +77,7 @@ public class VMDragonSlayerProvider extends ComponentProviderAdapter {
     private JLabel statusLabel;
     private JProgressBar analysisProgressBar;
     
-    public VMDragonSlayerProvider(VMDragonSlayerPlugin plugin, AgenticAPIClient apiClient) {
+    public VMDragonSlayerProvider(VMDragonSlayerPlugin plugin, VMDSAPIClient apiClient) {
         super(plugin.getTool(), "VMDragonSlayer", plugin.getName());
         
         this.plugin = plugin;
@@ -454,5 +454,5 @@ public class VMDragonSlayerProvider extends ComponentProviderAdapter {
     // Getters
     public Program getCurrentProgram() { return currentProgram; }
     public VMDragonSlayerPlugin getPlugin() { return plugin; }
-    public AgenticAPIClient getAPIClient() { return apiClient; }
+    public VMDSAPIClient getAPIClient() { return apiClient; }
 }

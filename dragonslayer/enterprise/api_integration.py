@@ -462,19 +462,301 @@ class GraphQLResolver:
             logger.warning("GraphQL not available - install graphene")
             return
 
+        class AnalysisResultType(graphene.ObjectType):
+            """GraphQL type for analysis results"""
+            id = graphene.String()
+            sample_id = graphene.String()
+            vm_type = graphene.String()
+            confidence = graphene.Float()
+            analysis_time = graphene.Float()
+            created_at = graphene.String()
+            results = graphene.String()  # JSON string
+            
+        class ThreatIndicatorType(graphene.ObjectType):
+            """GraphQL type for threat indicators"""
+            id = graphene.String()
+            indicator_type = graphene.String()
+            value = graphene.String()
+            confidence = graphene.Float()
+            severity = graphene.String()
+            first_seen = graphene.String()
+            last_seen = graphene.String()
+            tags = graphene.List(graphene.String)
+
         class AnalysisQuery(graphene.ObjectType):
-            analysis_results = graphene.List(graphene.String)
-            threat_indicators = graphene.List(graphene.String)
+            analysis_results = graphene.List(
+                AnalysisResultType,
+                sample_id=graphene.String(),
+                vm_type=graphene.String(),
+                limit=graphene.Int(default_value=100)
+            )
+            threat_indicators = graphene.List(
+                ThreatIndicatorType,
+                indicator_type=graphene.String(),
+                severity=graphene.String(),
+                limit=graphene.Int(default_value=100)
+            )
+            
+            analysis_result = graphene.Field(
+                AnalysisResultType,
+                id=graphene.String(required=True)
+            )
+            
+            threat_indicator = graphene.Field(
+                ThreatIndicatorType,
+                id=graphene.String(required=True)
+            )
 
-            def resolve_analysis_results(self, info):
-                # In a real implementation, this would query the database
-                return ["result1", "result2", "result3"]
+            def resolve_analysis_results(self, info, sample_id=None, vm_type=None, limit=100):
+                """Resolve analysis results from database"""
+                try:
+                    # Get database connection
+                    db_conn = self._get_database_connection()
+                    if not db_conn:
+                        logger.error("Database connection not available")
+                        return []
+                    
+                    # Build query
+                    query = "SELECT id, sample_id, vm_type, confidence, analysis_time, created_at, results FROM analysis_results WHERE 1=1"
+                    params = []
+                    
+                    if sample_id:
+                        query += " AND sample_id = ?"
+                        params.append(sample_id)
+                    
+                    if vm_type:
+                        query += " AND vm_type = ?"
+                        params.append(vm_type)
+                    
+                    query += " ORDER BY created_at DESC LIMIT ?"
+                    params.append(limit)
+                    
+                    cursor = db_conn.execute(query, params)
+                    rows = cursor.fetchall()
+                    
+                    results = []
+                    for row in rows:
+                        results.append(AnalysisResultType(
+                            id=row[0],
+                            sample_id=row[1], 
+                            vm_type=row[2],
+                            confidence=row[3],
+                            analysis_time=row[4],
+                            created_at=row[5],
+                            results=row[6]
+                        ))
+                    
+                    return results
+                    
+                except Exception as e:
+                    logger.error(f"Failed to resolve analysis results: {e}")
+                    return []
 
-            def resolve_threat_indicators(self, info):
-                # In a real implementation, this would query threat data
-                return ["indicator1", "indicator2"]
+            def resolve_threat_indicators(self, info, indicator_type=None, severity=None, limit=100):
+                """Resolve threat indicators from database"""
+                try:
+                    # Get database connection
+                    db_conn = self._get_database_connection()
+                    if not db_conn:
+                        logger.error("Database connection not available")
+                        return []
+                    
+                    # Build query
+                    query = "SELECT id, indicator_type, value, confidence, severity, first_seen, last_seen, tags FROM threat_indicators WHERE 1=1"
+                    params = []
+                    
+                    if indicator_type:
+                        query += " AND indicator_type = ?"
+                        params.append(indicator_type)
+                    
+                    if severity:
+                        query += " AND severity = ?"
+                        params.append(severity)
+                    
+                    query += " ORDER BY last_seen DESC LIMIT ?"
+                    params.append(limit)
+                    
+                    cursor = db_conn.execute(query, params)
+                    rows = cursor.fetchall()
+                    
+                    results = []
+                    for row in rows:
+                        # Parse tags JSON
+                        tags = []
+                        try:
+                            if row[7]:
+                                import json
+                                tags = json.loads(row[7])
+                        except:
+                            pass
+                            
+                        results.append(ThreatIndicatorType(
+                            id=row[0],
+                            indicator_type=row[1],
+                            value=row[2],
+                            confidence=row[3],
+                            severity=row[4],
+                            first_seen=row[5],
+                            last_seen=row[6],
+                            tags=tags
+                        ))
+                    
+                    return results
+                    
+                except Exception as e:
+                    logger.error(f"Failed to resolve threat indicators: {e}")
+                    return []
+            
+            def resolve_analysis_result(self, info, id):
+                """Resolve single analysis result by ID"""
+                try:
+                    db_conn = self._get_database_connection()
+                    if not db_conn:
+                        return None
+                    
+                    cursor = db_conn.execute(
+                        "SELECT id, sample_id, vm_type, confidence, analysis_time, created_at, results FROM analysis_results WHERE id = ?",
+                        (id,)
+                    )
+                    row = cursor.fetchone()
+                    
+                    if row:
+                        return AnalysisResultType(
+                            id=row[0],
+                            sample_id=row[1],
+                            vm_type=row[2], 
+                            confidence=row[3],
+                            analysis_time=row[4],
+                            created_at=row[5],
+                            results=row[6]
+                        )
+                    return None
+                    
+                except Exception as e:
+                    logger.error(f"Failed to resolve analysis result {id}: {e}")
+                    return None
+            
+            def resolve_threat_indicator(self, info, id):
+                """Resolve single threat indicator by ID"""
+                try:
+                    db_conn = self._get_database_connection()
+                    if not db_conn:
+                        return None
+                    
+                    cursor = db_conn.execute(
+                        "SELECT id, indicator_type, value, confidence, severity, first_seen, last_seen, tags FROM threat_indicators WHERE id = ?",
+                        (id,)
+                    )
+                    row = cursor.fetchone()
+                    
+                    if row:
+                        # Parse tags JSON
+                        tags = []
+                        try:
+                            if row[7]:
+                                import json
+                                tags = json.loads(row[7])
+                        except:
+                            pass
+                            
+                        return ThreatIndicatorType(
+                            id=row[0],
+                            indicator_type=row[1],
+                            value=row[2],
+                            confidence=row[3],
+                            severity=row[4],
+                            first_seen=row[5],
+                            last_seen=row[6],
+                            tags=tags
+                        )
+                    return None
+                    
+                except Exception as e:
+                    logger.error(f"Failed to resolve threat indicator {id}: {e}")
+                    return None
 
         self.schema = graphene.Schema(query=AnalysisQuery)
+        
+    def _get_database_connection(self):
+        """Get database connection for GraphQL resolvers"""
+        try:
+            if hasattr(self, '_db_connection') and self._db_connection:
+                return self._db_connection
+            
+            # Try to get database path from config
+            from ..core.config import VMDragonSlayerConfig
+            config = VMDragonSlayerConfig.get_instance()
+            
+            db_path = getattr(config, 'database_path', None)
+            if not db_path:
+                # Use default database path
+                from pathlib import Path
+                db_path = Path.home() / ".vmdragonslayer" / "analysis_results.db"
+            
+            # Create database and tables if they don't exist
+            self._ensure_database_schema(db_path)
+            
+            import sqlite3
+            self._db_connection = sqlite3.connect(str(db_path), check_same_thread=False)
+            return self._db_connection
+            
+        except Exception as e:
+            logger.error(f"Failed to get database connection: {e}")
+            return None
+    
+    def _ensure_database_schema(self, db_path):
+        """Ensure database schema exists"""
+        try:
+            import sqlite3
+            from pathlib import Path
+            
+            # Create directory if it doesn't exist
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            conn = sqlite3.connect(str(db_path))
+            
+            # Create analysis_results table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS analysis_results (
+                    id TEXT PRIMARY KEY,
+                    sample_id TEXT NOT NULL,
+                    vm_type TEXT,
+                    confidence REAL,
+                    analysis_time REAL,
+                    created_at TEXT NOT NULL,
+                    results TEXT
+                )
+            ''')
+            
+            # Create threat_indicators table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS threat_indicators (
+                    id TEXT PRIMARY KEY,
+                    indicator_type TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    confidence REAL,
+                    severity TEXT,
+                    first_seen TEXT,
+                    last_seen TEXT,
+                    tags TEXT
+                )
+            ''')
+            
+            # Create indexes for better performance
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_analysis_sample_id ON analysis_results(sample_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_analysis_vm_type ON analysis_results(vm_type)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_analysis_created_at ON analysis_results(created_at)')
+            
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_threat_type ON threat_indicators(indicator_type)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_threat_severity ON threat_indicators(severity)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_threat_last_seen ON threat_indicators(last_seen)')
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            logger.error(f"Failed to ensure database schema: {e}")
+            raise
 
 
 class IntegrationAPISystem:

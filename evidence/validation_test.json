@@ -1,0 +1,13 @@
+{
+  "validated": [
+    {
+      "file": "data\\patterns\\pattern_database.json",
+      "schema": "https://vmdragonslayer.com/schemas/pattern_database.json"
+    },
+    {
+      "file": "data\\patterns\\pattern_database_dev.json",
+      "schema": "https://vmdragonslayer.com/schemas/pattern_database.json"
+    }
+  ],
+  "errors": []
+}

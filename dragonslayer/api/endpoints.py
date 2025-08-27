@@ -18,11 +18,26 @@
 API Endpoints
 ============
 
-Endpoint definitions and handlers for the VMDragonSlayer REST API.
+Single source of truth for REST and WebSocket endpoint paths, plus a light
+registry used to generate OpenAPI. Import the PATH_* constants from here in
+both server and client code to avoid drift.
 """
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+# Path constants (used by server, Python client, and external plugins)
+PATH_ROOT = "/"
+PATH_HEALTH = "/health"
+PATH_STATUS = "/status"
+PATH_ANALYZE = "/analyze"
+PATH_UPLOAD_ANALYZE = "/upload-analyze"
+PATH_ANALYSIS_TYPES = "/analysis-types"
+PATH_METRICS = "/metrics"
+PATH_WS = "/ws"
+
+# Reserved for future use; guarded behind feature flags in plugins
+PATH_CONTEXT = "/context"
 
 
 @dataclass
@@ -48,8 +63,8 @@ class EndpointRegistry:
         """Register all API endpoints"""
 
         # Analysis endpoints
-        self.endpoints["/analyze"] = Endpoint(
-            path="/analyze",
+        self.endpoints[PATH_ANALYZE] = Endpoint(
+            path=PATH_ANALYZE,
             method="POST",
             handler="analyze_binary",
             description="Analyze binary data for VM patterns",
@@ -75,8 +90,8 @@ class EndpointRegistry:
             },
         )
 
-        self.endpoints["/upload-analyze"] = Endpoint(
-            path="/upload-analyze",
+        self.endpoints[PATH_UPLOAD_ANALYZE] = Endpoint(
+            path=PATH_UPLOAD_ANALYZE,
             method="POST",
             handler="upload_and_analyze",
             description="Upload and analyze binary file",
@@ -96,8 +111,8 @@ class EndpointRegistry:
         )
 
         # Status and information endpoints
-        self.endpoints["/status"] = Endpoint(
-            path="/status",
+        self.endpoints[PATH_STATUS] = Endpoint(
+            path=PATH_STATUS,
             method="GET",
             handler="get_status",
             description="Get service status information",
@@ -105,8 +120,8 @@ class EndpointRegistry:
             responses={200: {"description": "Status information"}},
         )
 
-        self.endpoints["/health"] = Endpoint(
-            path="/health",
+        self.endpoints[PATH_HEALTH] = Endpoint(
+            path=PATH_HEALTH,
             method="GET",
             handler="health_check",
             description="Health check endpoint",
@@ -114,8 +129,8 @@ class EndpointRegistry:
             responses={200: {"description": "Service is healthy"}},
         )
 
-        self.endpoints["/metrics"] = Endpoint(
-            path="/metrics",
+        self.endpoints[PATH_METRICS] = Endpoint(
+            path=PATH_METRICS,
             method="GET",
             handler="get_metrics",
             description="Get performance metrics",
@@ -124,8 +139,8 @@ class EndpointRegistry:
         )
 
         # Configuration endpoints
-        self.endpoints["/analysis-types"] = Endpoint(
-            path="/analysis-types",
+        self.endpoints[PATH_ANALYSIS_TYPES] = Endpoint(
+            path=PATH_ANALYSIS_TYPES,
             method="GET",
             handler="get_analysis_types",
             description="Get supported analysis types",

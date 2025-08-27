@@ -561,12 +561,185 @@ class PatternClassifier:
     ) -> Optional[ClassificationResult]:
         """Classify using PyTorch model."""
         try:
-            # Placeholder for PyTorch classification
-            # In real implementation, this would use a trained model
-            logger.debug("PyTorch classification not implemented - using fallback")
-            return None
+            if not self._pytorch_model:
+                logger.debug("No PyTorch model loaded - using fallback")
+                return None
+            
+            # Extract numerical features for PyTorch model
+            feature_vector = self._extract_pytorch_features(features)
+            
+            if feature_vector is None or len(feature_vector) == 0:
+                logger.warning("No features extracted for PyTorch classification")
+                return None
+            
+            # Convert to tensor
+            import torch
+            import numpy as np
+            
+            if isinstance(feature_vector, list):
+                feature_vector = np.array(feature_vector, dtype=np.float32)
+            
+            # Ensure proper shape (batch_size=1, feature_dims)
+            if feature_vector.ndim == 1:
+                feature_vector = feature_vector.reshape(1, -1)
+            
+            input_tensor = torch.FloatTensor(feature_vector)
+            
+            # Make prediction
+            self._pytorch_model.eval()
+            with torch.no_grad():
+                logits = self._pytorch_model(input_tensor)
+                
+                # Apply softmax to get probabilities
+                probabilities = torch.softmax(logits, dim=-1)
+                predicted_class_idx = torch.argmax(probabilities, dim=-1).item()
+                confidence = probabilities[0, predicted_class_idx].item()
+                
+                # Get class name
+                if hasattr(self, '_pytorch_class_names') and self._pytorch_class_names:
+                    predicted_class = self._pytorch_class_names[predicted_class_idx]
+                else:
+                    predicted_class = f"class_{predicted_class_idx}"
+                
+                # Get all class probabilities
+                prob_dict = {}
+                if hasattr(self, '_pytorch_class_names') and self._pytorch_class_names:
+                    for i, class_name in enumerate(self._pytorch_class_names):
+                        prob_dict[class_name] = probabilities[0, i].item()
+                else:
+                    for i in range(logits.size(-1)):
+                        prob_dict[f"class_{i}"] = probabilities[0, i].item()
+                
+                return ClassificationResult(
+                    predicted_class=predicted_class,
+                    confidence=confidence,
+                    method=ClassificationMethod.ML_PYTORCH,
+                    features=features,
+                    metadata={
+                        "probabilities": prob_dict,
+                        "logits": logits[0].tolist(),
+                        "feature_vector_shape": list(feature_vector.shape),
+                        "model_output_shape": list(logits.shape),
+                    }
+                )
+                
         except Exception as e:
             logger.error(f"PyTorch classification failed: {e}")
+            return None
+
+    def _extract_pytorch_features(self, features: PatternFeatures) -> Optional[List[float]]:
+        """Extract numerical feature vector for PyTorch models."""
+        try:
+            feature_vector = []
+            
+            # Basic pattern statistics
+            if features.bytecode_stats:
+                stats = features.bytecode_stats
+                feature_vector.extend([
+                    stats.get("length", 0),
+                    stats.get("unique_opcodes", 0),
+                    stats.get("entropy", 0.0),
+                    stats.get("compression_ratio", 0.0),
+                    stats.get("complexity_score", 0.0),
+                ])
+            else:
+                feature_vector.extend([0, 0, 0.0, 0.0, 0.0])
+            
+            # N-gram features (top 100 most common patterns)
+            if features.ngram_features:
+                # Flatten n-gram dictionaries and take top features
+                all_ngrams = {}
+                for gram_size, gram_dict in features.ngram_features.items():
+                    for gram, count in gram_dict.items():
+                        all_ngrams[f"{gram_size}_{gram}"] = count
+                
+                # Sort by frequency and take top 100
+                sorted_ngrams = sorted(all_ngrams.items(), key=lambda x: x[1], reverse=True)[:100]
+                ngram_vector = [count for _, count in sorted_ngrams]
+                
+                # Pad or truncate to exactly 100 features
+                if len(ngram_vector) < 100:
+                    ngram_vector.extend([0] * (100 - len(ngram_vector)))
+                else:
+                    ngram_vector = ngram_vector[:100]
+                    
+                feature_vector.extend(ngram_vector)
+            else:
+                feature_vector.extend([0] * 100)
+            
+            # Instruction pattern features
+            if features.instruction_patterns:
+                patterns = features.instruction_patterns
+                feature_vector.extend([
+                    patterns.get("push_sequences", 0),
+                    patterns.get("pop_sequences", 0),
+                    patterns.get("call_patterns", 0),
+                    patterns.get("jump_patterns", 0),
+                    patterns.get("conditional_branches", 0),
+                    patterns.get("loop_patterns", 0),
+                    patterns.get("arithmetic_ops", 0),
+                    patterns.get("memory_ops", 0),
+                    patterns.get("stack_ops", 0),
+                    patterns.get("crypto_ops", 0),
+                ])
+            else:
+                feature_vector.extend([0] * 10)
+            
+            # Control flow features
+            if features.control_flow_features:
+                cf = features.control_flow_features
+                feature_vector.extend([
+                    cf.get("basic_block_count", 0),
+                    cf.get("edge_count", 0),
+                    cf.get("cyclomatic_complexity", 0),
+                    cf.get("max_depth", 0),
+                    cf.get("branch_factor", 0.0),
+                    cf.get("loop_count", 0),
+                    cf.get("recursive_calls", 0),
+                ])
+            else:
+                feature_vector.extend([0] * 7)
+            
+            # Handler signature features
+            if features.handler_signatures:
+                # Convert handler signatures to numerical features
+                handler_features = []
+                for signature in features.handler_signatures[:10]:  # Top 10 signatures
+                    handler_features.extend([
+                        signature.get("opcode", 0),
+                        signature.get("operand_count", 0),
+                        signature.get("stack_delta", 0),
+                        signature.get("frequency", 0),
+                    ])
+                
+                # Pad to 40 features (10 handlers * 4 features each)
+                while len(handler_features) < 40:
+                    handler_features.append(0)
+                    
+                feature_vector.extend(handler_features[:40])
+            else:
+                feature_vector.extend([0] * 40)
+            
+            # VM characteristics
+            if hasattr(features, 'vm_characteristics') and features.vm_characteristics:
+                vm_chars = features.vm_characteristics
+                feature_vector.extend([
+                    1 if vm_chars.get("has_dispatcher", False) else 0,
+                    1 if vm_chars.get("has_handler_table", False) else 0,
+                    1 if vm_chars.get("has_opcode_encryption", False) else 0,
+                    1 if vm_chars.get("has_stack_encryption", False) else 0,
+                    1 if vm_chars.get("uses_context_switching", False) else 0,
+                    vm_chars.get("estimated_handlers", 0),
+                    vm_chars.get("protection_level", 0),
+                ])
+            else:
+                feature_vector.extend([0] * 7)
+            
+            logger.debug(f"Extracted {len(feature_vector)} features for PyTorch model")
+            return feature_vector
+            
+        except Exception as e:
+            logger.error(f"Feature extraction for PyTorch failed: {e}")
             return None
 
     def _classify_with_sklearn(

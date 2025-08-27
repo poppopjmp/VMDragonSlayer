@@ -74,6 +74,16 @@ except ImportError:
     HTTPException = Exception
 
 from ..core.api import VMDragonSlayerAPI
+from .endpoints import (
+    PATH_ROOT,
+    PATH_HEALTH,
+    PATH_STATUS,
+    PATH_ANALYZE,
+    PATH_UPLOAD_ANALYZE,
+    PATH_ANALYSIS_TYPES,
+    PATH_METRICS,
+    PATH_WS,
+)
 from ..core.config import get_api_config
 from ..core.exceptions import (
     APIError,
@@ -286,7 +296,7 @@ class APIServer:
     def _setup_routes(self):
         """Setup API routes"""
 
-        @self.app.get("/", response_model=Dict[str, str])
+        @self.app.get(PATH_ROOT, response_model=Dict[str, str])
         async def root():
             """Root endpoint"""
             return {
@@ -296,7 +306,7 @@ class APIServer:
                 "docs": "/docs",
             }
 
-        @self.app.get("/health", response_model=Dict[str, Any])
+        @self.app.get(PATH_HEALTH, response_model=Dict[str, Any])
         async def health_check():
             """Health check endpoint"""
             return {
@@ -305,7 +315,7 @@ class APIServer:
                 "uptime_seconds": time.time() - self.start_time,
             }
 
-        @self.app.get("/status", response_model=StatusResponse)
+        @self.app.get(PATH_STATUS, response_model=StatusResponse)
         async def get_status():
             """Get service status"""
             try:
@@ -330,7 +340,7 @@ class APIServer:
                 return None
             auth_dependency = Depends(_noop)
 
-        @self.app.post("/analyze", response_model=AnalysisResponse)
+        @self.app.post(PATH_ANALYZE, response_model=AnalysisResponse)
         async def analyze_binary(
             request: AnalysisRequest,
             background_tasks: BackgroundTasks,
@@ -401,7 +411,7 @@ class APIServer:
                 self.logger.error(f"Unexpected analysis error: {e}")
                 raise HTTPException(status_code=500, detail="Internal server error") from e
 
-        @self.app.post("/upload-analyze")
+        @self.app.post(PATH_UPLOAD_ANALYZE)
         async def upload_and_analyze(
             file: Annotated[UploadFile, File(...)],
             background_tasks: BackgroundTasks,
@@ -447,7 +457,7 @@ class APIServer:
                 self.logger.error(f"Upload analysis failed: {e}")
                 raise HTTPException(status_code=500, detail="Upload analysis failed") from e
 
-        @self.app.get("/analysis-types")
+        @self.app.get(PATH_ANALYSIS_TYPES)
         async def get_analysis_types():
             """Get supported analysis types"""
             return {
@@ -455,7 +465,7 @@ class APIServer:
                 "workflow_strategies": self.vmds_api.get_supported_workflow_strategies(),
             }
 
-        @self.app.get("/metrics")
+        @self.app.get(PATH_METRICS)
         async def get_metrics():
             """Get performance metrics"""
             try:
@@ -479,7 +489,7 @@ class APIServer:
                 self.logger.error(f"Failed to get metrics: {e}")
                 raise HTTPException(status_code=500, detail="Failed to get metrics") from e
 
-        @self.app.websocket("/ws")
+        @self.app.websocket(PATH_WS)
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint for real-time updates"""
             await self.connection_manager.connect(websocket)

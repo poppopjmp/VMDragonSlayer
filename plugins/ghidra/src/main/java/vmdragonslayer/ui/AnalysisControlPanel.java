@@ -21,7 +21,7 @@ package vmdragonslayer.ui;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.api.AnalysisRequest;
 import vmdragonslayer.api.EngineStatus;
 
@@ -46,7 +46,7 @@ import java.util.List;
 public class AnalysisControlPanel extends JPanel {
     
     private final VMDragonSlayerProvider provider;
-    private final AgenticAPIClient apiClient;
+    private final VMDSAPIClient apiClient;
     
     // UI Components
     private JComboBox<String> analysisTypeCombo;
@@ -66,7 +66,7 @@ public class AnalysisControlPanel extends JPanel {
     private Program currentProgram;
     private JLabel programInfoLabel;
     
-    public AnalysisControlPanel(VMDragonSlayerProvider provider, AgenticAPIClient apiClient) {
+    public AnalysisControlPanel(VMDragonSlayerProvider provider, VMDSAPIClient apiClient) {
         this.provider = provider;
         this.apiClient = apiClient;
         
@@ -365,7 +365,6 @@ public class AnalysisControlPanel extends JPanel {
         if (currentProgram == null) return "";
         
         // Create a simplified binary representation for analysis
-        // In a real implementation, this would extract relevant binary data
         return java.util.Base64.getEncoder().encodeToString(
             ("Program: " + currentProgram.getName() + "\\n" +
              "Format: " + currentProgram.getExecutableFormat() + "\\n" +

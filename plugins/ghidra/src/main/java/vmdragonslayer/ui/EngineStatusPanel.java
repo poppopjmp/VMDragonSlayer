@@ -19,7 +19,7 @@
 package vmdragonslayer.ui;
 
 import ghidra.util.Msg;
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.api.EngineStatus;
 import vmdragonslayer.api.SystemStatistics;
 
@@ -42,7 +42,7 @@ import java.util.Map;
  */
 public class EngineStatusPanel extends JPanel {
     
-    private final AgenticAPIClient apiClient;
+    private final VMDSAPIClient apiClient;
     
     // UI Components
     private JPanel engineGridPanel;
@@ -58,7 +58,7 @@ public class EngineStatusPanel extends JPanel {
     private EngineStatus lastStatus;
     private SystemStatistics lastStats;
     
-    public EngineStatusPanel(AgenticAPIClient apiClient) {
+    public EngineStatusPanel(VMDSAPIClient apiClient) {
         this.apiClient = apiClient;
         this.engineCards = new HashMap<>();
         

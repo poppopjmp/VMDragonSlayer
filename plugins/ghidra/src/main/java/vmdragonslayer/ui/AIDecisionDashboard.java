@@ -26,7 +26,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.List;
 import java.util.Map;
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.api.AIDecision;
 import vmdragonslayer.api.AnalysisUpdate;
 import vmdragonslayer.api.AgentDecisionHistory;
@@ -40,7 +40,7 @@ import vmdragonslayer.api.SystemStats;
  * and manual intervention controls.
  */
 public class AIDecisionDashboard extends JPanel {
-    private final AgenticAPIClient apiClient;
+    private final VMDSAPIClient apiClient;
     private Timer refreshTimer;
     
     // Decision History Components
@@ -71,7 +71,7 @@ public class AIDecisionDashboard extends JPanel {
     private JPanel confidenceChartPanel;
     private JPanel learningTrendPanel;
     
-    public AIDecisionDashboard(AgenticAPIClient apiClient) {
+    public AIDecisionDashboard(VMDSAPIClient apiClient) {
         this.apiClient = apiClient;
         initializeComponents();
         setupLayout();

@@ -26,7 +26,7 @@ import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
-import vmdragonslayer.api.AgenticAPIClient;
+import vmdragonslayer.api.VMDSAPIClient;
 import vmdragonslayer.ui.VMDragonSlayerProvider;
 import vmdragonslayer.ui.EngineStatusPanel;
 import vmdragonslayer.ui.AIDecisionDashboard;
@@ -61,7 +61,7 @@ public class VMDragonSlayerPlugin extends ProgramPlugin {
     private static final String AUTH_TOKEN = "vmdragonslayer-demo-token";
     
     // Core components
-    private AgenticAPIClient apiClient;
+    private VMDSAPIClient apiClient;
     private VMDragonSlayerProvider mainProvider;
     private EngineStatusPanel engineStatusPanel;
     private AIDecisionDashboard aiDashboard;
@@ -79,7 +79,7 @@ public class VMDragonSlayerPlugin extends ProgramPlugin {
         Msg.info(this, "Initializing VMDragonSlayer Plugin with Agentic AI...");
         
         // Initialize API client
-        this.apiClient = new AgenticAPIClient(API_BASE_URL, AUTH_TOKEN);
+        this.apiClient = new VMDSAPIClient(API_BASE_URL, AUTH_TOKEN);
         
         // Create main UI provider
         this.mainProvider = new VMDragonSlayerProvider(this, apiClient);
@@ -245,7 +245,7 @@ public class VMDragonSlayerPlugin extends ProgramPlugin {
     }
     
     // Getters for UI components
-    public AgenticAPIClient getAPIClient() {
+    public VMDSAPIClient getAPIClient() {
         return apiClient;
     }
     
