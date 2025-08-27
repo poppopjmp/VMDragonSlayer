@@ -24,6 +24,7 @@ Provides comprehensive compliance and regulatory frameworks including:
     - ISO27001 security management
     - GDPR data protection compliance
     - HIPAA healthcare compliance
+	- OSHA safety compliance
     - PCI DSS payment card security
     - NIST Cybersecurity Framework
     - Automated audit trails and reporting
@@ -88,6 +89,7 @@ class ComplianceFramework(Enum):
     ISO27001 = "iso27001"
     GDPR = "gdpr"
     HIPAA = "hipaa"
+	OSHA = "osha"
     PCI_DSS = "pci_dss"
     NIST_CSF = "nist_csf"
     COBIT = "cobit"
@@ -384,6 +386,9 @@ class ComplianceManager:
 
         # HIPAA requirements
         self._add_hipaa_requirements()
+		
+		# OSHA requirements
+		self._add_osha_requirements()
 
         logger.info(f"Loaded {len(self.requirements)} compliance requirements")
 
@@ -512,6 +517,46 @@ class ComplianceManager:
                 status=ComplianceStatus.UNDER_REVIEW,
             )
             self.requirements[f"GDPR_{req['control_id']}"] = requirement
+			
+	def add_osha_requirements(self):
+		"""Add OSHA compliance requirements"""
+		osha_requirements = [
+			{
+				"control_id": "1910.132",
+				"title": "Personal Protective Equipment",
+				"description": "Assess workplace hazards and provide appropriate personal protective equipment",
+				"severity": "HIGH",
+			},
+			{
+				"control_id": "1910.178",
+				"title": "Powered Industrial Trucks",
+				"description": "Implement procedures for operator training and safe use",
+				"severity": "MEDIUM",
+			},
+			{
+				"control_id": "1910.1200",
+				"title": "Hazard Communication",
+				"description": "Implement a hazard communication program including training and labeling",
+				"severity": "HIGH",
+			},
+			{
+				"control_id": "1910.147",
+				"title": "Lockout/Tagout",
+				"description": "Implement procedures to control hazardous energy during maintenance",
+				"severity": "HIGH",
+			},
+		]
+
+		for req in osha_requirements:
+			requirement = ComplianceRequirement(
+				framework=ComplianceFramework.OSHA,
+				control_id=req["control_id"],
+				title=req["title"],
+				description=req["description"],
+				severity=req["severity"],
+				status=ComplianceStatus.UNDER_REVIEW,
+			)
+			self.requirements[f"OSHA_{req['control_id']}"] = requirement
 
     def _add_hipaa_requirements(self):
         """Add HIPAA compliance requirements"""
