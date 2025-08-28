@@ -1,5 +1,5 @@
 # VMDragonSlayer
-
+Project will be puclic by end-August
 **Advanced Virtual Machine Detection and Analysis Framework**
 
 VMDragonSlayer is a comprehensive framework for analyzing binaries protected by Virtual Machine (VM) based protectors such as VMProtect 2.x/3.x, Themida, and custom malware VMs. The framework combines multiple analysis engines including Dynamic Taint Tracking (DTT), Symbolic Execution (SE), Pattern Classification, and Machine Learning to automate the reverse engineering process.
