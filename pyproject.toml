@@ -9,10 +9,10 @@ description = "Advanced VM detection and analysis library for binary reverse eng
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
 authors = [
-    {name = "van1sh", email = "contact@vmdragonslayer.dev"}
+    {name = "van1sh", email = "contact@vmdragonslayer.com"}
 ]
 maintainers = [
-    {name = "van1sh", email = "contact@vmdragonslayer.dev"}
+    {name = "van1sh", email = "contact@vmdragonslayer.com"}
 ]
 keywords = [
     "reverse-engineering",
