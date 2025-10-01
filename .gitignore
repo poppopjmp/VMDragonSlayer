@@ -20,7 +20,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+note/
 # PyInstaller
 *.manifest
 *.spec
