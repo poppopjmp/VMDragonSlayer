@@ -352,7 +352,7 @@ Mockups, examples, or references.
 ### Reporting Security Issues
 
 **DO NOT** create public issues for security vulnerabilities. Instead:
-- Email: security@vmdragonslayer.dev
+- Email: security@vmdragonslayer.com
 - Include: Detailed description, reproduction steps, impact assessment
 
 ### Security Review Requirements
@@ -387,7 +387,7 @@ We value all types of contributions:
 
 - **GitHub Discussions**: General questions and discussions
 - **GitHub Issues**: Bug reports and feature requests  
-- **Email**: contribute@vmdragonslayer.dev
+- **Email**: contribute@vmdragonslayer.com
 - **Discord**: [Link when available]
 
 ### Mentorship

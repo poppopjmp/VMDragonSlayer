@@ -1,5 +1,5 @@
 # VMDragonSlayer
-**Project will be public by end-August**
+**Project will be public by mid-October Refactoring In Progress**
 
 **Advanced Virtual Machine Detection and Analysis Framework**
 
@@ -105,11 +105,8 @@ VMDragonSlayer/
 │   ├── core/                      # Core framework components
 │   ├── ml/                        # Machine learning pipeline
 │   ├── analytics/                 # Analysis reporting and metrics
-│   ├── enterprise/                # Enterprise features
 │   ├── gpu/                       # GPU acceleration support
-│   ├── ui/                        # User interface components
 │   ├── utils/                     # Utility functions
-│   └── workflows/                 # Analysis workflow management
 ├── data/                          # Configuration and data files
 │   ├── patterns/                  # Pattern database
 │   ├── models/                    # ML models and metadata
@@ -122,8 +119,8 @@ VMDragonSlayer/
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # Test suite
-├── docs/                          # Documentation
+├── tests/                         # Tests suite
+├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
 
@@ -194,15 +191,6 @@ vmd = result.get("vm_discovery", {})
 print(f"VM detected: {vmd.get('vm_detected', False)}")
 print(f"Handlers found: {len(vmd.get('handlers_found', []))}")
 ```
-
-### Working Examples Available
-
-- `examples/01_basic_usage.py` - Basic framework usage with error handling
-- `examples/02_vmprotect_detection.py` - VMProtect-specific detection
-- `examples/03_configuration.py` - Configuration system usage  
-- `examples/04_batch_analysis.py` - Batch processing multiple files
-- `verify_installation.py` - Complete installation verification
-
 ### Quick Start
 
 ```bash
@@ -210,11 +198,6 @@ print(f"Handlers found: {len(vmd.get('handlers_found', []))}")
 pip install -r requirements.txt
 pip install -e .
 
-# 2. Verify installation
-python verify_installation.py
-
-# 3. Run examples
-python examples/01_basic_usage.py
 ```
 
 ### Core Framework
@@ -230,11 +213,6 @@ pip install -r requirements.txt
 # Install framework in development mode
 pip install -e .
 
-# Verify installation works
-python verify_installation.py
-
-# Run working examples
-python examples/01_basic_usage.py
 ```
 
 ### Installation for Different Hardware
@@ -266,7 +244,6 @@ pip install -r requirements.txt
 # Install framework
 cd dragonslayer
 pip install -e .
-```
 
 ### Plugin Installation
 Choose your preferred disassembler:
@@ -280,18 +257,6 @@ cd plugins/ghidra
 
 # Install to Ghidra
 cp dist/VMDragonSlayer.zip $GHIDRA_INSTALL_DIR/Extensions/
-```
-
-#### IDA Pro Plugin
-```bash
-# Copy plugin to IDA plugins directory
-cp plugins/idapro/vmdragonslayer_ida.py $IDA_INSTALL_DIR/plugins/
-```
-
-#### Binary Ninja Plugin
-```bash
-# Install via Binary Ninja plugin manager or copy manually
-cp -r plugins/binaryninja/ $BN_USER_DIR/plugins/vmdragonslayer/
 ```
 
 ---
@@ -324,36 +289,6 @@ print(f"Analysis Success: {result.get('success', False)}")
 | **Ghidra Plugin** | In Progress | October 2025 | Basic functionality available |
 | **IDA Pro Plugin** | Under Development | November 2025 | Work in progress - not functional |
 | **Binary Ninja Plugin** | Under Development | November 2025 | Work in progress - not functional |
-
-### Current Recommendation
-For immediate use, we recommend using the **Direct API** approach:
-
-```python
-from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
-
-orchestrator = Orchestrator()
-result = orchestrator.analyze_binary("your_binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
-```
-
-### Plugin Installation (When Available)
-Plugin installation instructions will be updated when plugins reach stable status.
-
-### 2. Plugin Usage (Ghidra Example)
-1. Open Ghidra and load your binary
-2. Navigate to `Tools > VMDragonSlayer`
-3. Configure analysis parameters
-4. Run analysis and review results in the plugin interface
-
-### 3. API Server
-```bash
-# Start REST API server
-python -m dragonslayer.api.server
-
-# Submit analysis via API
-curl -X POST "http://localhost:8000/analyze" \
-     -H "Content-Type: application/json" \
-     -d '{"binary_path": "/path/to/binary.exe"}'
-```
 
 ---
 ## Architecture
@@ -399,7 +334,6 @@ The framework includes several proof-of-concept models:
 - **Purpose**: Educational examples and research baselines
 - **Training Data**: Synthetic and limited real-world samples
 
-**Important**: These models are not intended for operational use and should be considered starting points for custom model development.
 
 ---
 ## Configuration
@@ -423,34 +357,6 @@ export VMDS_API_PORT="8000"
 - `data/database_config.json`: Database settings
 - `data/taint_config.properties`: Taint analysis parameters
 - `data/models/model_registry_config.toml`: ML model configuration
-
----
-## Analysis Workflow
-
-### 1. VM Discovery
-- Load binary into analysis framework
-- Perform static analysis to identify potential VM structures
-- Use heuristics to detect dispatcher patterns and handler tables
-
-### 2. Dynamic Analysis
-- Execute binary in controlled environment
-- Track taint propagation through VM handlers
-- Record execution traces and data dependencies
-
-### 3. Pattern Recognition
-- Apply rule-based signatures to identified structures
-- Use ML models to classify handler types
-- Cross-reference with known VM protection patterns
-
-### 4. Symbolic Analysis
-- Model VM state symbolically
-- Explore execution paths systematically
-- Resolve constraints to understand handler logic
-
-### 5. Deobfuscation
-- Map VM opcodes to semantic operations
-- Reconstruct original program logic
-- Generate clean disassembly or source code
 
 ---
 ## Examples
@@ -506,22 +412,6 @@ We welcome contributions! Please see:
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development guidelines
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) - Community standards
 - [SECURITY.md](SECURITY.md) - Security policy
-
-### Development Setup
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Code formatting
-black dragonslayer/
-isort dragonslayer/
-
-# Type checking
-mypy dragonslayer/
-```
 
 ---
 ## License
