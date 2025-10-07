@@ -1,0 +1,355 @@
+"""
+Pattern Database Module
+
+"""
+
+import json
+import logging
+import re
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Any
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+
+class Architecture(Enum):
+    """Supported architectures for patterns."""
+    X86 = "x86"
+    X64 = "x64"
+    ARM = "arm"
+    ARM64 = "arm64"
+    UNKNOWN = "unknown"
+
+
+class HandlerType(Enum):
+    """VM handler categories."""
+    ARITHMETIC = "arithmetic"
+    BITWISE = "bitwise"
+    MEMORY = "memory"
+    CONTROL_FLOW = "control_flow"
+    STACK = "stack"
+    COMPARISON = "comparison"
+    CONVERSION = "conversion"
+    CRYPTO = "crypto"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class Pattern:
+    """
+    Represents a VM handler pattern.
+    
+    """
+    pattern_id: str
+    name: str
+    signature: str
+    architecture: str
+    handler_type: str
+    operation: str
+    confidence: float = 0.9
+    wildcards: bool = True
+    variants: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Validate pattern after initialization."""
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
+        
+        if not self.pattern_id:
+            raise ValueError("Pattern ID cannot be empty")
+        
+        if not self.signature:
+            raise ValueError("Signature cannot be empty")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert pattern to dictionary."""
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Pattern':
+        """Create pattern from dictionary."""
+        return cls(**data)
+    
+    def matches_architecture(self, arch: str) -> bool:
+        """Check if pattern matches given architecture."""
+        return self.architecture.lower() == arch.lower()
+    
+    def matches_handler_type(self, handler_type: str) -> bool:
+        """Check if pattern matches given handler type."""
+        return self.handler_type.lower() == handler_type.lower()
+    
+    def get_signature_bytes(self) -> List[str]:
+        """
+        Parse signature into list of bytes.
+
+        """
+        # Remove spaces and split by common separators
+        sig = self.signature.replace(' ', '')
+        # Split into pairs of hex characters or wildcards
+        bytes_list = []
+        i = 0
+        while i < len(sig):
+            if sig[i:i+2] == '??':
+                bytes_list.append('??')
+                i += 2
+            elif sig[i:i+2].replace('|', '').strip():
+                # Handle pipe separators
+                byte = sig[i:i+2].replace('|', '').strip()
+                if byte:
+                    bytes_list.append(byte)
+                i += 2
+            else:
+                i += 1
+        return bytes_list
+
+
+class PatternDatabase:
+    """
+    Manages a collection of VM handler patterns.
+
+    """
+    
+    def __init__(self, database_path: Optional[Path] = None):
+        """
+        Initialize pattern database.
+        
+        """
+        self.patterns: Dict[str, Pattern] = {}
+        self.database_path = database_path
+        self._index_by_type: Dict[str, Set[str]] = {}
+        self._index_by_arch: Dict[str, Set[str]] = {}
+        self._index_by_operation: Dict[str, Set[str]] = {}
+        
+        if database_path and database_path.exists():
+            self.load(database_path)
+    
+    def add_pattern(self, pattern: Pattern) -> None:
+        """
+        Add a pattern to the database.
+        
+        """
+        if pattern.pattern_id in self.patterns:
+            raise ValueError(f"Pattern ID '{pattern.pattern_id}' already exists")
+        
+        self.patterns[pattern.pattern_id] = pattern
+        self._update_indices(pattern)
+        
+        logger.info(f"Added pattern: {pattern.pattern_id} ({pattern.name})")
+    
+    def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
+        """
+        Retrieve a pattern by ID.
+        
+        """
+        return self.patterns.get(pattern_id)
+    
+    def update_pattern(self, pattern: Pattern) -> None:
+        """
+        Update an existing pattern.
+        
+        """
+        if pattern.pattern_id not in self.patterns:
+            raise KeyError(f"Pattern ID '{pattern.pattern_id}' not found")
+        
+        # Remove old indices
+        old_pattern = self.patterns[pattern.pattern_id]
+        self._remove_from_indices(old_pattern)
+        
+        # Update pattern and indices
+        self.patterns[pattern.pattern_id] = pattern
+        self._update_indices(pattern)
+        
+        logger.info(f"Updated pattern: {pattern.pattern_id}")
+    
+    def delete_pattern(self, pattern_id: str) -> bool:
+        """
+        Delete a pattern from the database.
+        
+        """
+        if pattern_id not in self.patterns:
+            return False
+        
+        pattern = self.patterns[pattern_id]
+        self._remove_from_indices(pattern)
+        del self.patterns[pattern_id]
+        
+        logger.info(f"Deleted pattern: {pattern_id}")
+        return True
+    
+    def search_by_type(self, handler_type: str) -> List[Pattern]:
+        """
+        Find all patterns of a specific handler type.
+        
+        """
+        pattern_ids = self._index_by_type.get(handler_type.lower(), set())
+        return [self.patterns[pid] for pid in pattern_ids]
+    
+    def search_by_architecture(self, architecture: str) -> List[Pattern]:
+        """
+        Find all patterns for a specific architecture.
+        
+        """
+        pattern_ids = self._index_by_arch.get(architecture.lower(), set())
+        return [self.patterns[pid] for pid in pattern_ids]
+    
+    def search_by_operation(self, operation: str) -> List[Pattern]:
+        """
+        Find all patterns for a specific operation.
+        
+        """
+        pattern_ids = self._index_by_operation.get(operation.lower(), set())
+        return [self.patterns[pid] for pid in pattern_ids]
+    
+    def search(self, 
+               handler_type: Optional[str] = None,
+               architecture: Optional[str] = None,
+               operation: Optional[str] = None,
+               min_confidence: float = 0.0) -> List[Pattern]:
+        """
+        Search patterns with multiple filters.
+
+        """
+        # Start with all patterns
+        results = set(self.patterns.keys())
+        
+        # Apply filters
+        if handler_type:
+            results &= self._index_by_type.get(handler_type.lower(), set())
+        
+        if architecture:
+            results &= self._index_by_arch.get(architecture.lower(), set())
+        
+        if operation:
+            results &= self._index_by_operation.get(operation.lower(), set())
+        
+        # Filter by confidence
+        patterns = [self.patterns[pid] for pid in results]
+        if min_confidence > 0.0:
+            patterns = [p for p in patterns if p.confidence >= min_confidence]
+        
+        return patterns
+    
+    def get_all_patterns(self) -> List[Pattern]:
+        """
+        Get all patterns in the database.
+
+        """
+        return list(self.patterns.values())
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """
+        Get database statistics.
+
+        """
+        return {
+            'total_patterns': len(self.patterns),
+            'by_type': {k: len(v) for k, v in self._index_by_type.items()},
+            'by_architecture': {k: len(v) for k, v in self._index_by_arch.items()},
+            'by_operation': {k: len(v) for k, v in self._index_by_operation.items()},
+            'avg_confidence': sum(p.confidence for p in self.patterns.values()) / len(self.patterns) if self.patterns else 0.0
+        }
+    
+    def load(self, path: Path) -> int:
+        """
+        Load patterns from JSON file.
+        
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"Database file not found: {path}")
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Clear existing data
+        self.patterns.clear()
+        self._index_by_type.clear()
+        self._index_by_arch.clear()
+        self._index_by_operation.clear()
+        
+        # Load patterns
+        patterns_data = data.get('patterns', [])
+        for pattern_dict in patterns_data:
+            try:
+                pattern = Pattern.from_dict(pattern_dict)
+                self.add_pattern(pattern)
+            except Exception as e:
+                logger.warning(f"Failed to load pattern {pattern_dict.get('pattern_id', 'unknown')}: {e}")
+        
+        self.database_path = path
+        logger.info(f"Loaded {len(self.patterns)} patterns from {path}")
+        return len(self.patterns)
+    
+    def save(self, path: Optional[Path] = None) -> None:
+        """
+        Save patterns to JSON file.
+        
+        """
+        save_path = path or self.database_path
+        if not save_path:
+            raise ValueError("No path provided for saving database")
+        
+        # Ensure directory exists
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Convert patterns to dict
+        data = {
+            'version': '1.0',
+            'patterns': [p.to_dict() for p in self.patterns.values()]
+        }
+        
+        with open(save_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        
+        logger.info(f"Saved {len(self.patterns)} patterns to {save_path}")
+    
+    def _update_indices(self, pattern: Pattern) -> None:
+        """Update search indices for a pattern."""
+        # Index by type
+        handler_type = pattern.handler_type.lower()
+        if handler_type not in self._index_by_type:
+            self._index_by_type[handler_type] = set()
+        self._index_by_type[handler_type].add(pattern.pattern_id)
+        
+        # Index by architecture
+        arch = pattern.architecture.lower()
+        if arch not in self._index_by_arch:
+            self._index_by_arch[arch] = set()
+        self._index_by_arch[arch].add(pattern.pattern_id)
+        
+        # Index by operation
+        op = pattern.operation.lower()
+        if op not in self._index_by_operation:
+            self._index_by_operation[op] = set()
+        self._index_by_operation[op].add(pattern.pattern_id)
+    
+    def _remove_from_indices(self, pattern: Pattern) -> None:
+        """Remove pattern from search indices."""
+        # Remove from type index
+        handler_type = pattern.handler_type.lower()
+        if handler_type in self._index_by_type:
+            self._index_by_type[handler_type].discard(pattern.pattern_id)
+        
+        # Remove from architecture index
+        arch = pattern.architecture.lower()
+        if arch in self._index_by_arch:
+            self._index_by_arch[arch].discard(pattern.pattern_id)
+        
+        # Remove from operation index
+        op = pattern.operation.lower()
+        if op in self._index_by_operation:
+            self._index_by_operation[op].discard(pattern.pattern_id)
+    
+    def __len__(self) -> int:
+        """Return number of patterns in database."""
+        return len(self.patterns)
+    
+    def __contains__(self, pattern_id: str) -> bool:
+        """Check if pattern_id exists in database."""
+        return pattern_id in self.patterns
+    
+    def __iter__(self):
+        """Iterate over all patterns."""
+        return iter(self.patterns.values())
