@@ -1,0 +1,102 @@
+{
+  "version": "1.0",
+  "description": "Themida VM Handler Patterns",
+  "architecture": "x64",
+  "patterns": [
+    {
+      "pattern_id": "themida_add_64_v1",
+      "name": "Themida ADD Handler (x64)",
+      "signature": "48 8B ?? ?? 48 03 ?? ?? 48 89 ?? ??",
+      "architecture": "x64",
+      "handler_type": "arithmetic",
+      "operation": "add",
+      "confidence": 0.93,
+      "wildcards": true,
+      "variants": [
+        "4C 8B ?? ?? 48 03 ?? ?? 48 89 ?? ??",
+        "48 8B ?? ?? ?? ?? ?? 48 03 ?? ?? 48 89 ?? ??"
+      ],
+      "metadata": {
+        "description": "Themida ADD with stack operand fetch",
+        "themida_version": "3.x",
+        "instruction_count": 3
+      }
+    },
+    {
+      "pattern_id": "themida_xor_64_v1",
+      "name": "Themida XOR Handler (x64)",
+      "signature": "48 8B ?? ?? 48 33 ?? ?? 48 89 ?? ??",
+      "architecture": "x64",
+      "handler_type": "bitwise",
+      "operation": "xor",
+      "confidence": 0.94,
+      "wildcards": true,
+      "variants": [
+        "4C 8B ?? ?? 48 33 ?? ?? 48 89 ?? ??",
+        "48 8B ?? ?? ?? ?? ?? 48 33 ?? ?? 48 89 ?? ??"
+      ],
+      "metadata": {
+        "description": "Themida XOR with stack operand fetch",
+        "themida_version": "3.x",
+        "instruction_count": 3
+      }
+    },
+    {
+      "pattern_id": "themida_push_64_v1",
+      "name": "Themida PUSH Handler (x64)",
+      "signature": "48 8B ?? 48 83 ?? ?? 48 89 ?? ??",
+      "architecture": "x64",
+      "handler_type": "stack",
+      "operation": "push",
+      "confidence": 0.91,
+      "wildcards": true,
+      "variants": [
+        "4C 8B ?? 48 83 ?? ?? 48 89 ?? ??",
+        "48 8B ?? ?? 48 83 ?? ?? 48 89 ?? ??"
+      ],
+      "metadata": {
+        "description": "Themida stack push with adjustment",
+        "themida_version": "3.x",
+        "instruction_count": 3
+      }
+    },
+    {
+      "pattern_id": "themida_jmp_64_v1",
+      "name": "Themida JMP Handler (x64)",
+      "signature": "48 8B ?? ?? ?? ?? ?? 48 FF ??",
+      "architecture": "x64",
+      "handler_type": "control_flow",
+      "operation": "jmp",
+      "confidence": 0.87,
+      "wildcards": true,
+      "variants": [
+        "48 8B ?? ?? 48 FF ??",
+        "4C 8B ?? ?? ?? ?? ?? 48 FF ??"
+      ],
+      "metadata": {
+        "description": "Themida indirect jump",
+        "themida_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "themida_call_64_v1",
+      "name": "Themida CALL Handler (x64)",
+      "signature": "48 8D ?? ?? ?? ?? ?? 48 89 ?? ?? 48 83 ?? ?? 48 FF ??",
+      "architecture": "x64",
+      "handler_type": "control_flow",
+      "operation": "call",
+      "confidence": 0.85,
+      "wildcards": true,
+      "variants": [
+        "4C 8D ?? ?? ?? ?? ?? 48 89 ?? ?? 48 83 ?? ?? 48 FF ??",
+        "48 8D ?? ?? 48 89 ?? ?? 48 83 ?? ?? 48 FF ??"
+      ],
+      "metadata": {
+        "description": "Themida call with return address computation",
+        "themida_version": "3.x",
+        "instruction_count": 4
+      }
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+{
+  "version": "1.0",
+  "description": "VMProtect x64 Handler Patterns",
+  "architecture": "x64",
+  "patterns": [
+    {
+      "pattern_id": "vmp_add_64_v1",
+      "name": "VMProtect ADD Handler (x64) - Variant 1",
+      "signature": "48 01 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "arithmetic",
+      "operation": "add",
+      "confidence": 0.95,
+      "wildcards": true,
+      "variants": [
+        "48 03 ?? 48 89 ??",
+        "4C 01 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Standard ADD handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_sub_64_v1",
+      "name": "VMProtect SUB Handler (x64) - Variant 1",
+      "signature": "48 29 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "arithmetic",
+      "operation": "sub",
+      "confidence": 0.94,
+      "wildcards": true,
+      "variants": [
+        "48 2B ?? 48 89 ??",
+        "4C 29 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Standard SUB handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_xor_64_v1",
+      "name": "VMProtect XOR Handler (x64) - Variant 1",
+      "signature": "48 31 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "bitwise",
+      "operation": "xor",
+      "confidence": 0.96,
+      "wildcards": true,
+      "variants": [
+        "48 33 ?? 48 89 ??",
+        "4C 31 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Standard XOR handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_and_64_v1",
+      "name": "VMProtect AND Handler (x64) - Variant 1",
+      "signature": "48 21 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "bitwise",
+      "operation": "and",
+      "confidence": 0.95,
+      "wildcards": true,
+      "variants": [
+        "48 23 ?? 48 89 ??",
+        "4C 21 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Standard AND handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_or_64_v1",
+      "name": "VMProtect OR Handler (x64) - Variant 1",
+      "signature": "48 09 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "bitwise",
+      "operation": "or",
+      "confidence": 0.95,
+      "wildcards": true,
+      "variants": [
+        "48 0B ?? 48 89 ??",
+        "4C 09 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Standard OR handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_shl_64_v1",
+      "name": "VMProtect SHL Handler (x64) - Variant 1",
+      "signature": "48 D3 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "bitwise",
+      "operation": "shl",
+      "confidence": 0.93,
+      "wildcards": true,
+      "variants": [
+        "48 C1 ?? ?? 48 89 ??",
+        "4C D3 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Shift left handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_shr_64_v1",
+      "name": "VMProtect SHR Handler (x64) - Variant 1",
+      "signature": "48 D3 ?? 48 89 ??",
+      "architecture": "x64",
+      "handler_type": "bitwise",
+      "operation": "shr",
+      "confidence": 0.93,
+      "wildcards": true,
+      "variants": [
+        "48 C1 ?? ?? 48 89 ??",
+        "4C D3 ?? 4C 89 ??"
+      ],
+      "metadata": {
+        "description": "Shift right handler with REX prefix",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_mov_64_v1",
+      "name": "VMProtect MOV Handler (x64) - Variant 1",
+      "signature": "48 89 ??",
+      "architecture": "x64",
+      "handler_type": "memory",
+      "operation": "mov",
+      "confidence": 0.92,
+      "wildcards": true,
+      "variants": [
+        "48 8B ??",
+        "4C 89 ??",
+        "4C 8B ??"
+      ],
+      "metadata": {
+        "description": "Register move handler",
+        "vmprotect_version": "3.x",
+        "instruction_count": 1
+      }
+    },
+    {
+      "pattern_id": "vmp_push_64_v1",
+      "name": "VMProtect PUSH Handler (x64) - Variant 1",
+      "signature": "48 89 ?? ?? 48 83 ?? ??",
+      "architecture": "x64",
+      "handler_type": "stack",
+      "operation": "push",
+      "confidence": 0.94,
+      "wildcards": true,
+      "variants": [
+        "4C 89 ?? ?? 48 83 ?? ??",
+        "48 89 ?? ?? ?? ?? ?? 48 83 ?? ??"
+      ],
+      "metadata": {
+        "description": "Stack push handler with manual stack adjustment",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_pop_64_v1",
+      "name": "VMProtect POP Handler (x64) - Variant 1",
+      "signature": "48 8B ?? ?? 48 83 ?? ??",
+      "architecture": "x64",
+      "handler_type": "stack",
+      "operation": "pop",
+      "confidence": 0.94,
+      "wildcards": true,
+      "variants": [
+        "4C 8B ?? ?? 48 83 ?? ??",
+        "48 8B ?? ?? ?? ?? ?? 48 83 ?? ??"
+      ],
+      "metadata": {
+        "description": "Stack pop handler with manual stack adjustment",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_jmp_64_v1",
+      "name": "VMProtect JMP Handler (x64) - Variant 1",
+      "signature": "48 8B ?? ?? 48 FF ??",
+      "architecture": "x64",
+      "handler_type": "control_flow",
+      "operation": "jmp",
+      "confidence": 0.90,
+      "wildcards": true,
+      "variants": [
+        "48 8B ?? ?? ?? ?? ?? 48 FF ??",
+        "4C 8B ?? ?? 48 FF ??"
+      ],
+      "metadata": {
+        "description": "Indirect jump handler",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_jcc_64_v1",
+      "name": "VMProtect JCC Handler (x64) - Variant 1",
+      "signature": "48 85 ?? 0F ?? ?? ?? ?? ??",
+      "architecture": "x64",
+      "handler_type": "control_flow",
+      "operation": "jcc",
+      "confidence": 0.88,
+      "wildcards": true,
+      "variants": [
+        "48 3B ?? 0F ?? ?? ?? ?? ??",
+        "4C 85 ?? 0F ?? ?? ?? ?? ??"
+      ],
+      "metadata": {
+        "description": "Conditional jump handler",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    },
+    {
+      "pattern_id": "vmp_call_64_v1",
+      "name": "VMProtect CALL Handler (x64) - Variant 1",
+      "signature": "48 89 ?? ?? 48 83 ?? ?? 48 FF ??",
+      "architecture": "x64",
+      "handler_type": "control_flow",
+      "operation": "call",
+      "confidence": 0.89,
+      "wildcards": true,
+      "variants": [
+        "4C 89 ?? ?? 48 83 ?? ?? 48 FF ??",
+        "48 89 ?? ?? ?? ?? ?? 48 83 ?? ?? 48 FF ??"
+      ],
+      "metadata": {
+        "description": "Call handler with return address push and jump",
+        "vmprotect_version": "3.x",
+        "instruction_count": 3
+      }
+    },
+    {
+      "pattern_id": "vmp_ret_64_v1",
+      "name": "VMProtect RET Handler (x64) - Variant 1",
+      "signature": "48 8B ?? ?? 48 83 ?? ?? 48 FF ??",
+      "architecture": "x64",
+      "handler_type": "control_flow",
+      "operation": "ret",
+      "confidence": 0.91,
+      "wildcards": true,
+      "variants": [
+        "4C 8B ?? ?? 48 83 ?? ?? 48 FF ??",
+        "48 8B ?? ?? ?? ?? ?? 48 83 ?? ?? 48 FF ??"
+      ],
+      "metadata": {
+        "description": "Return handler with stack pop and jump",
+        "vmprotect_version": "3.x",
+        "instruction_count": 3
+      }
+    },
+    {
+      "pattern_id": "vmp_cmp_64_v1",
+      "name": "VMProtect CMP Handler (x64) - Variant 1",
+      "signature": "48 3B ?? 48 9C",
+      "architecture": "x64",
+      "handler_type": "comparison",
+      "operation": "cmp",
+      "confidence": 0.92,
+      "wildcards": true,
+      "variants": [
+        "48 39 ?? 48 9C",
+        "4C 3B ?? 48 9C"
+      ],
+      "metadata": {
+        "description": "Compare handler with flags capture",
+        "vmprotect_version": "3.x",
+        "instruction_count": 2
+      }
+    }
+  ]
+}

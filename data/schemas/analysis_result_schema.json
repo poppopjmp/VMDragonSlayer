@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Analysis Result Schema",
+  "description": "Schema for VMDragonSlayer analysis results",
+  "type": "object",
+  "required": ["success", "analysis_id", "timestamp", "results"],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "Whether the analysis completed successfully"
+    },
+    "analysis_id": {
+      "type": "string",
+      "description": "Unique identifier for this analysis"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the analysis was performed"
+    },
+    "execution_time": {
+      "type": "number",
+      "description": "Analysis execution time in seconds"
+    },
+    "file_info": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "hash": {
+          "type": "string"
+        }
+      }
+    },
+    "results": {
+      "type": "object",
+      "description": "Analysis results by type"
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if analysis failed"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata"
+    }
+  }
+}

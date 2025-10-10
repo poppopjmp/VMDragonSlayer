@@ -1,0 +1,44 @@
+{
+  "vmprotect_fast": {
+    "name": "VMProtect Fast Analysis",
+    "description": "Quick analysis with minimal optimization for rapid feedback",
+    "trace_depth": 1000,
+    "skip_optimization": true,
+    "enable_symbolic": false,
+    "timeout": 300,
+    "llvm_opt_level": "O0",
+    "validate_output": false
+  },
+  "vmprotect_deep": {
+    "name": "VMProtect Deep Analysis",
+    "description": "Comprehensive analysis with full optimization and validation",
+    "trace_depth": 100000,
+    "skip_optimization": false,
+    "enable_symbolic": true,
+    "timeout": 1800,
+    "llvm_opt_level": "O3",
+    "validate_output": true
+  },
+  "vmprotect_balanced": {
+    "name": "VMProtect Balanced Analysis",
+    "description": "Balance between speed and thoroughness",
+    "trace_depth": 50000,
+    "skip_optimization": false,
+    "enable_symbolic": true,
+    "timeout": 900,
+    "llvm_opt_level": "O2",
+    "validate_output": false
+  },
+  "vmprotect_debug": {
+    "name": "VMProtect Debug Mode",
+    "description": "Extended logging and validation for debugging",
+    "trace_depth": 10000,
+    "skip_optimization": false,
+    "enable_symbolic": true,
+    "timeout": 600,
+    "llvm_opt_level": "O1",
+    "validate_output": true,
+    "debug_mode": true,
+    "save_intermediate_results": true
+  }
+}

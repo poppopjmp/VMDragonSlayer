@@ -1,0 +1,47 @@
+# VMDragonSlayer Development Configuration
+
+logging:
+  level: DEBUG
+  file: logs/vmds_dev.log
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  console: true
+
+analysis:
+  timeout: 600  # 10 minutes
+  max_threads: 4
+  enable_caching: true
+
+pin:
+  path: pin/pin.exe
+  timeout: 300  # 5 minutes
+  ia32_tool: VMDragonTaint.ia32.dll
+  intel64_tool: VMDragonTaint.intel64.dll
+  trace_output_dir: traces/
+
+api:
+  host: 127.0.0.1
+  port: 8000
+  workers: 2
+  enable_cors: true
+  debug: true
+
+vmprotect:
+  trace_depth: 100000
+  enable_symbolic: true
+  llvm_opt_level: O3
+  skip_optimization: false
+  validation_threshold: 0.85
+  confidence_threshold: 0.8
+  max_handler_size: 10000
+
+data:
+  patterns_db: data/patterns/pattern_database_dev.json
+  models_dir: data/models/
+  samples_dir: data/samples/
+  schemas_dir: data/schemas/
+
+paths:
+  workspace_root: .
+  logs_dir: logs/
+  temp_dir: temp/
+  output_dir: output/
