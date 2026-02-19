@@ -278,10 +278,12 @@ class AnalysisPipeline:
             from ..analysis.pattern_analysis.recognizer import PatternRecognizer
 
             # Load pattern database
+            # parents[2] reaches the project root (pipeline.py → core/ → dragonslayer/ → root)
             db = PatternDatabase()
+            project_root = Path(__file__).resolve().parents[2]
             for candidate in [
-                Path(__file__).resolve().parents[1] / "data" / "patterns" / "vmprotect_handlers.json",
-                Path(__file__).resolve().parents[1] / "data" / "patterns" / "themida_patterns.json",
+                project_root / "data" / "patterns" / "vmprotect_handlers.json",
+                project_root / "data" / "patterns" / "themida_patterns.json",
             ]:
                 if candidate.exists():
                     db = PatternDatabase(candidate)
@@ -523,13 +525,49 @@ class AnalysisPipeline:
         binary_data: bytes,
         ctx: Any,
     ) -> StageResult:
-        """Run taint tracking over the binary using VM discovery results."""
+        """Run taint tracking over the binary using VM discovery results.
+
+        The TaintAnalyzer expects lifted instructions, not raw bytes.
+        We lift via InstructionLifter first, using the dispatcher address
+        from vm_discovery when available.
+        """
         t0 = time.monotonic()
         try:
             from ..analysis.taint_tracking.analyzer import TaintAnalyzer
+            from ..analysis.symbolic_execution.lifter import InstructionLifter
+
+            # Determine entry point from vm_discovery
+            vm_info = ctx.shared_data.get("vm_discovery", {})
+            dispatchers = vm_info.get("dispatchers", [])
+            entry = dispatchers[0] if dispatchers else 0
+
+            # Lift instructions from binary data
+            lifter = InstructionLifter()
+            instructions = lifter.lift(binary_data, base_address=entry)
+
+            if not instructions:
+                return StageResult(
+                    stage="taint_analysis",
+                    success=True,
+                    data={"skipped": True, "reason": "No instructions lifted from binary"},
+                    duration=time.monotonic() - t0,
+                )
+
+            # Auto-configure taint sources based on VM detection
+            taint_sources: dict[str, str] = {}
+            if vm_info.get("vm_detected"):
+                taint_sources = {
+                    "rsi": "vm_context",
+                    "rbp": "vm_context",
+                    "rdi": "vm_operand",
+                }
 
             analyzer = TaintAnalyzer()
-            result = analyzer.analyze(binary_data, shared_data=ctx.shared_data)
+            result = analyzer.analyze(
+                instructions,
+                taint_sources=taint_sources,
+                shared_data=ctx.shared_data,
+            )
 
             ctx.shared_data["taint_results"] = result
 
