@@ -46,7 +46,6 @@ class TaintAnalyzer:
         shared_data : dict | None
             Pipeline shared data for cross-stage context.
         """
-        # Apply taint sources
         tag_map = {
             "input": TaintTag.INPUT,
             "vm_operand": TaintTag.VM_OPERAND,
@@ -55,28 +54,21 @@ class TaintAnalyzer:
             "crypto": TaintTag.CRYPTO,
         }
 
+        # Reset accumulated state from any previous analysis *first*,
+        # then apply taint sources exactly once.
+        self._tracker.reset()
+
+        # Apply explicit taint sources
         for name, tag_name in (taint_sources or {}).items():
             tag = tag_map.get(tag_name.lower(), TaintTag.INPUT)
             self._tracker.taint_register(name, tag)
 
-        # Auto-taint from shared data
+        # Auto-taint VM context registers when VM protection is detected
         if shared_data:
             vm_data = shared_data.get("vm_discovery", {})
             if vm_data.get("vm_detected"):
-                # Auto-taint common VM context registers
                 self._tracker.taint_register("rbp", TaintTag.VM_CONTEXT)
                 self._tracker.taint_register("rsi", TaintTag.VM_CONTEXT)
-
-        # Reset accumulated state from any previous analysis
-        self._tracker.reset()
-
-        # Re-apply taint sources after reset
-        for name, tag_name in (taint_sources or {}).items():
-            tag = tag_map.get(tag_name.lower(), TaintTag.INPUT)
-            self._tracker.taint_register(name, tag)
-        if shared_data and shared_data.get("vm_discovery", {}).get("vm_detected"):
-            self._tracker.taint_register("rbp", TaintTag.VM_CONTEXT)
-            self._tracker.taint_register("rsi", TaintTag.VM_CONTEXT)
 
         result = self._tracker.analyze(instructions)
 
