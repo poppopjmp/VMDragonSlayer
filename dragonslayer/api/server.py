@@ -141,6 +141,9 @@ server_state: Dict[str, Any] = {
 # Async lock protects rate_limiter dict against concurrent ASGI requests
 _rate_lock = asyncio.Lock()
 
+# Separate lock for request counters (avoids contention with rate limiter)
+_counter_lock = asyncio.Lock()
+
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = 10  # requests per window
 RATE_LIMIT_WINDOW = 60  # seconds
@@ -173,15 +176,17 @@ async def check_rate_limit(request: Request) -> bool:
 # Middleware for request counting
 @app.middleware("http")
 async def count_requests(request: Request, call_next):
-    """Count active and total requests."""
-    server_state['total_requests'] += 1
-    server_state['active_requests'] += 1
-    
+    """Count active and total requests (async-safe)."""
+    async with _counter_lock:
+        server_state['total_requests'] += 1
+        server_state['active_requests'] += 1
+
     try:
         response = await call_next(request)
         return response
     finally:
-        server_state['active_requests'] -= 1
+        async with _counter_lock:
+            server_state['active_requests'] -= 1
 
 
 # Exception Handlers
@@ -365,7 +370,8 @@ async def analyze_binary(
             **analysis_request.options
         )
 
-        server_state['analysis_count'] += 1
+        async with _counter_lock:
+            server_state['analysis_count'] += 1
 
         return AnalysisResponse(**result)
 
@@ -435,7 +441,8 @@ async def upload_and_analyze(
             metadata=metadata
         )
 
-        server_state['analysis_count'] += 1
+        async with _counter_lock:
+            server_state['analysis_count'] += 1
 
         return result
 
