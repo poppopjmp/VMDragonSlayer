@@ -35,3 +35,10 @@ from .cfg import (  # noqa: F401
     CFGStats,
     NX_AVAILABLE,
 )
+
+from .bytecode_extract import (  # noqa: F401
+    extract_bytecode,
+    BytecodeStream,
+    OpcodeMap,
+    VMOpcode,
+)
