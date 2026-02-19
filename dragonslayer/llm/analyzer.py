@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -349,12 +350,13 @@ class LLMAnalyzer:
 
             # Try to parse as JSON
             if response_format == "json":
-                # Strip markdown code fences if present
-                if content.startswith("```"):
-                    lines = content.split("\n")
-                    # Remove first line (```json) and last (```)
-                    lines = [l for l in lines if not l.strip().startswith("```")]
-                    content = "\n".join(lines)
+                # Strip markdown code fences if present (```json ... ```)
+                content = re.sub(
+                    r"^\s*```(?:json)?\s*\n?", "", content,
+                )
+                content = re.sub(
+                    r"\n?\s*```\s*$", "", content,
+                )
                 try:
                     return json.loads(content)
                 except json.JSONDecodeError:
@@ -481,6 +483,12 @@ class LLMAnalyzer:
 # ---------------------------------------------------------------------------
 
 _analyzer: LLMAnalyzer | None = None
+
+
+def reset_llm_analyzer() -> None:
+    """Reset the module-level singleton (useful for testing / config reload)."""
+    global _analyzer
+    _analyzer = None
 
 
 def get_llm_analyzer(**kwargs: Any) -> LLMAnalyzer:

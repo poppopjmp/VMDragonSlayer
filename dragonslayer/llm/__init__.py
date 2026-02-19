@@ -16,6 +16,6 @@ Key classes
 
 from __future__ import annotations
 
-from .analyzer import LLMAnalyzer, get_llm_analyzer
+from .analyzer import LLMAnalyzer, get_llm_analyzer, reset_llm_analyzer
 
-__all__ = ["LLMAnalyzer", "get_llm_analyzer"]
+__all__ = ["LLMAnalyzer", "get_llm_analyzer", "reset_llm_analyzer"]
