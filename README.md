@@ -20,60 +20,79 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 ## Core Capabilities
 | Domain | Engine / Module | Highlights |
 |--------|-----------------|-----------|
-| VM Discovery | `analysis.vm_discovery` | Dispatcher & handler table identification, nested VM heuristics |
-| Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection) |
-| Taint Tracking | `analysis.taint_tracking` | Intel Pin–driven byte-level taint, handler discovery, flow confidence |
-| Symbolic Execution | `analysis.symbolic_execution.executor` | PathPrioritizer ML-weighted exploration, constraint & state tracking |
-| Hybrid Orchestration | (Python core) | Sequential / parallel / adaptive workflows (Ghidra report indicates implemented) |
-| Synthetic Data | `data/training/synthetic_sample_generator.py` | Obfuscation mutation, multi-architecture sample generation |
-| Pattern DB | `data/patterns/` | JSON + enhanced DB + SQLite-backed runtime patterns |
-| Ghidra Plugin | `plugins/ghidra/` | In-progress UI integration (several templates missing) |
-| Schemas / Validation | `data/schemas/` | JSON schema–validated analysis output & pattern formats |
+| VM Discovery | `analysis.vm_discovery` | Dispatcher & handler table identification, signature database matching, nested VM heuristics |
+| Dispatcher Analysis | `analysis.vm_discovery.dispatcher` | Jump-table scanning, handler table reconstruction, opcode→address mapping |
+| Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection), regex entry-point matching |
+| Taint Tracking | `analysis.taint_tracking` | Register + memory taint propagation, virtual register mapping (VMProtect/Themida presets), handler boundary detection |
+| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), z3 branch constraints, opaque predicate detection |
+| Anti-Evasion | `analysis.anti_evasion` | Section-aware instruction scanning (PE/ELF), anti-debug/VM/sandbox detection, binary patching |
+| LLM-Assisted | `llm.analyzer` | Few-shot handler classification, deobfuscation hints, code recovery, pattern explanation (via litellm) |
+| Plugin Pipeline | `core.pipeline` | Multi-stage pipeline with ThreadPoolExecutor, per-plugin timeout, thread-safe shared data |
+| Plugin Ecosystem | `plugins/` | 16 plugins across 4 stages (static/dynamic/enrichment/reporting) with angr, Triton, Qiling, etc. |
+| Reporting | `plugins.reporting.reporter` | VM deobfuscation analysis sections (handler table, taint flow, symbolic results, virtual register map) |
 
 ---
 ## Architecture Overview
 
-VMDragonSlayer uses a modular architecture where multiple analysis engines work together:
+VMDragonSlayer uses a modular pipeline architecture where analysis stages flow through a shared context:
 
 ```mermaid
 graph TD
-    A[VM Discovery Engine] --> B[Pattern/ML Classifier]
-    B --> C[Symbolic Execution Engine]
-    B --> D[Dynamic Taint Tracker]
-    D --> C
+    A[VM Discovery] --> B[Dispatcher Analysis]
+    B --> C[Anti-Evasion Scan]
+    C --> D[Pattern Classification]
+    D --> E[Taint Analysis]
+    D --> F[Symbolic Execution]
+    E --> F
+    F --> G[Plugin Stages]
     
-    subgraph DataSources ["Data Sources"]
-        E[Pattern Database]
-        F[ML Models - PoC]
+    subgraph PluginPipeline ["Plugin Pipeline (ThreadPoolExecutor)"]
+        G --> G1[Static Plugins]
+        G --> G2[Dynamic Plugins]
+        G --> G3[Enrichment]
+        G --> G4[Reporting]
     end
     
-    subgraph Coordination
-        G[Orchestrator - Workflow Management & Coordination]
+    subgraph SharedContext ["Shared PluginContext"]
+        H[shared_data — thread-safe]
     end
     
-    E --> B
-    F --> B
-    A --> G
-    B --> G
-    C --> G
-    D --> G
-    E --> G
-    F --> G
-    G --> H[REST API Server]
-    G --> I[Plugins - RE Tools]
+    A --> H
+    B --> H
+    E --> H
+    F --> H
+    G1 --> H
+    G2 --> H
+    G4 --> I[Markdown Report]
+    
+    subgraph LLM ["LLM Assistance (optional)"]
+        J[Handler Classification]
+        K[Deobfuscation Hints]
+        L[Code Recovery]
+    end
+    
+    D --> J
+    F --> K
+    E --> L
 ```
 
 ### Core Analysis Engines
 
 #### 1. **VM Discovery Engine** (`dragonslayer.analysis.vm_discovery`)
 - **Purpose**: Detect and classify VM-based protection schemes
-- **Techniques**: Dispatcher loop detection, handler table analysis, control flow heuristics
-- **Targets**: VMProtect, Themida, custom malware VMs, nested protection
+- **Techniques**: Dispatcher loop detection, handler table analysis, signature database matching
+- **Targets**: VMProtect, Themida, custom malware VMs
 
-#### 2. **Dynamic Taint Tracking** (`dragonslayer.analysis.taint_tracking`)
+#### 2. **Dispatcher Analyzer** (`dragonslayer.analysis.vm_discovery.dispatcher`)
+- **Purpose**: Identify VM dispatchers and reconstruct handler tables
+- **Techniques**: Jump-table scanning (`jmp [reg*4+disp32]`), opcode→address mapping
+- **Output**: DispatchTableResult with HandlerEntry list
+
+#### 3. **Dynamic Taint Tracking** (`dragonslayer.analysis.taint_tracking`)
 - **Purpose**: Track data flow through VM execution to identify critical paths
-- **Implementation**: Intel Pin-based instrumentation with byte-level precision
-- **Features**: Shadow memory, anti-analysis evasion, automated handler discovery
+- **Implementation**: Register + memory taint propagation with 7 taint tag categories
+- **VM-Aware**: Virtual register mapping presets (VMProtect x64/x86, Themida x64), handler boundary detection via untaint/retaint patterns
+- **Pipeline**: Uses VMTaintTracker when VM detected, falls back to generic TaintAnalyzer
 
 #### 3. **Pattern Analysis** (`dragonslayer.analysis.pattern_analysis`)
 - **Purpose**: Classify and categorize VM patterns and behaviors
@@ -82,10 +101,18 @@ graph TD
 
 #### 4. **Symbolic Execution** (`dragonslayer.analysis.symbolic_execution`)
 - **Purpose**: Explore VM execution paths symbolically
-- **Features**: Constraint solving, path prioritization, state merging
-- **Integration**: Uses taint analysis results to seed exploration
+- **Instruction Semantics**: mov, add/sub, and/or/xor, shl/shr/sar/rol/ror, push/pop, lea, cmp/test, inc/dec, neg/not, xchg, movzx/movsx — all produce z3 BitVec expressions
+- **Branch Analysis**: Maps jcc mnemonics to z3 constraints, forks state on conditional branches
+- **Opaque Predicate Detection**: Trivial (`cmp reg,reg`) + z3-proven constant predicates
+- **Integration**: Uses dispatcher addresses from vm_discovery for focused exploration
 
-#### 5. **Machine Learning Pipeline** (`dragonslayer.ml`)
+#### 5. **Anti-Evasion** (`dragonslayer.analysis.anti_evasion`)
+- **Purpose**: Detect and neutralise anti-analysis techniques
+- **Section-Aware**: Parses PE/ELF section headers to restrict instruction scanning to executable sections (avoids false positives in data sections)
+- **Detection**: Anti-debug APIs, timing checks (rdtsc), PEB access, VM/sandbox artefacts, anti-disassembly tricks, self-modifying code
+- **Patching**: Generates NOP patches for patchable indicators
+
+#### 6. **Machine Learning Pipeline** (`dragonslayer.ml`)
 - **Purpose**: Automated classification and analysis assistance
 - **Models**: Basic proof-of-concept models for research and education
 - **Components**: Feature extraction, model training, ensemble prediction
@@ -96,30 +123,29 @@ graph TD
 VMDragonSlayer/
 ├── dragonslayer/                    # Main Python package
 │   ├── analysis/                   # Analysis engines
-│   │   ├── vm_discovery/          # VM detection and classification
+│   │   ├── vm_discovery/          # VM detection, dispatcher analysis
 │   │   ├── pattern_analysis/      # Pattern matching and ML classification
-│   │   ├── symbolic_execution/    # Symbolic execution engine
-│   │   ├── taint_tracking/        # Dynamic taint analysis
-│   │   └── anti_evasion/          # Anti-analysis countermeasures
+│   │   ├── symbolic_execution/    # Symbolic execution with real semantics
+│   │   ├── taint_tracking/        # Register + memory taint, VM-aware tracker
+│   │   └── anti_evasion/          # Section-aware anti-analysis detection
 │   ├── api/                       # REST API server and client
-│   ├── core/                      # Core framework components
+│   ├── core/                      # Pipeline, orchestrator, config
+│   ├── llm/                       # LLM-assisted analysis (litellm)
 │   ├── ml/                        # Machine learning pipeline
-│   ├── analytics/                 # Analysis reporting and metrics
 │   ├── gpu/                       # GPU acceleration support
-│   ├── utils/                     # Utility functions
-├── data/                          # Configuration and data files
-│   ├── patterns/                  # Pattern database
+│   ├── plugins/                   # 16 plugins (static/dynamic/enrichment/reporting)
+│   └── utils/                     # Utility functions
+├── config/                        # YAML configuration
+├── data/                          # Patterns, models, schemas
+│   ├── patterns/                  # VMProtect/Themida pattern databases
 │   ├── models/                    # ML models and metadata
-│   │   ├── pretrained/           # Pre-trained models (PoC)
-│   │   └── metadata/             # Model metadata and schemas
-│   ├── samples/                   # Sample files and registries
-│   ├── schemas/                   # JSON schemas for validation
-│   └── training/                  # Training configurations
-├── plugins/                       # Reverse engineering tool plugins
+│   ├── samples/                   # Sample files and traces
+│   └── schemas/                   # JSON schemas for validation
+├── plugins/                       # External RE tool plugins
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # Tests suite
+├── tests/                         # 160 tests (159 pass, 1 skip)
 ├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
@@ -151,8 +177,8 @@ VMDragonSlayer integrates with major reverse engineering tools:
 ## Installation
 
 ### Prerequisites
-- Python 3.8 or higher
-- One or more reverse engineering tools:
+- Python 3.10 or higher (tested with 3.14)
+- One or more reverse engineering tools (optional):
   - Ghidra 10.0+ (for Ghidra plugin)
   - IDA Pro 7.0+ (for IDA plugin) 
   - Binary Ninja (for Binary Ninja plugin)
@@ -175,21 +201,29 @@ VMDragonSlayer integrates with major reverse engineering tools:
 - **WSL**: Some GPU features may have limited functionality in WSL environments
 - **Remote Servers**: Ensure CUDA drivers are properly installed for headless GPU access
 
-## Current Status (Fixed Issues)
+## Current Status
 
-### Verified Working Examples
+### Test Suite
+- **160 tests** across 8 test files
+- **159 passed**, 1 skipped (z3-solver optional)
+- Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules
+
+### What's Implemented and Working
 
 ```python
-# This now works perfectly:
+# Pipeline-based analysis (recommended)
+from dragonslayer.core.pipeline import create_full_pipeline
+
+pipeline = create_full_pipeline()
+result = pipeline.run(binary_data=open("binary.exe", "rb").read())
+# Result includes: vm_discovery, dispatcher_analysis, anti_evasion,
+# taint_analysis, symbolic_execution, pattern classification, plugin stages
+
+# Orchestrator-based analysis
 from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
 
 orchestrator = Orchestrator()
-result = orchestrator.analyze_binary("your_binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
-
-# Results are properly structured:
-vmd = result.get("vm_discovery", {})
-print(f"VM detected: {vmd.get('vm_detected', False)}")
-print(f"Handlers found: {len(vmd.get('handlers_found', []))}")
+result = orchestrator.analyze_binary("binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
 ```
 ### Quick Start
 
@@ -354,9 +388,11 @@ export VMDS_API_PORT="8000"
 ```
 
 ### Configuration Files
-- `data/database_config.json`: Database settings
-- `data/taint_config.properties`: Taint analysis parameters
-- `data/models/model_registry_config.toml`: ML model configuration
+- `config/vmdragonslayer.yml`: Main configuration (analysis, API, logging, paths)
+- `config/analysis_profiles.json`: Pipeline profile definitions
+- `data/patterns/vmprotect_handlers.json`: VMProtect handler signatures
+- `data/patterns/themida_patterns.json`: Themida pattern database
+- `data/schemas/analysis_result_schema.json`: JSON schema for analysis output
 
 ---
 ## Examples
@@ -364,29 +400,29 @@ export VMDS_API_PORT="8000"
 ### Advanced Configuration
 ```python
 from dragonslayer.core.config import Config
-from dragonslayer.analysis.vm_discovery import VMDiscoveryEngine
-from dragonslayer.analysis.taint_tracking import TaintTracker
+from dragonslayer.analysis.taint_tracking import VMTaintTracker, VM_REG_PRESETS
+from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+from dragonslayer.analysis.anti_evasion.environment_normalizer import EnvironmentNormalizer
 
-# Custom configuration
-config = Config({
-    'vm_discovery': {
-        'min_handler_count': 10,
-        'dispatcher_threshold': 0.8
-    },
-    'taint_tracking': {
-        'precision': 'byte_level',
-        'max_depth': 1000
-    }
-})
+# VM-aware taint analysis with virtual register mapping
+vtt = VMTaintTracker()
+result = vtt.analyze_vm_trace(
+    instructions=lifted_instructions,
+    vm_preset="vmprotect_x64",  # maps rsi→vIP, rbp→vSP, rdi→vContext, r12→vHandlerTbl
+)
+print(result["virtual_register_map"])
+print(result["handler_boundaries"])
 
-# Initialize specific engines
-vm_engine = VMDiscoveryEngine(config)
-taint_tracker = TaintTracker(config)
+# Symbolic execution with real instruction semantics
+executor = SymbolicExecutor()
+sym_result = executor.analyze(binary_data, entry_point=0x401000)
+print(f"Paths explored: {sym_result.paths_explored}")
+print(f"Opaque predicates: {sym_result.opaque_predicates}")
 
-# Run targeted analysis
-vm_result = vm_engine.analyze("binary.exe")
-if vm_result.vm_detected:
-    taint_result = taint_tracker.analyze(vm_result.handlers)
+# Section-aware anti-evasion (only scans executable sections)
+normalizer = EnvironmentNormalizer()
+report = normalizer.analyze(binary_data)
+patched = normalizer.apply_patches(binary_data, report.patches)
 ```
 
 ### Batch Analysis
