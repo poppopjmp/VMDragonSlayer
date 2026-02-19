@@ -78,6 +78,7 @@ class PipelineConfig:
         "dynamic",
         "taint_analysis",
         "symbolic_execution",
+        "dispatcher_analysis",
         "enrichment",
         "llm_analysis",
         "reporting",
@@ -210,6 +211,7 @@ class AnalysisPipeline:
             "classify": lambda: self._run_classify(ctx),
             "taint_analysis": lambda: self._run_taint_analysis(binary_data, ctx),
             "symbolic_execution": lambda: self._run_symbolic_execution(binary_data, ctx),
+            "dispatcher_analysis": lambda: self._run_dispatcher_analysis(binary_data, ctx),
             "static": lambda: self._run_plugin_stage(binary_data, file_path, ctx, Stage.STATIC, "static"),
             "dynamic": lambda: self._run_plugin_stage(binary_data, file_path, ctx, Stage.DYNAMIC, "dynamic"),
             "enrichment": lambda: self._run_plugin_stage(binary_data, file_path, ctx, Stage.ENRICHMENT, "enrichment"),
@@ -677,6 +679,44 @@ class AnalysisPipeline:
                 duration=time.monotonic() - t0,
             )
 
+    def _run_dispatcher_analysis(
+        self,
+        binary_data: bytes,
+        ctx: Any,
+    ) -> StageResult:
+        """
+        Identify VM dispatchers and reconstruct the handler dispatch table.
+
+        Runs after symbolic_execution so it can incorporate handler
+        classifications.  Stores the dispatch table in shared_data for
+        the LLM analyzer and reporter.
+        """
+        t0 = time.monotonic()
+        try:
+            from ..analysis.vm_discovery.dispatcher import DispatcherAnalyzer
+
+            analyzer = DispatcherAnalyzer()
+            result = analyzer.analyze(binary_data, shared_data=ctx.shared_data)
+            result_data = result.to_dict()
+
+            ctx.shared_data["dispatcher_analysis"] = result_data
+            ctx.shared_data["handler_table"] = result_data.get("handler_table", [])
+
+            return StageResult(
+                stage="dispatcher_analysis",
+                success=result.success,
+                data=result_data,
+                duration=time.monotonic() - t0,
+            )
+        except Exception as exc:
+            logger.exception("Dispatcher analysis stage failed")
+            return StageResult(
+                stage="dispatcher_analysis",
+                success=False,
+                error=str(exc),
+                duration=time.monotonic() - t0,
+            )
+
     # -- LLM stages --------------------------------------------------------
 
     def _run_llm_analysis(
@@ -845,6 +885,7 @@ def create_full_pipeline(**kwargs: Any) -> tuple[AnalysisPipeline, PipelineConfi
         "dynamic",
         "taint_analysis",
         "symbolic_execution",
+        "dispatcher_analysis",
         "enrichment",
         "llm_analysis",
         "reporting",
@@ -881,6 +922,7 @@ def create_vmprotect_devirt_pipeline(**kwargs: Any) -> tuple[AnalysisPipeline, P
         "dynamic",
         "taint_analysis",
         "symbolic_execution",
+        "dispatcher_analysis",
         "llm_analysis",
         "enrichment",
         "reporting",

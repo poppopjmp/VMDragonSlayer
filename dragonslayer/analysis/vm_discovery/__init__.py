@@ -11,6 +11,7 @@ try:
     from .detector import VMDetector
     from .analyzer import VMAnalyzer
     from .database import VMSignature, VMSignatureDatabase
+    from .dispatcher import DispatcherAnalyzer, DispatchTableResult
 except ImportError:
     pass
 
@@ -19,4 +20,6 @@ __all__ = [
     "VMAnalyzer",
     "VMSignature",
     "VMSignatureDatabase",
+    "DispatcherAnalyzer",
+    "DispatchTableResult",
 ]
