@@ -16,6 +16,12 @@ from .recognizer import (
     SequenceRecognizer
 )
 
+from .classifier import (
+    PatternClassifier,
+    ClassificationResult,
+    ClassificationReport,
+)
+
 __all__ = [
     # Database
     'Pattern',
@@ -27,4 +33,9 @@ __all__ = [
     'Match',
     'PatternRecognizer',
     'SequenceRecognizer',
+
+    # Classification
+    'PatternClassifier',
+    'ClassificationResult',
+    'ClassificationReport',
 ]

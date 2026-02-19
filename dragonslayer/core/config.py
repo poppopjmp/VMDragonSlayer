@@ -3,6 +3,7 @@ Configuration Management for VMDragonSlayer
 
 """
 
+import copy
 import os
 import logging
 from pathlib import Path
@@ -80,8 +81,8 @@ class Config:
         return Path('config')
     
     def _load_defaults(self):
-        """Load default configuration values."""
-        self._config = self.DEFAULTS.copy()
+        """Load default configuration values (deep copy so mutations are isolated)."""
+        self._config = copy.deepcopy(self.DEFAULTS)
     
     def _load_yaml_config(self):
         """Load YAML configuration file based on environment."""

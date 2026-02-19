@@ -1,0 +1,367 @@
+"""
+Pattern Classifier
+==================
+
+Classifies matched byte-patterns into VM handler categories by combining
+rule-based heuristics with *optional* LLM refinement.  Works downstream
+of :class:`PatternRecognizer` — takes a list of :class:`Match` objects and
+produces :class:`ClassificationResult` records.
+
+Usage::
+
+    from dragonslayer.analysis.pattern_analysis.classifier import PatternClassifier
+
+    classifier = PatternClassifier()
+    results = classifier.classify_matches(matches)  # from PatternRecognizer
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Set
+
+from .database import HandlerType, Pattern
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Classification result
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ClassificationResult:
+    """One classified pattern match."""
+
+    pattern_id: str
+    name: str
+    handler_type: HandlerType
+    sub_category: str = ""
+    confidence: float = 0.0
+    reasoning: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    llm_refined: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "pattern_id": self.pattern_id,
+            "name": self.name,
+            "handler_type": self.handler_type.value,
+            "sub_category": self.sub_category,
+            "confidence": self.confidence,
+            "reasoning": self.reasoning,
+            "metadata": self.metadata,
+            "llm_refined": self.llm_refined,
+        }
+
+
+@dataclass
+class ClassificationReport:
+    """Aggregate classification output."""
+
+    results: List[ClassificationResult] = field(default_factory=list)
+    category_counts: Dict[str, int] = field(default_factory=dict)
+    dominant_type: Optional[HandlerType] = None
+    complexity_score: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "results": [r.to_dict() for r in self.results],
+            "category_counts": self.category_counts,
+            "dominant_type": self.dominant_type.value if self.dominant_type else None,
+            "complexity_score": self.complexity_score,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Heuristic rules
+# ---------------------------------------------------------------------------
+
+# Mapping from mnemonic keywords found inside pattern names / operations to
+# their likely handler type.  Order matters — first match wins.
+_OPERATION_RULES: List[tuple[re.Pattern, HandlerType, str]] = [
+    # Arithmetic
+    (re.compile(r"\b(add|sub|inc|dec|imul|idiv|mul|div|neg|adc|sbb)\b", re.I), HandlerType.ARITHMETIC, "arithmetic op"),
+    # Bitwise / logic
+    (re.compile(r"\b(xor|and|or|not|shl|shr|sar|sal|rol|ror|bt|bsf|bsr|bswap)\b", re.I), HandlerType.BITWISE, "bitwise op"),
+    # Memory
+    (re.compile(r"\b(mov|lea|lod|sto|load|store|read|write|mem)\b", re.I), HandlerType.MEMORY, "memory op"),
+    # Control flow
+    (re.compile(r"\b(jmp|jcc|jz|jnz|je|jne|ja|jb|jg|jl|call|ret|retn|branch|dispatch|loop|enter|leave)\b", re.I), HandlerType.CONTROL_FLOW, "control-flow op"),
+    # Stack
+    (re.compile(r"\b(push|pop|pusha|popa|pushf|popf|esp|rsp|stack)\b", re.I), HandlerType.STACK, "stack op"),
+    # Comparison / flags
+    (re.compile(r"\b(cmp|test|cmov|setz|setnz|setc|flag)\b", re.I), HandlerType.COMPARISON, "comparison / flag op"),
+    # Conversion / data width
+    (re.compile(r"\b(cbw|cwde|cdq|cqo|movsx|movzx|cvt|trunc|extend|widen|narrow)\b", re.I), HandlerType.CONVERSION, "conversion op"),
+    # Crypto
+    (re.compile(r"\b(aes|sha|crc|rc4|tea|xtea|serpent|encrypt|decrypt)\b", re.I), HandlerType.CRYPTO, "crypto op"),
+]
+
+# Byte-level heuristics for when we only have raw matched bytes.
+_BYTE_RULES: List[tuple[bytes, HandlerType, str]] = [
+    # Common x86 opcode prefixes
+    (bytes([0x01]), HandlerType.ARITHMETIC, "ADD r/m"),
+    (bytes([0x29]), HandlerType.ARITHMETIC, "SUB r/m"),
+    (bytes([0x31]), HandlerType.BITWISE, "XOR r/m"),
+    (bytes([0x21]), HandlerType.BITWISE, "AND r/m"),
+    (bytes([0x09]), HandlerType.BITWISE, "OR r/m"),
+    (bytes([0x89]), HandlerType.MEMORY, "MOV r/m"),
+    (bytes([0x8B]), HandlerType.MEMORY, "MOV r,r/m"),
+    (bytes([0xFF]), HandlerType.CONTROL_FLOW, "JMP/CALL indirect"),
+    (bytes([0xE8]), HandlerType.CONTROL_FLOW, "CALL near"),
+    (bytes([0xE9]), HandlerType.CONTROL_FLOW, "JMP near"),
+    (bytes([0xC3]), HandlerType.CONTROL_FLOW, "RET"),
+    (bytes([0x50]), HandlerType.STACK, "PUSH rAX"),
+    (bytes([0x58]), HandlerType.STACK, "POP rAX"),
+    (bytes([0x3B]), HandlerType.COMPARISON, "CMP r,r/m"),
+    (bytes([0x85]), HandlerType.COMPARISON, "TEST r/m"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Classifier
+# ---------------------------------------------------------------------------
+
+class PatternClassifier:
+    """
+    Classifies matched patterns into VM handler categories.
+
+    Two-pass approach:
+
+    1. **Rule-based** — fast mnemonic / operation / byte heuristics.
+    2. **LLM-refined** — optional; sends ambiguous results to the LLM for
+       a more nuanced classification.  Requires the ``llm`` module.
+    """
+
+    def __init__(self, *, use_llm: bool = False) -> None:
+        self._use_llm = use_llm
+
+    # -- public API ---------------------------------------------------------
+
+    def classify_matches(
+        self,
+        matches: Sequence[Any],
+        *,
+        min_confidence: float = 0.0,
+    ) -> ClassificationReport:
+        """
+        Classify a list of :class:`Match` or match-dict objects.
+
+        Parameters
+        ----------
+        matches
+            Match objects (from PatternRecognizer) or dicts with keys
+            ``pattern_id``, ``name``, ``operation``, ``handler_type``,
+            ``matched_bytes``, ``confidence``.
+        min_confidence
+            Drop results below this confidence.
+
+        Returns
+        -------
+        ClassificationReport
+        """
+        results: List[ClassificationResult] = []
+
+        for m in matches:
+            cr = self._classify_single(m)
+            if cr.confidence >= min_confidence:
+                results.append(cr)
+
+        # Optional LLM refinement pass
+        if self._use_llm:
+            results = self._llm_refine(results)
+
+        # Build report
+        category_counts: Dict[str, int] = {}
+        for r in results:
+            key = r.handler_type.value
+            category_counts[key] = category_counts.get(key, 0) + 1
+
+        dominant = max(category_counts, key=category_counts.get, default=None) if category_counts else None
+        dominant_type = HandlerType(dominant) if dominant else None
+
+        complexity = self._compute_complexity(results, category_counts)
+
+        return ClassificationReport(
+            results=results,
+            category_counts=category_counts,
+            dominant_type=dominant_type,
+            complexity_score=complexity,
+        )
+
+    def classify_handler_bytes(
+        self,
+        raw_bytes: bytes,
+        *,
+        handler_name: str = "",
+    ) -> ClassificationResult:
+        """
+        Classify a raw handler byte sequence directly (no Match object).
+        """
+        match_dict = {
+            "pattern_id": f"raw_{handler_name or 'unknown'}",
+            "name": handler_name or "raw_handler",
+            "operation": "",
+            "handler_type": "unknown",
+            "matched_bytes": raw_bytes.hex().upper(),
+            "confidence": 0.5,
+        }
+        return self._classify_single(match_dict)
+
+    # -- internal -----------------------------------------------------------
+
+    @staticmethod
+    def _to_dict(match: Any) -> Dict[str, Any]:
+        """Normalize a Match object or dict into a dict."""
+        if isinstance(match, dict):
+            return match
+        # Match dataclass from recognizer
+        d: Dict[str, Any] = {}
+        if hasattr(match, "pattern"):
+            p = match.pattern
+            d["pattern_id"] = getattr(p, "pattern_id", "")
+            d["name"] = getattr(p, "name", "")
+            d["operation"] = getattr(p, "operation", "")
+            d["handler_type"] = getattr(p, "handler_type", "unknown")
+        d.setdefault("pattern_id", getattr(match, "pattern_id", ""))
+        d.setdefault("name", getattr(match, "name", ""))
+        d.setdefault("operation", getattr(match, "operation", ""))
+        d.setdefault("handler_type", getattr(match, "handler_type", "unknown"))
+        d["matched_bytes"] = getattr(match, "matched_bytes", "")
+        d["confidence"] = getattr(match, "confidence", 0.0)
+        return d
+
+    def _classify_single(self, match: Any) -> ClassificationResult:
+        """Classify one match using heuristic rules."""
+        d = self._to_dict(match)
+
+        # Start with the declared handler_type if it's already meaningful
+        declared = d.get("handler_type", "unknown")
+        if isinstance(declared, str):
+            try:
+                ht = HandlerType(declared)
+            except ValueError:
+                ht = HandlerType.UNKNOWN
+        else:
+            ht = declared if isinstance(declared, HandlerType) else HandlerType.UNKNOWN
+
+        reasoning_parts: List[str] = []
+
+        # 1) If declared type is already specific, trust it
+        if ht != HandlerType.UNKNOWN:
+            reasoning_parts.append(f"declared as {ht.value}")
+        else:
+            # 2) Operation / name keyword matching
+            text = f"{d.get('operation', '')} {d.get('name', '')}"
+            for pattern, handler_type, label in _OPERATION_RULES:
+                if pattern.search(text):
+                    ht = handler_type
+                    reasoning_parts.append(f"keyword match: {label}")
+                    break
+
+        # 3) If still unknown, try byte-level heuristics
+        if ht == HandlerType.UNKNOWN:
+            matched_hex = d.get("matched_bytes", "")
+            try:
+                raw = bytes.fromhex(matched_hex.replace(" ", ""))
+            except (ValueError, AttributeError):
+                raw = b""
+            if raw:
+                for prefix, handler_type, label in _BYTE_RULES:
+                    if raw[:len(prefix)] == prefix:
+                        ht = handler_type
+                        reasoning_parts.append(f"byte heuristic: {label}")
+                        break
+
+        # 4) Compute confidence
+        base_conf = d.get("confidence", 0.5)
+        # Boost if multiple signals agree
+        boost = 0.05 * len(reasoning_parts)
+        confidence = min(base_conf + boost, 1.0)
+
+        # Determine sub-category from operation field
+        sub_cat = d.get("operation", "") or ""
+
+        return ClassificationResult(
+            pattern_id=d.get("pattern_id", ""),
+            name=d.get("name", ""),
+            handler_type=ht,
+            sub_category=sub_cat,
+            confidence=confidence,
+            reasoning="; ".join(reasoning_parts) if reasoning_parts else "no heuristic match",
+        )
+
+    def _llm_refine(
+        self,
+        results: List[ClassificationResult],
+    ) -> List[ClassificationResult]:
+        """Send ambiguous classifications to the LLM for refinement."""
+        try:
+            from ...llm import get_llm_analyzer
+            llm = get_llm_analyzer()
+            if not llm.available:
+                return results
+        except Exception:
+            return results
+
+        refined: List[ClassificationResult] = []
+        for cr in results:
+            # Only refine uncertain ones
+            if cr.handler_type == HandlerType.UNKNOWN or cr.confidence < 0.6:
+                try:
+                    import json
+                    llm_result = llm.classify_handler(
+                        handler_data=json.dumps(cr.to_dict(), indent=2),
+                        context=f"sub_category={cr.sub_category}",
+                    )
+                    if "error" not in llm_result:
+                        suggested = llm_result.get("category", "").lower()
+                        try:
+                            new_ht = HandlerType(suggested)
+                        except ValueError:
+                            new_ht = cr.handler_type
+                        cr = ClassificationResult(
+                            pattern_id=cr.pattern_id,
+                            name=cr.name,
+                            handler_type=new_ht,
+                            sub_category=cr.sub_category,
+                            confidence=min(cr.confidence + 0.15, 1.0),
+                            reasoning=cr.reasoning + f"; LLM refined → {new_ht.value}",
+                            metadata={"llm_response": llm_result},
+                            llm_refined=True,
+                        )
+                except Exception as exc:
+                    logger.debug("LLM refinement failed for %s: %s", cr.pattern_id, exc)
+            refined.append(cr)
+
+        return refined
+
+    @staticmethod
+    def _compute_complexity(
+        results: List[ClassificationResult],
+        counts: Dict[str, int],
+    ) -> float:
+        """
+        Compute a 0.0–1.0 complexity score based on handler diversity.
+
+        More distinct handler types AND higher total count ⇒ more complex VM.
+        """
+        if not results:
+            return 0.0
+
+        n_types = len(counts)
+        n_total = len(results)
+
+        # Diversity component: max 9 handler types (all minus UNKNOWN)
+        diversity = min(n_types / 8.0, 1.0)
+        # Volume component: logarithmic scaling
+        import math
+        volume = min(math.log2(1 + n_total) / 10.0, 1.0)
+        # Average confidence penalty for low confidence
+        avg_conf = sum(r.confidence for r in results) / n_total
+        conf_factor = avg_conf
+
+        return round(0.4 * diversity + 0.3 * volume + 0.3 * conf_factor, 4)

@@ -1,30 +1,45 @@
 """
 Machine Learning Module
 
+All imports are guarded so the package can be imported even when the
+individual sub-modules have not been implemented yet.
 """
 
-from .pipeline import FeatureExtractor, FeatureVector
-from .trainer import ModelTrainer, TrainingResult, prepare_training_data
-from .model import BaseModel, VMHandlerModel, PredictionResult
-from .ensemble import EnsembleClassifier, WeightedEnsemble
+try:
+    from .pipeline import FeatureExtractor, FeatureVector
+except (ImportError, AttributeError):
+    FeatureExtractor = None  # type: ignore[assignment,misc]
+    FeatureVector = None  # type: ignore[assignment,misc]
+
+try:
+    from .trainer import ModelTrainer, TrainingResult, prepare_training_data
+except (ImportError, AttributeError):
+    ModelTrainer = None  # type: ignore[assignment,misc]
+    TrainingResult = None  # type: ignore[assignment,misc]
+    prepare_training_data = None  # type: ignore[assignment,misc]
+
+try:
+    from .model import BaseModel, VMHandlerModel, PredictionResult
+except (ImportError, AttributeError):
+    BaseModel = None  # type: ignore[assignment,misc]
+    VMHandlerModel = None  # type: ignore[assignment,misc]
+    PredictionResult = None  # type: ignore[assignment,misc]
+
+try:
+    from .ensemble import EnsembleClassifier, WeightedEnsemble
+except (ImportError, AttributeError):
+    EnsembleClassifier = None  # type: ignore[assignment,misc]
+    WeightedEnsemble = None  # type: ignore[assignment,misc]
 
 __all__ = [
-    # Feature extraction
     'FeatureExtractor',
     'FeatureVector',
-    
-    # Training
     'ModelTrainer',
     'TrainingResult',
     'prepare_training_data',
-    
-    # Models
     'BaseModel',
     'VMHandlerModel',
     'PredictionResult',
-    
-    # Ensemble
     'EnsembleClassifier',
     'WeightedEnsemble',
-
 ]

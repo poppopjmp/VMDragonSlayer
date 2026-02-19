@@ -2,63 +2,49 @@
 Taint Tracking Module
 ====================
 
-Unified dynamic taint tracking for VM analysis.
+Data-flow taint tracking for VM-protected binary analysis.
 
-This module provides comprehensive taint tracking capabilities including:
-- Dynamic taint propagation through VMDragonTaint.cpp
-- VM handler signature analysis
-- Data flow analysis
-- Execution trace processing
-- Optimized DTT execution
+Tracks how tainted inputs flow through registers and memory
+to identify handler semantics and data dependencies.
 """
 
-from .tracker import (
-    TaintTracker,
-    TaintInfo,
-    TaintType,
-    TaintScope,
-    OperationType,
-    TaintEvent,
-    TaintPropagation,
-    TaintEventAnalyzer,
-    EnhancedVMTaintTracker  # Backwards compatibility alias
-)
+try:
+    from .tracker import (
+        TaintTracker,
+        TaintTag,
+        TaintState,
+        TaintEvent,
+        TaintResult,
+    )
+except (ImportError, AttributeError):
+    TaintTracker = None  # type: ignore[assignment,misc]
+    TaintTag = None  # type: ignore[assignment,misc]
+    TaintState = None  # type: ignore[assignment,misc]
+    TaintEvent = None  # type: ignore[assignment,misc]
+    TaintResult = None  # type: ignore[assignment,misc]
 
-from .analyzer import (
-    VMTaintAnalyzer,
-    VMHandlerSignature,
-    TaintAnalysisResult
-)
+try:
+    from .analyzer import TaintAnalyzer
+except (ImportError, AttributeError):
+    TaintAnalyzer = None  # type: ignore[assignment,misc]
 
-# Import VM taint tracker and DTT executor
 try:
     from .vm_taint_tracker import VMTaintTracker
-    from .dtt_executor import OptimizedDTTExecutor
-except ImportError:
-    # Graceful fallback if dependencies are missing
-    VMTaintTracker = None
-    OptimizedDTTExecutor = None
+except (ImportError, AttributeError):
+    VMTaintTracker = None  # type: ignore[assignment,misc]
+
+try:
+    from .dtt_executor import DTTExecutor
+except (ImportError, AttributeError):
+    DTTExecutor = None  # type: ignore[assignment,misc]
 
 __all__ = [
-    # Core tracking
     "TaintTracker",
-    "TaintInfo",
-    "TaintType",
-    "TaintScope", 
-    "OperationType",
+    "TaintTag",
+    "TaintState",
     "TaintEvent",
-    "TaintPropagation",
-    "TaintEventAnalyzer",
-    
-    # Analysis
-    "VMTaintAnalyzer",
-    "VMHandlerSignature",
-    "TaintAnalysisResult",
-    
-    # VM taint tracking (if available)
+    "TaintResult",
+    "TaintAnalyzer",
     "VMTaintTracker",
-    "OptimizedDTTExecutor",
-    
-    # Backwards compatibility
-    "EnhancedVMTaintTracker"
+    "DTTExecutor",
 ]
