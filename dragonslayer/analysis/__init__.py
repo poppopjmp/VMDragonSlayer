@@ -50,3 +50,11 @@ from .handler_semantics import (  # noqa: F401
     SemanticOpcodeTable,
     VMOperation,
 )
+
+from .pseudocode import (  # noqa: F401
+    emit_pseudocode,
+    emit_linear,
+    emit_structured,
+    emit_c_like,
+    PseudocodeResult,
+)
