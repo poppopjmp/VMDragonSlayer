@@ -35,6 +35,10 @@ try:
         AST_REPRESENTATION,
         Instruction,
         TritonContext,
+        REG,
+        CALLBACK,
+        OPCODE,
+        OPERAND,
     )
     import capstone  # type: ignore[import-untyped]
 
@@ -122,6 +126,31 @@ class TritonAnalyzer(Plugin):
                 vaddr += binary.optional_header.imagebase
             tc.setConcreteMemoryAreaValue(vaddr, content)
 
+        # --- Taint engine: taint VM context registers -----------------------
+        # Taint registers commonly used as VM context pointers
+        taint_regs = []
+        vm_detected = ctx.shared_data.get("vm_detected", False)
+        if vm_detected:
+            try:
+                if is_64:
+                    taint_targets = [
+                        tc.registers.rsi, tc.registers.rbp,
+                        tc.registers.rdi, tc.registers.r12,
+                    ]
+                else:
+                    taint_targets = [
+                        tc.registers.esi, tc.registers.ebp,
+                        tc.registers.edi,
+                    ]
+                for reg in taint_targets:
+                    try:
+                        tc.taintRegister(reg)
+                        taint_regs.append(reg.getName())
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         # Guidance intervals from shared context
         guidance: List[Dict[str, int]] = []
         qiling_data = ctx.shared_data.get("qiling", {})
@@ -136,8 +165,20 @@ class TritonAnalyzer(Plugin):
             entry += binary.optional_header.imagebase
 
         exec_addrs = [entry]
+        # Also use dispatcher addresses from VM discovery
+        dispatcher_addrs = ctx.shared_data.get("vm_discovery", {}).get("dispatcher_addresses", [])
+        if dispatcher_addrs:
+            exec_addrs = dispatcher_addrs[:10] + exec_addrs
         if guidance:
-            exec_addrs = [g["start"] for g in guidance[:50]]
+            exec_addrs = [g["start"] for g in guidance[:50]] + exec_addrs
+        # De-duplicate while preserving order
+        seen = set()
+        unique_addrs = []
+        for a in exec_addrs:
+            if a not in seen:
+                seen.add(a)
+                unique_addrs.append(a)
+        exec_addrs = unique_addrs
 
         # Symbolic execution (limited to prevent explosion)
         MAX_INSNS = 5_000
@@ -145,6 +186,8 @@ class TritonAnalyzer(Plugin):
         ast_counter: Counter[str] = Counter()
         functions_data: List[Dict[str, Any]] = []
         executed_addrs: List[int] = []
+        taint_flow: List[Dict[str, Any]] = []
+        path_constraints: List[str] = []
 
         for start_addr in exec_addrs:
             pc = start_addr
@@ -173,6 +216,39 @@ class TritonAnalyzer(Plugin):
                     node_type = type(ast_node).__name__
                     local_counter[node_type] += 1
                     ast_counter[node_type] += 1
+
+                # --- Taint tracking: record taint propagation ---------------
+                if taint_regs and inst.isTainted():
+                    taint_entry = {
+                        "address": pc,
+                        "disasm": inst.getDisassembly(),
+                    }
+                    try:
+                        tainted_read = [
+                            op.getRegister().getName()
+                            for op in inst.getOperands()
+                            if hasattr(op, "getRegister") and op.getType() == OPERAND.REG
+                            and tc.isRegisterTainted(op.getRegister())
+                        ]
+                        tainted_write = [
+                            op.getRegister().getName()
+                            for op in inst.getOperands()
+                            if hasattr(op, "getRegister") and op.getType() == OPERAND.REG
+                        ]
+                        taint_entry["tainted_reads"] = tainted_read
+                        taint_entry["tainted_writes"] = tainted_write
+                    except Exception:
+                        pass
+                    taint_flow.append(taint_entry)
+
+                # --- Path constraints: collect on branch instructions --------
+                try:
+                    if inst.isBranch() and inst.isSymbolized():
+                        pc_ast = tc.getPathPredicate()
+                        if pc_ast is not None:
+                            path_constraints.append(str(pc_ast)[:500])
+                except Exception:
+                    pass
 
                 pc = int(tc.getConcreteRegisterValue(
                     tc.registers.rip if is_64 else tc.registers.eip
@@ -205,5 +281,10 @@ class TritonAnalyzer(Plugin):
             "functions": functions_data,
             "global_ast_types": dict(ast_counter),
             "guidance_intervals": len(guidance),
+            "taint_flow": taint_flow[:200],
+            "taint_flow_count": len(taint_flow),
+            "tainted_registers_initial": taint_regs,
+            "path_constraints": path_constraints[:50],
+            "path_constraint_count": len(path_constraints),
             "confidence": round(confidence, 4),
         }

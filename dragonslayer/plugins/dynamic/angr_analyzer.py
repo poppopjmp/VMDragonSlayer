@@ -95,15 +95,22 @@ class AngrAnalyzer(Plugin):
                 if addr:
                     guidance.append(addr)
 
+        # Load dispatcher addresses from VM discovery
+        vm_info = ctx.shared_data.get("vm_discovery", {})
+        dispatcher_addrs = vm_info.get("dispatcher_addresses", [])
+        vm_detected = ctx.shared_data.get("vm_detected", False)
+
         # Create angr project
         proj = angr.Project(file_path, auto_load_libs=False)
 
-        # Build CFG
+        # Build CFG with block cap to prevent runaway
+        MAX_BLOCKS = 10_000
         if guidance:
             cfg = proj.analyses.CFGEmulated(
                 starts=guidance[:50],
                 call_depth=3,
                 normalize=True,
+                max_steps=MAX_BLOCKS,
             )
         else:
             cfg = proj.analyses.CFGFast(normalize=True)
@@ -121,6 +128,8 @@ class AngrAnalyzer(Plugin):
             for block_node in func.blocks:
                 block_count += 1
                 total_blocks += 1
+                if total_blocks > MAX_BLOCKS:
+                    break
                 try:
                     vex_block = proj.factory.block(block_node.addr).vex
                     for stmt in vex_block.statements:
@@ -144,7 +153,22 @@ class AngrAnalyzer(Plugin):
             if guidance and func_addr in guidance:
                 func_entry["dynamically_reached"] = True
 
+            # Flag functions near dispatcher addresses (handler candidates)
+            if dispatcher_addrs:
+                for d_addr in dispatcher_addrs:
+                    if abs(func_addr - d_addr) < 0x1000:
+                        func_entry["near_dispatcher"] = True
+                        func_entry["dispatcher_distance"] = abs(func_addr - d_addr)
+                        break
+
             functions_data.append(func_entry)
+
+        # --- Handler boundary detection via SimulationManager ---------------
+        handler_exploration: Dict[str, Any] = {}
+        if vm_detected and dispatcher_addrs:
+            handler_exploration = self._explore_handlers(
+                proj, dispatcher_addrs, max_steps=2000,
+            )
 
         confidence = min(1.0, len(functions_data) / 50) if functions_data else 0.0
 
@@ -155,5 +179,68 @@ class AngrAnalyzer(Plugin):
             "total_blocks": total_blocks,
             "functions": functions_data,
             "guidance_addresses": len(guidance),
+            "handler_exploration": handler_exploration,
             "confidence": round(confidence, 4),
+        }
+
+    def _explore_handlers(
+        self,
+        proj: Any,
+        dispatcher_addrs: List[int],
+        max_steps: int = 2000,
+    ) -> Dict[str, Any]:
+        """
+        Use angr's SimulationManager to explore paths from dispatcher
+        addresses, identifying handler boundaries (where control returns
+        to the dispatcher).
+
+        Returns handler exploration summary.
+        """
+        handlers_found: List[Dict[str, Any]] = []
+        total_paths = 0
+
+        for d_addr in dispatcher_addrs[:5]:  # Limit to first 5 dispatchers
+            try:
+                state = proj.factory.blank_state(addr=d_addr)
+                simgr = proj.factory.simulation_manager(state)
+
+                # Step until we find paths that return to the dispatcher
+                # or reach a function boundary
+                visited = set()
+                for step_i in range(max_steps):
+                    if not simgr.active:
+                        break
+                    simgr.step()
+
+                    new_active = []
+                    for s in simgr.active:
+                        pc = s.addr
+                        if pc in visited:
+                            # Probably looped back to dispatcher
+                            if pc == d_addr:
+                                handlers_found.append({
+                                    "dispatcher": d_addr,
+                                    "path_length": step_i + 1,
+                                    "type": "loop_back",
+                                })
+                            simgr.stash(from_stash="active", to_stash="deadended",
+                                        filter_func=lambda s_, target=s: s_ is target)
+                            continue
+                        visited.add(pc)
+                        new_active.append(s)
+
+                    # Cap active states
+                    if len(simgr.active) > 32:
+                        simgr.drop(stash="active", filter_func=lambda s, n=32: simgr.active.index(s) >= n if s in simgr.active else True)
+
+                total_paths += len(simgr.deadended) + len(simgr.active)
+
+            except Exception as exc:
+                logger.debug("Handler exploration from %#x failed: %s", d_addr, exc)
+                continue
+
+        return {
+            "handlers_found": len(handlers_found),
+            "total_paths_explored": total_paths,
+            "handler_details": handlers_found[:50],
         }
