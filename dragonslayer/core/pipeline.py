@@ -456,7 +456,8 @@ class AnalysisPipeline:
                         successes += 1
                         total_confidence += pr.confidence
                         if pr.data:
-                            ctx.shared_data.setdefault("plugin_results", {})[name] = pr.data
+                            ctx.set_shared("plugin_results",
+                                           {**ctx.get_shared("plugin_results", {}), name: pr.data})
 
             elapsed = time.monotonic() - t0
             avg_confidence = total_confidence / successes if successes else 0.0
@@ -469,7 +470,7 @@ class AnalysisPipeline:
             }
 
             # Store aggregated stage results in shared_data
-            ctx.shared_data[label] = stage_data
+            ctx.set_shared(label, stage_data)
 
             return StageResult(
                 stage=label,

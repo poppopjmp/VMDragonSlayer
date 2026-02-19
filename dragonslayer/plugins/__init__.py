@@ -28,6 +28,7 @@ Stages mirror the Metroplex pipeline:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
@@ -91,6 +92,24 @@ class PluginContext:
     sample_hash: str = ""
     work_dir: str = ""
 
+    def __post_init__(self) -> None:
+        self._lock = threading.Lock()
+
+    def set_shared(self, key: str, value: Any) -> None:
+        """Thread-safe write to ``shared_data``."""
+        with self._lock:
+            self.shared_data[key] = value
+
+    def get_shared(self, key: str, default: Any = None) -> Any:
+        """Thread-safe read from ``shared_data``."""
+        with self._lock:
+            return self.shared_data.get(key, default)
+
+    def update_shared(self, mapping: Dict[str, Any]) -> None:
+        """Thread-safe bulk update of ``shared_data``."""
+        with self._lock:
+            self.shared_data.update(mapping)
+
 
 # ---------------------------------------------------------------------------
 # Plugin base class
@@ -143,14 +162,31 @@ class Plugin(ABC):
             confidence=confidence,
         )
 
+    #: Per-plugin timeout in seconds (0 = no timeout)
+    timeout: float = 0
+
     def safe_execute(
         self,
         file_path: str,
         file_data: bytes,
         context: PluginContext,
     ) -> PluginResult:
-        """Wraps :meth:`execute` with timing + exception guard."""
+        """Wraps :meth:`execute` with timing, timeout, and exception guard.
+
+        If ``self.timeout`` is > 0 the plugin is run in a daemon thread
+        and aborted if it exceeds the configured duration.
+        """
         t0 = time.monotonic()
+
+        effective_timeout = self.timeout or context.config.get(
+            f"plugins.{self.name}.timeout", 0
+        )
+
+        if effective_timeout and effective_timeout > 0:
+            return self._execute_with_timeout(
+                file_path, file_data, context, effective_timeout, t0,
+            )
+
         try:
             result = self.execute(file_path, file_data, context)
             if result.duration == 0.0:
@@ -163,6 +199,61 @@ class Plugin(ABC):
                 error=str(exc),
                 duration=time.monotonic() - t0,
             )
+
+    def _execute_with_timeout(
+        self,
+        file_path: str,
+        file_data: bytes,
+        context: PluginContext,
+        timeout: float,
+        t0: float,
+    ) -> PluginResult:
+        """Run :meth:`execute` in a daemon thread with a hard timeout."""
+        result_holder: list[PluginResult] = []
+        error_holder: list[Exception] = []
+
+        def _worker() -> None:
+            try:
+                result_holder.append(
+                    self.execute(file_path, file_data, context)
+                )
+            except Exception as exc:
+                error_holder.append(exc)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout)
+
+        elapsed = time.monotonic() - t0
+        if thread.is_alive():
+            logger.warning(
+                "Plugin %s timed out after %.1f s", self.name, timeout,
+            )
+            return self._make_result(
+                success=False,
+                error=f"Plugin timed out after {timeout}s",
+                duration=elapsed,
+            )
+
+        if error_holder:
+            logger.exception("Plugin %s failed", self.name, exc_info=error_holder[0])
+            return self._make_result(
+                success=False,
+                error=str(error_holder[0]),
+                duration=elapsed,
+            )
+
+        if result_holder:
+            result = result_holder[0]
+            if result.duration == 0.0:
+                result.duration = elapsed
+            return result
+
+        return self._make_result(
+            success=False,
+            error="Plugin returned no result",
+            duration=elapsed,
+        )
 
 
 # ---------------------------------------------------------------------------
