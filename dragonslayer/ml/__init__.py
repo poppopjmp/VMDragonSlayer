@@ -1,8 +1,8 @@
 """
 Machine Learning Module
 
-All imports are guarded so the package can be imported even when the
-individual sub-modules have not been implemented yet.
+All imports are guarded so the package can be imported even when
+optional dependencies (scikit-learn, PyTorch, etc.) are missing.
 """
 
 try:
@@ -31,6 +31,11 @@ except (ImportError, AttributeError):
     EnsembleClassifier = None  # type: ignore[assignment,misc]
     WeightedEnsemble = None  # type: ignore[assignment,misc]
 
+try:
+    from .classifier import VMClassifier
+except (ImportError, AttributeError):
+    VMClassifier = None  # type: ignore[assignment,misc]
+
 __all__ = [
     'FeatureExtractor',
     'FeatureVector',
@@ -42,4 +47,5 @@ __all__ = [
     'PredictionResult',
     'EnsembleClassifier',
     'WeightedEnsemble',
+    'VMClassifier',
 ]
