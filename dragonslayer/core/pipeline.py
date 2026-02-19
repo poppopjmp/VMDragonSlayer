@@ -570,13 +570,14 @@ class AnalysisPipeline:
     ) -> StageResult:
         """Run taint tracking over the binary using VM discovery results.
 
-        The TaintAnalyzer expects lifted instructions, not raw bytes.
-        We lift via InstructionLifter first, using the dispatcher address
-        from vm_discovery when available.
+        When a VM protector is detected, uses :class:`VMTaintTracker` which
+        provides virtual register mapping and handler boundary detection.
+        Otherwise falls back to the generic :class:`TaintAnalyzer`.
         """
         t0 = time.monotonic()
         try:
             from ..analysis.taint_tracking.analyzer import TaintAnalyzer
+            from ..analysis.taint_tracking.vm_taint_tracker import VMTaintTracker
             from ..analysis.symbolic_execution.lifter import InstructionLifter
 
             # Determine entry point from vm_discovery
@@ -596,23 +597,35 @@ class AnalysisPipeline:
                     duration=time.monotonic() - t0,
                 )
 
-            # Auto-configure taint sources based on VM detection
-            taint_sources: dict[str, str] = {}
-            if vm_info.get("vm_detected"):
-                taint_sources = {
-                    "rsi": "vm_context",
-                    "rbp": "vm_context",
-                    "rdi": "vm_operand",
-                }
+            vm_detected = vm_info.get("vm_detected", False)
 
-            analyzer = TaintAnalyzer()
-            result = analyzer.analyze(
-                instructions,
-                taint_sources=taint_sources,
-                shared_data=ctx.shared_data,
-            )
+            if vm_detected:
+                # Use VM-aware tracker with virtual register mapping
+                vm_type = vm_info.get("vm_type", "").lower()
+                # Pick preset based on detected VM type
+                if "vmprotect" in vm_type:
+                    preset = "vmprotect_x64"
+                elif "themida" in vm_type:
+                    preset = "themida_x64"
+                else:
+                    preset = None
 
-            ctx.shared_data["taint_results"] = result
+                vtt = VMTaintTracker()
+                result = vtt.analyze_vm_trace(
+                    instructions,
+                    vm_preset=preset,
+                )
+                ctx.shared_data["taint_results"] = result
+            else:
+                # Generic taint analysis (no VM-specific enrichment)
+                taint_sources: dict[str, str] = {}
+                analyzer = TaintAnalyzer()
+                result = analyzer.analyze(
+                    instructions,
+                    taint_sources=taint_sources,
+                    shared_data=ctx.shared_data,
+                )
+                ctx.shared_data["taint_results"] = result
 
             return StageResult(
                 stage="taint_analysis",

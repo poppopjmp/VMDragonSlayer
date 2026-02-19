@@ -29,9 +29,10 @@ except (ImportError, AttributeError):
     TaintAnalyzer = None  # type: ignore[assignment,misc]
 
 try:
-    from .vm_taint_tracker import VMTaintTracker
+    from .vm_taint_tracker import VMTaintTracker, VM_REG_PRESETS
 except (ImportError, AttributeError):
     VMTaintTracker = None  # type: ignore[assignment,misc]
+    VM_REG_PRESETS = {}  # type: ignore[assignment]
 
 try:
     from .dtt_executor import DTTExecutor
@@ -46,5 +47,6 @@ __all__ = [
     "TaintResult",
     "TaintAnalyzer",
     "VMTaintTracker",
+    "VM_REG_PRESETS",
     "DTTExecutor",
 ]

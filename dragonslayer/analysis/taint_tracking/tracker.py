@@ -160,7 +160,7 @@ class TaintTracker:
             return TaintResult(success=False, error=str(exc))
 
     def _process_instruction(self, insn: Any) -> None:
-        """Propagate taint for a single instruction."""
+        """Propagate taint for a single instruction, including memory ops."""
         reads = getattr(insn, "reads", [])
         writes = getattr(insn, "writes", [])
         address = getattr(insn, "address", 0)
@@ -168,7 +168,7 @@ class TaintTracker:
         operands = getattr(insn, "operands", "")
         category = getattr(insn, "category", "unknown")
 
-        # Collect taint from read operands
+        # Collect taint from read operands (registers)
         combined_taint = TaintTag.CLEAN
         tainted_sources: List[str] = []
 
@@ -179,17 +179,34 @@ class TaintTracker:
                 combined_taint |= tag
                 tainted_sources.append(reg_lower)
 
+        # --- Memory taint propagation ---
+        # Check if this is a memory read (load) that reads tainted memory
+        if category in ("memory_read", "stack_pop") and not tainted_sources:
+            # Parse memory operand to check for tainted memory address
+            mem_addr = self._extract_memory_address(operands, reads)
+            if mem_addr is not None:
+                mem_tag = self._mem_taint.get(mem_addr, TaintTag.CLEAN)
+                if mem_tag != TaintTag.CLEAN:
+                    combined_taint |= mem_tag
+                    tainted_sources.append(f"mem[{mem_addr:#x}]")
+
+        # Taint from base register used as memory pointer
+        for reg in reads:
+            reg_lower = reg.lower()
+            tag = self._reg_taint.get(reg_lower, TaintTag.CLEAN)
+            if tag != TaintTag.CLEAN and category in ("memory_read", "memory_write"):
+                combined_taint |= TaintTag.MEMORY
+                if reg_lower not in tainted_sources:
+                    tainted_sources.append(reg_lower)
+
         # Propagate to write operands
         if combined_taint != TaintTag.CLEAN:
-            # Mark result as COMPUTED if it's derived from tainted inputs
             output_tag = combined_taint | TaintTag.COMPUTED
 
             for reg in writes:
                 reg_lower = reg.lower()
-                old_tag = self._reg_taint.get(reg_lower, TaintTag.CLEAN)
                 self._reg_taint[reg_lower] = output_tag
 
-                # Record event
                 for src in tainted_sources:
                     self._events.append(TaintEvent(
                         address=address,
@@ -199,8 +216,23 @@ class TaintTracker:
                         destination=reg_lower,
                         tag=output_tag,
                     ))
-                    # Update flow graph
                     self._flow_graph.setdefault(src, set()).add(reg_lower)
+
+            # Memory write with tainted data → taint the memory location
+            if category in ("memory_write", "stack_push"):
+                mem_addr = self._extract_memory_address(operands, reads)
+                if mem_addr is not None:
+                    self._mem_taint[mem_addr] = output_tag
+                    for src in tainted_sources:
+                        self._events.append(TaintEvent(
+                            address=address,
+                            instruction=f"{mnemonic} {operands}",
+                            event_type="propagate",
+                            source=src,
+                            destination=f"mem[{mem_addr:#x}]",
+                            tag=output_tag,
+                        ))
+                        self._flow_graph.setdefault(src, set()).add(f"mem[{mem_addr:#x}]")
 
             # Implicit taint for conditional branches
             if category == "branch_conditional":
@@ -227,6 +259,27 @@ class TaintTracker:
                         tag=TaintTag.CLEAN,
                     ))
                     self._reg_taint[reg_lower] = TaintTag.CLEAN
+
+    @staticmethod
+    def _extract_memory_address(operands: str, reads: List[str]) -> Optional[int]:
+        """
+        Try to extract a concrete memory address from operands.
+
+        Only works for simple cases like ``[0x401000]`` or ``[rsp+0x8]``
+        (if the register value is not available, returns None).
+        """
+        if "[" not in operands:
+            return None
+
+        import re
+        # Match [hex_address]
+        m = re.search(r"\[(?:0x)?([0-9a-fA-F]+)\]", operands)
+        if m:
+            try:
+                return int(m.group(1), 16)
+            except ValueError:
+                pass
+        return None
 
     @staticmethod
     def _event_to_dict(event: TaintEvent) -> Dict[str, Any]:
