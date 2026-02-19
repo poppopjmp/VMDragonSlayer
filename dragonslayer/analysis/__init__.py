@@ -42,3 +42,11 @@ from .bytecode_extract import (  # noqa: F401
     OpcodeMap,
     VMOpcode,
 )
+
+from .handler_semantics import (  # noqa: F401
+    analyse_handler_semantics,
+    HandlerSemantic,
+    OpcodeTableEntry,
+    SemanticOpcodeTable,
+    VMOperation,
+)
