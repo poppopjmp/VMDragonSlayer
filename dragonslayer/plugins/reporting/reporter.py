@@ -264,6 +264,108 @@ def generate_markdown(
         md += "## 7. Dynamic Analysis\n"
         md += "\n".join(dynamic_sections) + "\n\n"
 
+    # ── VM Deobfuscation Analysis ──────────────────────────────────────
+    vm_info = plugins_data.get("vm_discovery", {})
+    taint_results = plugins_data.get("taint_results", {})
+    symex_results = plugins_data.get("symbolic_execution", {})
+    dispatcher_results = plugins_data.get("dispatcher_analysis", {})
+
+    has_vm = vm_info.get("vm_detected") or vm_info.get("protector_name")
+    if has_vm or dispatcher_results or taint_results:
+        md += "## VM Deobfuscation Analysis\n\n"
+
+        # --- Protector identification ---
+        if vm_info:
+            protector = vm_info.get("protector_name") or vm_info.get("vm_type") or "Unknown"
+            confidence = vm_info.get("confidence", 0)
+            md += "### Protector Identification\n"
+            md += f"- **Protector:** {protector}\n"
+            if confidence:
+                md += f"- **Confidence:** {confidence:.0%}\n"
+            dispatchers = vm_info.get("dispatchers") or vm_info.get("dispatcher_addresses", [])
+            if dispatchers:
+                md += f"- **Dispatcher addresses:** {', '.join(f'`0x{d:x}`' if isinstance(d, int) else f'`{d}`' for d in dispatchers)}\n"
+            sigs = vm_info.get("signatures_matched", [])
+            if sigs:
+                md += f"- **Signatures matched:** {len(sigs)}\n"
+            md += "\n"
+
+        # --- Dispatcher / handler table ---
+        if dispatcher_results:
+            dt = dispatcher_results.get("dispatch_table", {})
+            handlers = dt.get("handlers", []) if isinstance(dt, dict) else []
+            md += "### Dispatcher & Handler Table\n"
+            dispatchers_found = dispatcher_results.get("dispatchers", [])
+            if dispatchers_found:
+                md += f"- **Dispatchers found:** {len(dispatchers_found)}\n"
+                for d in dispatchers_found[:5]:
+                    addr = d.get("address", 0) if isinstance(d, dict) else d
+                    md += f"  - `0x{addr:x}`\n" if isinstance(addr, int) else f"  - `{addr}`\n"
+            if handlers:
+                md += f"- **Handlers identified:** {len(handlers)}\n"
+                md += "\n| Opcode | Address | Size |\n|---|---|---|\n"
+                for h in handlers[:30]:
+                    opc = h.get("opcode", "?")
+                    addr = h.get("address", 0)
+                    size = h.get("size", "?")
+                    md += f"| `0x{opc:02x}` | `0x{addr:x}` | {size} |\n" if isinstance(opc, int) and isinstance(addr, int) else f"| `{opc}` | `{addr}` | {size} |\n"
+            md += "\n"
+
+        # --- Symbolic execution results ---
+        if symex_results:
+            md += "### Symbolic Execution\n"
+            paths = symex_results.get("paths_explored", 0)
+            opaques = symex_results.get("opaque_predicates", [])
+            md += f"- **Paths explored:** {paths}\n"
+            if opaques:
+                md += f"- **Opaque predicates detected:** {len(opaques)}\n"
+                for op in opaques[:10]:
+                    addr = op.get("address", 0)
+                    desc = op.get("description", op.get("type", ""))
+                    md += f"  - `0x{addr:x}`: {desc}\n" if isinstance(addr, int) else f"  - {desc}\n"
+            constraints = symex_results.get("constraints", [])
+            if constraints:
+                md += f"- **Symbolic constraints:** {len(constraints)}\n"
+            md += "\n"
+
+        # --- Taint analysis ---
+        if taint_results:
+            md += "### Taint Analysis\n"
+            flow_summary = taint_results.get("data_flow_summary", {})
+            vreg_map = taint_results.get("virtual_register_map", {})
+            handler_boundaries = taint_results.get("handler_boundaries", [])
+            mem_summary = taint_results.get("memory_taint_summary", {})
+
+            if vreg_map:
+                md += "**Virtual Register Mapping:**\n\n"
+                md += "| Native Register | VM Role |\n|---|---|\n"
+                for native, role in sorted(vreg_map.items()):
+                    md += f"| `{native}` | {role} |\n"
+                md += "\n"
+
+            evt_counts = flow_summary.get("event_type_counts", {})
+            if evt_counts:
+                md += "**Taint Flow Statistics:**\n\n"
+                for etype, count in sorted(evt_counts.items()):
+                    md += f"- {etype}: {count}\n"
+                md += "\n"
+
+            if flow_summary.get("has_implicit_flow"):
+                md += "> ⚠️ **Implicit control-flow taint detected** — tainted data affects branch decisions.\n\n"
+            if flow_summary.get("has_memory_flow"):
+                md += "> 📝 **Memory taint propagation detected** — tainted data flows through memory.\n\n"
+
+            if handler_boundaries:
+                md += f"**Handler boundaries detected:** {len(handler_boundaries)}\n"
+                for hb in handler_boundaries[:15]:
+                    addr = hb.get("address", 0)
+                    ev = hb.get("evidence", "")
+                    md += f"- `0x{addr:x}` ({ev})\n" if isinstance(addr, int) else f"- {addr} ({ev})\n"
+                md += "\n"
+
+            if mem_summary and mem_summary.get("tainted_locations", 0) > 0:
+                md += f"**Tainted memory locations:** {mem_summary['tainted_locations']}\n\n"
+
     # 8. Network Indicators
     if domains or urls or ips:
         md += "## 8. Network Indicators\n"
