@@ -286,26 +286,27 @@ class SymbolicExecutor:
             ):
                 ops = prev_insn.operands.replace(" ", "").split(",")
                 if len(ops) == 2:
-                    # Case 1: trivial — `cmp reg, reg` always equal
                     if ops[0] == ops[1]:
-                        opaque.append({
-                            "address": insn.address,
-                            "comparison_address": prev_insn.address,
-                            "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
-                            "branch": f"{insn.mnemonic} {insn.operands}",
-                            "always_true": insn.mnemonic in ("je", "jz", "jle", "jge", "jbe", "jae"),
-                            "confidence": 0.99,
-                        })
-                    # Case 2: test reg, reg — ZF=1 iff reg==0
-                    elif prev_insn.mnemonic == "test" and ops[0] == ops[1]:
-                        opaque.append({
-                            "address": insn.address,
-                            "comparison_address": prev_insn.address,
-                            "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
-                            "branch": f"{insn.mnemonic} {insn.operands}",
-                            "always_true": None,  # depends on register value
-                            "confidence": 0.5,
-                        })
+                        if prev_insn.mnemonic == "test":
+                            # test reg, reg — ZF=1 iff reg==0 (NOT opaque)
+                            opaque.append({
+                                "address": insn.address,
+                                "comparison_address": prev_insn.address,
+                                "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
+                                "branch": f"{insn.mnemonic} {insn.operands}",
+                                "always_true": None,  # depends on register value
+                                "confidence": 0.5,
+                            })
+                        else:
+                            # cmp reg, reg — SUB always yields zero → ZF always 1
+                            opaque.append({
+                                "address": insn.address,
+                                "comparison_address": prev_insn.address,
+                                "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
+                                "branch": f"{insn.mnemonic} {insn.operands}",
+                                "always_true": insn.mnemonic in ("je", "jz", "jle", "jge", "jbe", "jae"),
+                                "confidence": 0.99,
+                            })
                     else:
                         # Case 3: cmp with constant — check if always true/false
                         # e.g. cmp eax, 0 followed by jge  (always true if unsigned)
@@ -716,6 +717,20 @@ class SymbolicExecutor:
         right = self._ensure_bv(right, state.bit_width)
 
         mn = insn.mnemonic
+
+        # TEST performs bitwise AND; CMP performs SUB.
+        # Branch conditions after TEST use (left & right) as the "diff";
+        # after CMP they use (left - right).
+        if cmp_mnemonic == "test":
+            diff = left & right
+            if mn in ("je", "jz"):
+                return diff == 0
+            elif mn in ("jne", "jnz"):
+                return diff != 0
+            # Other branches after TEST are uncommon; fall through to None
+            return None
+
+        # --- CMP semantics: branch on (left - right) comparison ---------
         # Map branch mnemonics to z3 predicates
         if mn in ("je", "jz"):
             return left == right

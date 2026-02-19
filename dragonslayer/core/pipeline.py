@@ -37,6 +37,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+import shutil as _shutil
+
 logger = logging.getLogger(__name__)
 
 
@@ -225,7 +227,8 @@ class AnalysisPipeline:
         errors: List[str] = []
         llm_insights: Dict[str, Any] = {}
 
-        for stage_name in cfg.stages:
+        try:
+          for stage_name in cfg.stages:
             handler = stage_handlers.get(stage_name)
             if handler is None:
                 logger.warning("Unknown pipeline stage '%s' — skipping", stage_name)
@@ -256,15 +259,12 @@ class AnalysisPipeline:
                 ))
                 errors.append(f"[{stage_name}] {exc}")
 
+        finally:
+            # Always clean up the temp directory
+            _shutil.rmtree(work_dir, ignore_errors=True)
+
         elapsed = time.monotonic() - t0
         any_success = any(sr.success for sr in stage_results) if stage_results else False
-
-        # Cleanup temp directory
-        import shutil
-        try:
-            shutil.rmtree(work_dir, ignore_errors=True)
-        except Exception:
-            pass
 
         return PipelineResult(
             success=any_success,
@@ -432,10 +432,6 @@ class AnalysisPipeline:
             successes = 0
             total_confidence = 0.0
 
-            max_w = getattr(
-                pipeline_config, "max_workers", 4
-            ) if hasattr(self, "_pipeline_config") else 4
-            # Access from the pipeline run context if stored
             max_w = getattr(self, "_current_max_workers", 4)
 
             def _exec_one(plugin):
@@ -583,8 +579,8 @@ class AnalysisPipeline:
 
             # Determine entry point from vm_discovery
             vm_info = ctx.shared_data.get("vm_discovery", {})
-            dispatchers = vm_info.get("dispatchers", [])
-            entry = dispatchers[0] if dispatchers else 0
+            dispatcher_addrs = vm_info.get("dispatcher_addresses", [])
+            entry = dispatcher_addrs[0] if dispatcher_addrs else 0
 
             # Lift instructions from binary data
             lifter = InstructionLifter()

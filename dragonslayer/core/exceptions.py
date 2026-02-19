@@ -6,6 +6,8 @@ Each exception carries an ``error_code`` for structured API responses
 and an optional ``details`` dict for diagnostics.
 """
 
+from __future__ import annotations
+
 
 class VMDragonSlayerError(Exception):
     """Base exception for the entire framework."""
