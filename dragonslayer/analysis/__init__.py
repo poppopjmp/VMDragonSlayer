@@ -24,3 +24,14 @@ from .trace_ingestion import (  # noqa: F401
     from_angr_result,
     from_qiling_result,
 )
+
+from .cfg import (  # noqa: F401
+    build_instruction_cfg,
+    build_handler_cfg,
+    extract_basic_blocks,
+    analyse_cfg,
+    find_dominators,
+    BasicBlock,
+    CFGStats,
+    NX_AVAILABLE,
+)
