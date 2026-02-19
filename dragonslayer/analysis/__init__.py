@@ -11,3 +11,16 @@ from .binary_format import (  # noqa: F401
     detect_format,
     LIEF_AVAILABLE,
 )
+
+from .trace_ingestion import (  # noqa: F401
+    ExecutionTrace,
+    TraceInstruction,
+    TraceMemoryAccess,
+    TraceControlFlow,
+    HandlerMarker,
+    parse_trace_text,
+    from_shared_data,
+    from_triton_result,
+    from_angr_result,
+    from_qiling_result,
+)
