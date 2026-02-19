@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from dragonslayer.analysis.binary_format import parse_binary
+
 logger = logging.getLogger(__name__)
 
 
@@ -307,70 +309,12 @@ class EnvironmentNormalizer:
 
         Falls back to the entire binary if the format is unrecognised so
         that non-PE/ELF inputs still get scanned.
+
+        Delegates to :func:`~dragonslayer.analysis.binary_format.parse_binary`
+        for the heavy lifting.
         """
-        ranges: List[Tuple[int, int]] = []
-
-        # ── PE ─────────────────────────────────────────────────────────
-        if data[:2] == b"MZ" and len(data) > 0x40:
-            try:
-                pe_off = struct.unpack_from("<I", data, 0x3C)[0]
-                if data[pe_off : pe_off + 4] == b"PE\x00\x00":
-                    num_sections = struct.unpack_from("<H", data, pe_off + 6)[0]
-                    opt_size = struct.unpack_from("<H", data, pe_off + 20)[0]
-                    section_table = pe_off + 24 + opt_size
-                    IMAGE_SCN_MEM_EXECUTE = 0x20000000
-                    for i in range(num_sections):
-                        entry = section_table + i * 40
-                        if entry + 40 > len(data):
-                            break
-                        characteristics = struct.unpack_from("<I", data, entry + 36)[0]
-                        if characteristics & IMAGE_SCN_MEM_EXECUTE:
-                            raw_size = struct.unpack_from("<I", data, entry + 16)[0]
-                            raw_offset = struct.unpack_from("<I", data, entry + 20)[0]
-                            ranges.append((raw_offset, raw_offset + raw_size))
-            except (struct.error, IndexError):
-                pass
-
-        # ── ELF ────────────────────────────────────────────────────────
-        elif data[:4] == b"\x7fELF" and len(data) > 0x40:
-            try:
-                ei_class = data[4]  # 1 = 32-bit, 2 = 64-bit
-                if ei_class == 1:
-                    e_shoff = struct.unpack_from("<I", data, 0x20)[0]
-                    e_shentsize = struct.unpack_from("<H", data, 0x2E)[0]
-                    e_shnum = struct.unpack_from("<H", data, 0x30)[0]
-                    SHF_EXECINSTR = 0x4
-                    for i in range(e_shnum):
-                        off = e_shoff + i * e_shentsize
-                        if off + e_shentsize > len(data):
-                            break
-                        sh_flags = struct.unpack_from("<I", data, off + 8)[0]
-                        if sh_flags & SHF_EXECINSTR:
-                            sh_offset = struct.unpack_from("<I", data, off + 16)[0]
-                            sh_size = struct.unpack_from("<I", data, off + 20)[0]
-                            ranges.append((sh_offset, sh_offset + sh_size))
-                elif ei_class == 2:
-                    e_shoff = struct.unpack_from("<Q", data, 0x28)[0]
-                    e_shentsize = struct.unpack_from("<H", data, 0x3A)[0]
-                    e_shnum = struct.unpack_from("<H", data, 0x3C)[0]
-                    SHF_EXECINSTR = 0x4
-                    for i in range(e_shnum):
-                        off = e_shoff + i * e_shentsize
-                        if off + e_shentsize > len(data):
-                            break
-                        sh_flags = struct.unpack_from("<Q", data, off + 8)[0]
-                        if sh_flags & SHF_EXECINSTR:
-                            sh_offset = struct.unpack_from("<Q", data, off + 24)[0]
-                            sh_size = struct.unpack_from("<Q", data, off + 32)[0]
-                            ranges.append((sh_offset, sh_offset + sh_size))
-            except (struct.error, IndexError):
-                pass
-
-        # Fallback: treat entire binary as executable
-        if not ranges:
-            ranges = [(0, len(data))]
-
-        return ranges
+        parsed = parse_binary(data)
+        return parsed.executable_ranges()
 
     @staticmethod
     def _in_exec_range(offset: int, exec_ranges: List[Tuple[int, int]]) -> bool:

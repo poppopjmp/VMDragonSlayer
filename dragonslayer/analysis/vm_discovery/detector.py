@@ -20,9 +20,14 @@ handled by Stage-4 plugins (angr, triton, qiling).
 from __future__ import annotations
 
 import logging
-import math
 import struct
 from typing import Any, Dict, List, Optional
+
+from dragonslayer.analysis.binary_format import (
+    ParsedBinary,
+    parse_binary,
+    _calculate_entropy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,78 +90,26 @@ DISPATCHER_PATTERNS: List[tuple[bytes, str]] = [
 
 def _parse_pe_sections(data: bytes) -> List[Dict[str, Any]]:
     """
-    Extract PE section headers from raw bytes without pefile.
+    Extract PE section headers using the shared binary parser.
 
-    Returns a list of dicts: {name, virtual_size, virtual_address,
-    raw_size, raw_offset, characteristics, entropy}.
+    Returns a list of dicts matching the legacy format for backwards
+    compatibility.
     """
-    sections: List[Dict[str, Any]] = []
-    if len(data) < 64 or data[:2] != b"MZ":
-        return sections
-
-    try:
-        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
-        if pe_offset + 24 > len(data):
-            return sections
-        if data[pe_offset:pe_offset + 4] != b"PE\x00\x00":
-            return sections
-
-        # COFF header
-        num_sections = struct.unpack_from("<H", data, pe_offset + 6)[0]
-        opt_hdr_size = struct.unpack_from("<H", data, pe_offset + 20)[0]
-
-        section_table_offset = pe_offset + 24 + opt_hdr_size
-        SECTION_HDR_SIZE = 40
-
-        for i in range(min(num_sections, 96)):  # cap at 96 to avoid abuse
-            off = section_table_offset + i * SECTION_HDR_SIZE
-            if off + SECTION_HDR_SIZE > len(data):
-                break
-
-            name_raw = data[off:off + 8].rstrip(b"\x00")
-            vsize = struct.unpack_from("<I", data, off + 8)[0]
-            vaddr = struct.unpack_from("<I", data, off + 12)[0]
-            raw_size = struct.unpack_from("<I", data, off + 16)[0]
-            raw_offset = struct.unpack_from("<I", data, off + 20)[0]
-            characteristics = struct.unpack_from("<I", data, off + 36)[0]
-
-            # Calculate section entropy (slice handles out-of-bounds gracefully)
-            sec_data = data[raw_offset:raw_offset + raw_size]
-            entropy = _calculate_entropy(sec_data) if sec_data else 0.0
-
-            sections.append({
-                "name": name_raw.decode(errors="replace"),
-                "virtual_size": vsize,
-                "virtual_address": vaddr,
-                "raw_size": raw_size,
-                "raw_offset": raw_offset,
-                "characteristics": characteristics,
-                "entropy": round(entropy, 4),
-                "executable": bool(characteristics & 0x20000000),
-                "writable": bool(characteristics & 0x80000000),
-            })
-
-    except (struct.error, IndexError):
-        pass
-
-    return sections
-
-
-# ---------------------------------------------------------------------------
-# Entropy calculation
-# ---------------------------------------------------------------------------
-
-def _calculate_entropy(data: bytes) -> float:
-    """Shannon entropy in bits per byte (0..8)."""
-    if not data:
-        return 0.0
-    freq = [0] * 256
-    for b in data:
-        freq[b] += 1
-    length = len(data)
-    return -sum(
-        (c / length) * math.log2(c / length) for c in freq if c > 0
-    )
+    parsed = parse_binary(data)
+    return [
+        {
+            "name": sec.name,
+            "virtual_size": sec.virtual_size,
+            "virtual_address": sec.virtual_address,
+            "raw_size": sec.raw_size,
+            "raw_offset": sec.raw_offset,
+            "characteristics": sec.characteristics,
+            "entropy": round(sec.entropy, 4),
+            "executable": sec.executable,
+            "writable": sec.writable,
+        }
+        for sec in parsed.sections
+    ]
 
 
 def _block_entropy_analysis(
