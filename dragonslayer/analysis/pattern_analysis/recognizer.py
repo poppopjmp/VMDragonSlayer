@@ -4,7 +4,10 @@ Pattern Recognizer Module
 Performs pattern matching against instruction sequences to identify
 VM handlers and obfuscation patterns.
 
-Moving completely to YARA rules for pattern definitions and matching will be more efficient and flexible.
+When ``yara-python`` is available the :class:`PatternRecognizer` delegates
+to :class:`~.yara_engine.YaraEngine` for high-performance byte-level
+matching.  Otherwise it falls back to a pure-Python regex engine
+transparently.
 """
 
 import logging
@@ -13,6 +16,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 
 from .database import Pattern, PatternDatabase
+from .yara_engine import YaraEngine, YaraMatch, YARA_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +43,37 @@ class PatternRecognizer:
     """
     Recognizes VM handler patterns in instruction sequences.
 
+    When ``yara-python`` is installed, patterns are compiled to YARA rules
+    for ~10-100× faster scanning.  The pure-Python regex path is kept as a
+    seamless fallback.
     """
     
-    def __init__(self, database: PatternDatabase):
+    def __init__(self, database: PatternDatabase, *, use_yara: bool = True):
         """
         Initialize pattern recognizer.
 
+        Parameters
+        ----------
+        database : PatternDatabase
+            Pattern database to match against.
+        use_yara : bool
+            If *True* (default) and ``yara-python`` is installed, compile the
+            patterns to YARA rules once and use them for all subsequent scans.
         """
         self.database = database
         self._compiled_patterns: Dict[str, re.Pattern] = {}
+
+        # YARA engine (preferred)
+        self._yara: Optional[YaraEngine] = None
+        if use_yara and YARA_AVAILABLE:
+            try:
+                engine = YaraEngine()
+                n = engine.compile_from_database(database)
+                if n:
+                    self._yara = engine
+                    logger.info("YARA engine active – %d rules compiled", n)
+            except Exception:
+                logger.warning("YARA compilation failed – falling back to regex", exc_info=True)
     
     def recognize(self, 
                   instruction_bytes: str,
@@ -57,6 +83,7 @@ class PatternRecognizer:
         """
         Recognize patterns in instruction byte sequence.
 
+        Uses YARA when available, otherwise falls back to regex matching.
         """
         # Convert enum to string if needed
         if architecture and hasattr(architecture, 'value'):
@@ -64,32 +91,22 @@ class PatternRecognizer:
         if handler_type and hasattr(handler_type, 'value'):
             handler_type = handler_type.value
         
-        # Search for relevant patterns
-        patterns = self.database.search(
+        # ---- YARA fast path ----
+        if self._yara is not None:
+            return self._recognize_yara(
+                instruction_bytes,
+                min_confidence=min_confidence,
+                architecture=architecture,
+                handler_type=handler_type,
+            )
+        
+        # ---- Regex fallback ----
+        return self._recognize_regex(
+            instruction_bytes,
+            min_confidence=min_confidence,
             architecture=architecture,
             handler_type=handler_type,
-            min_confidence=min_confidence * 0.8 
         )
-        
-        if not patterns:
-            logger.debug("No patterns found matching search criteria")
-            return []
-        
-        # Normalize input bytes
-        normalized_bytes = self._normalize_bytes(instruction_bytes)
-        
-        # Find matches
-        matches = []
-        for pattern in patterns:
-            pattern_matches = self._match_pattern(pattern, normalized_bytes)
-            for match in pattern_matches:
-                if match.confidence >= min_confidence:
-                    matches.append(match)
-        
-        matches.sort(key=lambda m: m.confidence, reverse=True)
-        
-        logger.info(f"Found {len(matches)} matches (min_confidence={min_confidence})")
-        return matches
     
     def recognize_single(self,
                         instruction_bytes: str,
@@ -107,6 +124,96 @@ class PatternRecognizer:
             handler_type=handler_type
         )
         return matches[0] if matches else None
+    
+    # ------------------------------------------------------------------
+    # YARA fast path
+    # ------------------------------------------------------------------
+
+    def _recognize_yara(
+        self,
+        instruction_bytes: str,
+        *,
+        min_confidence: float = 0.7,
+        architecture: Optional[str] = None,
+        handler_type: Optional[str] = None,
+    ) -> List[Match]:
+        """Use the YARA engine for matching and translate results to Match."""
+        assert self._yara is not None
+
+        yara_hits = self._yara.scan_hex(instruction_bytes, min_confidence=min_confidence)
+
+        # Build a set of acceptable pattern IDs when filtering by arch/type
+        allowed_ids: Optional[set] = None
+        if architecture or handler_type:
+            allowed = self.database.search(
+                architecture=architecture,
+                handler_type=handler_type,
+                min_confidence=0.0,
+            )
+            allowed_ids = {p.pattern_id for p in allowed}
+
+        matches: list[Match] = []
+        for yh in yara_hits:
+            if allowed_ids is not None and yh.pattern_id not in allowed_ids:
+                continue
+
+            pattern = self.database.get_pattern(yh.pattern_id)
+            if pattern is None:
+                continue
+
+            matched_hex = yh.matched_bytes.hex().upper()
+            matches.append(Match(
+                pattern=pattern,
+                start_offset=yh.offset,
+                end_offset=yh.offset + yh.length,
+                confidence=yh.confidence,
+                matched_bytes=self._format_bytes(matched_hex),
+                context={
+                    "variant_index": yh.variant_index,
+                    "match_type": "yara",
+                    "rule_name": yh.rule_name,
+                },
+            ))
+
+        matches.sort(key=lambda m: m.confidence, reverse=True)
+        logger.info("YARA found %d matches (min_confidence=%.2f)", len(matches), min_confidence)
+        return matches
+
+    # ------------------------------------------------------------------
+    # Regex fallback
+    # ------------------------------------------------------------------
+
+    def _recognize_regex(
+        self,
+        instruction_bytes: str,
+        *,
+        min_confidence: float = 0.7,
+        architecture: Optional[str] = None,
+        handler_type: Optional[str] = None,
+    ) -> List[Match]:
+        """Pure-Python regex matching (original algorithm)."""
+        patterns = self.database.search(
+            architecture=architecture,
+            handler_type=handler_type,
+            min_confidence=min_confidence * 0.8,
+        )
+
+        if not patterns:
+            logger.debug("No patterns found matching search criteria")
+            return []
+
+        normalized_bytes = self._normalize_bytes(instruction_bytes)
+
+        matches: list[Match] = []
+        for pattern in patterns:
+            pattern_matches = self._match_pattern(pattern, normalized_bytes)
+            for match in pattern_matches:
+                if match.confidence >= min_confidence:
+                    matches.append(match)
+
+        matches.sort(key=lambda m: m.confidence, reverse=True)
+        logger.info("Regex found %d matches (min_confidence=%.2f)", len(matches), min_confidence)
+        return matches
     
     def _match_pattern(self, pattern: Pattern, normalized_bytes: str) -> List[Match]:
         """
@@ -265,7 +372,9 @@ class PatternRecognizer:
         return {
             'total_patterns': len(self.database),
             'compiled_patterns': len(self._compiled_patterns),
-            'database_stats': self.database.get_statistics()
+            'database_stats': self.database.get_statistics(),
+            'yara_available': YARA_AVAILABLE,
+            'yara_active': self._yara is not None,
         }
 
 

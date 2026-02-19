@@ -22,6 +22,12 @@ from .classifier import (
     ClassificationReport,
 )
 
+from .yara_engine import (
+    YaraEngine,
+    YaraMatch,
+    YARA_AVAILABLE,
+)
+
 __all__ = [
     # Database
     'Pattern',
@@ -38,4 +44,9 @@ __all__ = [
     'PatternClassifier',
     'ClassificationResult',
     'ClassificationReport',
+
+    # YARA
+    'YaraEngine',
+    'YaraMatch',
+    'YARA_AVAILABLE',
 ]

@@ -129,6 +129,11 @@ gpu = [
     "pynvml>=11.5.0"
 ]
 
+# YARA pattern matching (optional – regex fallback when absent)
+yara = [
+    "yara-python>=4.3.0"
+]
+
 # LLM-assisted analysis
 llm = [
     "litellm>=1.30.0"
