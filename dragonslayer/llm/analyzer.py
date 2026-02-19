@@ -87,7 +87,42 @@ Classify the following VM bytecode handler.  Return a JSON object with keys:
   explanation – one-sentence reasoning
   simplified  – pseudo-C equivalent (or "unknown")
 
-Handler disassembly / trace:
+Here are several examples of correct classification:
+
+Example 1 — arithmetic handler:
+```
+mov eax, [esi]       ; fetch operand from VM bytecode
+add [ebp], eax       ; add to top of virtual stack
+add esi, 4           ; advance virtual IP
+jmp dword [edi]      ; dispatch next handler
+```
+Result:
+{{"category": "arithmetic", "confidence": 0.95, "explanation": "Fetches a 32-bit operand from the bytecode stream and adds it to the virtual stack top, characteristic of a vADD handler.", "simplified": "vSP[0] += bytecode[vIP]; vIP += 4;"}}
+
+Example 2 — stack_push handler:
+```
+sub ebp, 4           ; grow virtual stack
+movzx eax, byte [esi]; fetch 1-byte immediate
+mov [ebp], eax       ; push value onto virtual stack
+inc esi              ; advance vIP by 1
+jmp dword [edi]
+```
+Result:
+{{"category": "stack_push", "confidence": 0.92, "explanation": "Pushes an 8-bit immediate from the bytecode stream onto the virtual stack.", "simplified": "vSP -= 4; vSP[0] = (uint32_t)bytecode[vIP]; vIP += 1;"}}
+
+Example 3 — branch_conditional handler:
+```
+mov eax, [ebp]       ; pop condition from virtual stack
+add ebp, 4
+mov ecx, [esi]       ; fetch branch offset
+test eax, eax
+cmovnz esi, ecx      ; if condition != 0, jump
+jmp dword [edi]
+```
+Result:
+{{"category": "branch_conditional", "confidence": 0.90, "explanation": "Pops a condition value and conditionally updates vIP, implementing a virtual conditional branch (vJNZ).", "simplified": "cond = vSP[0]; vSP += 4; if (cond) vIP = offset;"}}
+
+Now classify this handler:
 ```
 {handler_data}
 ```
@@ -104,31 +139,42 @@ Suggest concrete simplifications.  Return a JSON object with keys:
   simplification     – step-by-step simplification approach
   confidence         – float 0..1
 
-Obfuscated structure:
+Here are examples:
+
+Example 1 — opaque predicate:
+```
+mov eax, ecx
+imul eax, ecx        ; eax = ecx^2
+and eax, 1           ; x^2 mod 2
+jnz 0xDEAD           ; always falls through (x^2 is always even for even x)
+```
+Result:
+{{"technique_detected": "opaque_predicate", "simplification": "1. Recognise x*x is always >= 0. 2. x^2 mod 2 == (x mod 2)^2 mod 2. 3. For all x, this predicate is constant at runtime. 4. Replace with NOP (always falls through).", "confidence": 0.88}}
+
+Example 2 — control-flow flattening:
+```
+entry:
+  mov [state_var], 0x1A
+dispatcher:
+  mov eax, [state_var]
+  cmp eax, 0x1A ; jz block_A
+  cmp eax, 0x2B ; jz block_B
+  ...
+block_A:
+  <real code>
+  mov [state_var], 0x2B
+  jmp dispatcher
+```
+Result:
+{{"technique_detected": "control_flow_flattening", "simplification": "1. Identify the dispatcher variable ([state_var]). 2. Trace all assignments to state_var to recover block order. 3. Build a map: {{0x1A: block_A, 0x2B: block_B, ...}}. 4. Relink blocks in original order, removing dispatcher.", "confidence": 0.92}}
+
+Now analyse this structure:
 ```
 {structure}
 ```
 
 Known indicators:
 {indicators}
-"""
-
-_PATTERN_EXPLANATION_PROMPT = """\
-Explain what the following byte-pattern match means in the context \
-of VM-based obfuscation.  Be specific about which packer or protector \
-likely produced it.
-
-Pattern: {pattern_name} ({pattern_id})
-Matched bytes: {matched_bytes}
-Offset: {offset}
-Handler type: {handler_type}
-Architecture: {architecture}
-
-Provide a JSON object:
-  explanation  – 2-3 sentence description
-  packer       – most likely packer name
-  purpose      – what this pattern accomplishes
-  confidence   – float 0..1
 """
 
 _CODE_RECOVERY_PROMPT = """\
@@ -146,6 +192,23 @@ Taint analysis results:
 Symbolic constraints:
 {constraints}
 
+Example — a VM trace that implements memcpy:
+Instructions:
+```
+vPUSH [vSP+0x08]    ; src ptr
+vPUSH [vSP+0x10]    ; dst ptr
+vPUSH [vSP+0x18]    ; count
+vLOAD_BYTE           ; load *src
+vSTORE_BYTE          ; store *dst
+vINC src             ; src++
+vINC dst             ; dst++
+vDEC count           ; count--
+vJNZ loop            ; if count != 0, loop
+```
+Result:
+{{"pseudocode": "void vm_memcpy(void *dst, void *src, size_t n) {{\\n    while (n--) *dst++ = *src++;\\n}}", "confidence": 0.85, "assumptions": ["Loop body is a single-byte copy", "Pointers are incremented post-copy"]}}
+
+Now reconstruct the code for:
 Return a JSON object:
   pseudocode  – reconstructed C-like pseudocode
   confidence  – float 0..1
