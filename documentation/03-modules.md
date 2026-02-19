@@ -2,82 +2,79 @@
 
 Index of primary packages and key modules. Paths link to source and docs where available.
 
+> **Note**: This listing reflects modules that actually exist in the codebase as of Phase 6 (dev-0.9.1).
+
 ## Core System
 
 - **core**
 	- `dragonslayer/core/api.py` — Unified facade for analysis and configuration
-	- `dragonslayer/core/orchestrator.py` — Coordinates analysis workflows and components
-	- `dragonslayer/core/config.py` — Typed configuration and environment overrides
-	- `dragonslayer/core/exceptions.py` — Error hierarchy and validators
+	- `dragonslayer/core/orchestrator.py` — Coordinates analysis workflows; temp-dir cleanup via try/finally; `shutdown()` method
+	- `dragonslayer/core/config.py` — Typed configuration with recursive `_deep_merge`, thread-safe `get_config()` singleton
+	- `dragonslayer/core/exceptions.py` — Error hierarchy and validators (`from __future__ import annotations` for 3.14 compat)
+	- `dragonslayer/core/pipeline.py` — Multi-stage analysis pipeline; wires `avg_confidence` into result_data
 
 - **api**
-	- `dragonslayer/api/server.py` — FastAPI server exposing analysis endpoints
+	- `dragonslayer/api/server.py` — FastAPI server with lifespan context manager, async rate limiter (`asyncio.Lock`), CORS fix
 	- `dragonslayer/api/client.py` — HTTP client for interacting with the server
 	- `dragonslayer/api/endpoints.py` — API endpoint definitions
-	- `dragonslayer/api/transfer.py` — Data transfer utilities
 
 ## Analysis Engine
 
 - **analysis**
-	- `vm_discovery/` — VMDetector and structural detection (docs: modules/dragonslayer/analysis/vm_discovery/detector.md)
-	- `pattern_analysis/` — PatternRecognizer and extended pattern detection
-		- `recognizer.py` — Core pattern recognition
-		- `extended_recognizer.py` — Extended VM pattern matching with metamorphic support
+	- `vm_discovery/` — VMDetector and structural detection
+		- `detector.py` — Section entropy with correct slice, PE/ELF section parsing
+		- `analyzer.py` — VM topology analysis
+		- `database.py` — Signature database (`import re` at module level)
+		- `dispatcher.py` — `DispatcherAnalyzer` with jump-table scanning, 64-bit `entry_size` support
+	- `pattern_analysis/` — PatternRecognizer and pattern detection
+		- `recognizer.py` — Core pattern recognition; offset fix, UnboundLocalError fix, `re.escape()` safety
 		- `classifier.py` — ML-enhanced pattern classification
 		- `database.py` — Pattern database management
-	- `taint_tracking/` — Dynamic taint analysis engine (docs: modules/dragonslayer/analysis/taint_tracking/tracker.md)
+	- `taint_tracking/` — Dynamic taint analysis engine
+		- `tracker.py` — Register + memory taint propagation; `reset()`, public `process_instruction()`, `reg_taint`/`mem_taint` properties
+		- `analyzer.py` — TaintAnalyzer orchestration (calls `reset()` before each run)
+		- `dtt_executor.py` — DTT execution driver
+		- `vm_taint_tracker.py` — VM-aware tracker with virtual register presets (vmprotect_x64/x86, themida_x64)
 	- `symbolic_execution/` — Symbolic execution and path exploration
-		- `executor.py` — Core symbolic executor
-		- `symbolic_engine.py` — Extended symbolic analysis with SMT solving
-		- `lifter.py` — Binary lifting utilities
-		- `solver.py` — Constraint solving interface
-	- `multi_arch/` — Cross-platform architecture support
-		- `cross_platform_detector.py` — Multi-architecture VM detection
+		- `executor.py` — Core symbolic executor; test vs cmp distinction, LEA `_resolve_effective_address()`, deque worklist
+		- `lifter.py` — Binary lifting; int3→SYSTEM, mov MEMORY_WRITE
+		- `solver.py` — z3 constraint solving; `_constraint_stack` push/pop sync
+		- `state.py` — Symbolic state; `_last_cmp` attribute, fork propagation, `read_memory` size from `bit_width`
 	- `anti_evasion/` — Anti-analysis countermeasures
-		- `environment_normalizer.py` — Environment normalization
-		- `security_extensions.py` — Advanced evasion detection and mitigation
+		- `environment_normalizer.py` — Section-aware scanning; per-pattern confidence (`_ANTI_DISASM_CONFIDENCE`), int3 non-patchable
 
-## Machine Learning & Intelligence
+## Machine Learning
 
 - **ml**
-	- `classifier.py` — Core ML classification engine
-	- `ml_detection.py` — ML-based VM detection with ensemble methods
-	- `model.py` — Model management and persistence
-	- `trainer.py` — Training pipeline and optimization
-	- `pipeline.py` — ML processing pipelines
-	- `ensemble.py` — Ensemble method implementations
+	- `classifier.py` — `VMClassifier` high-level entry point
+	- `model.py` — Abstract `BaseModel` / `VMHandlerModel` with `train()`/`predict()`/`save()`/`load()` contract
+	- `trainer.py` — `ModelTrainer` with metric collection, `TrainingResult`, `prepare_training_data()`
+	- `pipeline.py` — `FeatureExtractor` (configurable feature_spec), `FeatureVector` dataclass
+	- `ensemble.py` — `EnsembleClassifier` (majority vote), `WeightedEnsemble` (weighted strategy)
 
-- **analytics**
-	- `intelligence.py` — Threat intelligence integration
-	- `metrics.py` — Performance and accuracy metrics
-	- `reporting.py` — Analysis report generation
-	- `dashboard.py` — Real-time analytics dashboard
-
-## Real-time & Performance
-
-- **realtime**
-	- `analysis_engine.py` — Real-time analysis capabilities with streaming support
+## GPU Acceleration
 
 - **gpu**
-	- `engine.py` — GPU-accelerated analysis engine
-	- `memory.py` — GPU memory management
-	- `optimizer.py` — Performance optimization
-	- `profiler.py` — GPU performance profiling
+	- `__init__.py` — `gpu_available()` with guarded torch/CUDA imports
+	- `engine.py` — `GPUEngine` device management and data transfer interface
+	- `memory.py` — `GPUMemoryManager` allocation tracking
+	- `optimizer.py` — `GPUOptimizer` block-size recommendation
+	- `profiler.py` — `GPUProfiler` wall-clock timing (works without GPU hardware)
 
-## Integration & Extensions
+## LLM Integration
 
-- **unified_analysis.py** — Unified analysis orchestration layer integrating all components
+- **llm**
+	- `analyzer.py` — LLM-assisted analysis via litellm; regex JSON fence stripping, `reset_llm_analyzer()` singleton reset
 
-- **workflows**
-	- `manager.py` — Workflow orchestration and management
-	- `pipeline.py` — Analysis pipeline definitions
-	- `integration.py` — External tool integration
+## Plugin Ecosystem
 
-- **ui**
-	- `dashboard.py` — Web-based analysis dashboard
-	- `interface.py` — User interface components
-	- `widgets.py` — Dashboard widgets and visualizations
-	- `charts.py` — Chart and graph generation
+- **plugins**
+	- `__init__.py` — `PluginRegistry` with duplicate warnings, auto-discovery, thread-safe `PluginContext`
+	- `_storage.py` — `MemoryBackend` (with `threading.Lock`), `LocalFileBackend` (batch flush in `store_bulk`)
+	- `dynamic/` — angr (`simgr.move()` pattern), triton (tainted_write filter), binexport, qiling
+	- `enrichment/` — similarity (ssdeep pre-computed hashes, pefile close), llm, vt, yara
+	- `static/` — capstone, pefile, strings, yara
+	- `reporting/` — json, markdown, html, sarif
 
 - **enterprise**
 	- `enterprise_architecture.py` — Enterprise deployment support

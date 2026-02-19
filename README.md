@@ -110,12 +110,19 @@ graph TD
 - **Purpose**: Detect and neutralise anti-analysis techniques
 - **Section-Aware**: Parses PE/ELF section headers to restrict instruction scanning to executable sections (avoids false positives in data sections)
 - **Detection**: Anti-debug APIs, timing checks (rdtsc), PEB access, VM/sandbox artefacts, anti-disassembly tricks, self-modifying code
-- **Patching**: Generates NOP patches for patchable indicators
+- **Patching**: Generates NOP patches for patchable indicators (int3 excluded as non-patchable)
+- **Tuning**: Per-pattern confidence overrides via `_ANTI_DISASM_CONFIDENCE`; reduced `call_next` false positives
 
 #### 6. **Machine Learning Pipeline** (`dragonslayer.ml`)
 - **Purpose**: Automated classification and analysis assistance
 - **Models**: Basic proof-of-concept models for research and education
-- **Components**: Feature extraction, model training, ensemble prediction
+- **Components**: `VMClassifier` (high-level entry point), `FeatureExtractor`/`FeatureVector`, `ModelTrainer` with metric collection, `EnsembleClassifier` with majority-vote and weighted strategies
+- **Architecture**: Abstract `BaseModel` / `VMHandlerModel` base with `train()`/`predict()`/`save()`/`load()` contract
+
+#### 7. **GPU Acceleration** (`dragonslayer.gpu`)
+- **Purpose**: Optional GPU-accelerated analysis when CUDA hardware is available
+- **Components**: `GPUEngine` (device management), `GPUMemoryManager` (allocation tracking), `GPUOptimizer` (block-size tuning), `GPUProfiler` (wall-clock timing — works without GPU hardware)
+- **Detection**: Runtime `gpu_available()` with guarded torch/CUDA imports; graceful CPU fallback
 
 ## Repository Structure
 
@@ -145,7 +152,7 @@ VMDragonSlayer/
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # 160 tests (159 pass, 1 skip)
+├── tests/                         # 159 pass, 1 skip (z3-solver optional)
 ├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
@@ -206,6 +213,7 @@ VMDragonSlayer integrates with major reverse engineering tools:
 ### Test Suite
 - **160 tests** across 8 test files
 - **159 passed**, 1 skipped (z3-solver optional)
+- All 12 Phase 6 commits verified green before merge
 - Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules
 
 ### What's Implemented and Working
@@ -367,6 +375,13 @@ The framework includes several proof-of-concept models:
 - **Size**: Small models suitable for rapid prototyping
 - **Purpose**: Educational examples and research baselines
 - **Training Data**: Synthetic and limited real-world samples
+
+### Thread Safety & Robustness
+- **Config singleton** — Double-checked locking with `threading.Lock`
+- **Storage backends** — `MemoryBackend` and `LocalFileBackend` guarded with locks; batch flush for bulk writes
+- **Plugin shared_data** — Thread-safe accessors via `PluginContext`
+- **API rate limiter** — `asyncio.Lock`-protected async rate limit handler
+- **Taint state** — `TaintTracker.reset()` ensures clean state between runs
 
 
 ---
