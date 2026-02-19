@@ -161,6 +161,12 @@ class DispatcherAnalyzer:
                 if not existing:
                     dispatcher_infos.append(td)
 
+            # 2b. Scan for push imm32; ret sequences (obfuscated jumps)
+            push_ret_entries = self._find_push_ret_sequences(
+                binary_data,
+                image_base=vm_info.get("image_base", 0),
+            )
+
             # 3. Merge with symbolic execution handler data
             sym_info = shared.get("symbolic_execution", {})
             sym_handlers = sym_info.get("handlers", [])
@@ -198,8 +204,36 @@ class DispatcherAnalyzer:
                             category="table_entry",
                         ))
 
+            # From push/ret sequences — add targets as handler entry points
+            for pr_addr, pr_target in push_ret_entries:
+                if pr_target not in seen_addrs:
+                    seen_addrs.add(pr_target)
+                    handler_table.append(HandlerEntry(
+                        opcode=len(handler_table),
+                        handler_address=pr_target,
+                        category="push_ret_target",
+                    ))
+                # Register the push/ret site as a dispatcher if enough
+                # targets converge in a small region
+            if push_ret_entries:
+                pr_dispatcher = DispatcherInfo(
+                    address=push_ret_entries[0][0],
+                    pattern="push_ret",
+                    dispatch_type="push_ret",
+                    handler_count=len(push_ret_entries),
+                    confidence=min(1.0, 0.4 + len(push_ret_entries) * 0.1),
+                    table_entries=[t for _, t in push_ret_entries],
+                )
+                dispatcher_infos.append(pr_dispatcher)
+
             # 5. Detect dispatcher loops
             for di in dispatcher_infos:
+                # push_ret dispatchers already have accurate counts
+                if di.dispatch_type == "push_ret":
+                    if di.handler_count > 3:
+                        di.loop_detected = True
+                    continue
+
                 di.handler_count = len([
                     h for h in handler_table
                     if abs(h.handler_address - di.address) < 0x10000
@@ -274,6 +308,73 @@ class DispatcherAnalyzer:
                 if len(results) >= 20:
                     break
 
+        return results
+
+    # ------------------------------------------------------------------
+    # push imm32 ; ret  detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _find_push_ret_sequences(
+        data: bytes,
+        *,
+        image_base: int = 0,
+        max_sequences: int = 512,
+    ) -> List[tuple]:
+        """Scan for ``push imm32; ret`` (``\\x68 <4B> \\xC3``) obfuscated jumps.
+
+        VMProtect (and similar protectors) replace direct ``jmp addr`` with a
+        ``push addr; ret`` pair.  This method finds all such 6-byte sequences
+        whose pushed value looks like a plausible code pointer.
+
+        Parameters
+        ----------
+        data : bytes
+            Raw binary data.
+        image_base : int
+            VA of the binary image base (used for pointer validation).
+        max_sequences : int
+            Cap on the number of returned results.
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            ``(file_offset_of_push, pushed_address)`` pairs.
+        """
+        results: List[tuple] = []
+        data_len = len(data)
+        # Pattern: 0x68 <imm32 LE> 0xC3
+        needle = b"\x68"
+        start = 0
+
+        while len(results) < max_sequences:
+            idx = data.find(needle, start)
+            if idx == -1 or idx + 6 > data_len:
+                break
+            start = idx + 1
+
+            # Next byte after the 4-byte immediate must be 0xC3 (ret)
+            if data[idx + 5] != 0xC3:
+                continue
+
+            pushed = struct.unpack_from("<I", data, idx + 1)[0]
+
+            # Basic validation: pushed value should be a plausible code address
+            if pushed == 0:
+                continue
+
+            # If we know image_base, target should be >= image_base
+            if image_base and pushed < image_base:
+                continue
+
+            # For raw files without a known image_base, accept addresses that
+            # fit within a 32-bit VA range and aren't tiny constants.
+            if pushed < 0x1000:
+                continue
+
+            results.append((idx, pushed))
+
+        logger.info("Found %d push/ret sequences", len(results))
         return results
 
     @staticmethod
