@@ -138,7 +138,21 @@ class Config:
                 logger.warning("Invalid VMDS_API_PORT value")
     
     def _merge_config(self, new_config: Dict[str, Any]):
-        \"\"\"Recursively merge new configuration into existing config.\"\"\"\n        self._deep_merge(self._config, new_config)\n\n    @staticmethod\n    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:\n        \"\"\"Recursively merge *override* into *base* in-place.\"\"\"\n        for key, value in override.items():\n            if (\n                isinstance(value, dict)\n                and key in base\n                and isinstance(base[key], dict)\n            ):\n                Config._deep_merge(base[key], value)\n            else:\n                base[key] = value
+        """Recursively merge new configuration into existing config."""
+        self._deep_merge(self._config, new_config)
+
+    @staticmethod
+    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
+        """Recursively merge *override* into *base* in-place."""
+        for key, value in override.items():
+            if (
+                isinstance(value, dict)
+                and key in base
+                and isinstance(base[key], dict)
+            ):
+                Config._deep_merge(base[key], value)
+            else:
+                base[key] = value
     
     def get(self, key: str, default: Any = None) -> Any:
 
