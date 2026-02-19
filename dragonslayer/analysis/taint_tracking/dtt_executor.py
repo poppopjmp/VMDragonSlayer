@@ -63,6 +63,7 @@ class DTTExecutor:
         }
 
         # Apply initial taints
+        self._tracker.reset()
         for reg, tag_name in (taint_sources or {}).items():
             tag = tag_map.get(tag_name.lower(), TaintTag.INPUT)
             self._tracker.taint_register(reg, tag)
@@ -74,7 +75,7 @@ class DTTExecutor:
             state_before = self._tracker.get_state()
 
             # Process instruction
-            self._tracker._process_instruction(insn)
+            self._tracker.process_instruction(insn)
 
             # Snapshot after
             state_after = self._tracker.get_state()
@@ -94,15 +95,12 @@ class DTTExecutor:
                     "taint_changes": changed_regs,
                 })
 
-        # Final result
-        final_result = self._tracker.analyze([])  # get accumulated state
-
         return {
             "success": True,
             "snapshots": snapshots[:200],  # cap
             "snapshots_total": len(snapshots),
             "final_tainted_registers": {
-                reg: str(tag) for reg, tag in self._tracker._reg_taint.items()
+                reg: str(tag) for reg, tag in self._tracker.reg_taint.items()
                 if tag != TaintTag.CLEAN
             },
             "instructions_processed": len(instructions),

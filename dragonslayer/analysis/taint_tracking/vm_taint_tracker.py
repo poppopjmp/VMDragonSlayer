@@ -112,6 +112,9 @@ class VMTaintTracker:
             for i, reg in enumerate(op_regs):
                 self._vreg_map[reg.lower()] = f"vOperand{i}"
 
+        # Reset tracker for clean analysis
+        self._tracker.reset()
+
         # Taint VM context registers
         for reg in ctx_regs:
             self._tracker.taint_register(reg, TaintTag.VM_CONTEXT)

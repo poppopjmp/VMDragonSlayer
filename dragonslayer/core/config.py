@@ -6,6 +6,7 @@ Configuration Management for VMDragonSlayer
 import copy
 import os
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional
 import yaml
@@ -137,12 +138,7 @@ class Config:
                 logger.warning("Invalid VMDS_API_PORT value")
     
     def _merge_config(self, new_config: Dict[str, Any]):
-        """Merge new configuration into existing config."""
-        for key, value in new_config.items():
-            if isinstance(value, dict) and key in self._config:
-                self._config[key].update(value)
-            else:
-                self._config[key] = value
+        \"\"\"Recursively merge new configuration into existing config.\"\"\"\n        self._deep_merge(self._config, new_config)\n\n    @staticmethod\n    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:\n        \"\"\"Recursively merge *override* into *base* in-place.\"\"\"\n        for key, value in override.items():\n            if (\n                isinstance(value, dict)\n                and key in base\n                and isinstance(base[key], dict)\n            ):\n                Config._deep_merge(base[key], value)\n            else:\n                base[key] = value
     
     def get(self, key: str, default: Any = None) -> Any:
 
@@ -195,6 +191,7 @@ class Config:
 
 # Global configuration instance
 _config_instance: Optional[Config] = None
+_config_lock = threading.Lock()
 
 
 def get_config(environment: Optional[str] = None) -> Config:
@@ -203,14 +200,20 @@ def get_config(environment: Optional[str] = None) -> Config:
 
     """
     global _config_instance
-    
-    if _config_instance is None:
-        env = environment or os.environ.get('VMDS_ENVIRONMENT', 'development')
-        _config_instance = Config(environment=env)
-    
+
+    if _config_instance is not None:
+        return _config_instance
+
+    with _config_lock:
+        # Double-check after acquiring lock
+        if _config_instance is None:
+            env = environment or os.environ.get('VMDS_ENVIRONMENT', 'development')
+            _config_instance = Config(environment=env)
+
     return _config_instance
 
 
 def reset_config():
     global _config_instance
-    _config_instance = None
+    with _config_lock:
+        _config_instance = None

@@ -67,6 +67,17 @@ class TaintAnalyzer:
                 self._tracker.taint_register("rbp", TaintTag.VM_CONTEXT)
                 self._tracker.taint_register("rsi", TaintTag.VM_CONTEXT)
 
+        # Reset accumulated state from any previous analysis
+        self._tracker.reset()
+
+        # Re-apply taint sources after reset
+        for name, tag_name in (taint_sources or {}).items():
+            tag = tag_map.get(tag_name.lower(), TaintTag.INPUT)
+            self._tracker.taint_register(name, tag)
+        if shared_data and shared_data.get("vm_discovery", {}).get("vm_detected"):
+            self._tracker.taint_register("rbp", TaintTag.VM_CONTEXT)
+            self._tracker.taint_register("rsi", TaintTag.VM_CONTEXT)
+
         result = self._tracker.analyze(instructions)
 
         return result.to_dict()

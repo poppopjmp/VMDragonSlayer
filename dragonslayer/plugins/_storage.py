@@ -88,47 +88,55 @@ class StorageBackend(ABC):
 
 
 class MemoryBackend(StorageBackend):
-    """Thread-safe-ish in-memory storage for tests and lightweight use."""
+    """Thread-safe in-memory storage for tests and lightweight use."""
 
     def __init__(self) -> None:
+        import threading
         self._data: Dict[str, Dict[str, Dict[str, Any]]] = {}  # index -> doc_id -> doc
+        self._lock = threading.Lock()
 
     def store(self, index: str, doc_id: str, document: Dict[str, Any]) -> bool:
-        self._data.setdefault(index, {})[doc_id] = document
+        with self._lock:
+            self._data.setdefault(index, {})[doc_id] = document
         return True
 
     def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
-        return self._data.get(index, {}).get(doc_id)
+        with self._lock:
+            return self._data.get(index, {}).get(doc_id)
 
     def delete(self, index: str, doc_id: str) -> bool:
-        bucket = self._data.get(index, {})
-        if doc_id in bucket:
-            del bucket[doc_id]
-            return True
-        return False
+        with self._lock:
+            bucket = self._data.get(index, {})
+            if doc_id in bucket:
+                del bucket[doc_id]
+                return True
+            return False
 
     def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
-        bucket = self._data.get(index, {})
-        # Simple match filter
-        match = query.get("match", {})
-        hits: list[Dict[str, Any]] = []
-        for doc in bucket.values():
-            ok = True
-            for k, v in match.items():
-                if str(doc.get(k, "")) != str(v):
-                    ok = False
-                    break
-            if ok:
-                hits.append(doc)
-                if len(hits) >= size:
-                    break
-        return hits
+        with self._lock:
+            bucket = self._data.get(index, {})
+            # Simple match filter
+            match = query.get("match", {})
+            hits: list[Dict[str, Any]] = []
+            for doc in bucket.values():
+                ok = True
+                for k, v in match.items():
+                    if str(doc.get(k, "")) != str(v):
+                        ok = False
+                        break
+                if ok:
+                    hits.append(doc)
+                    if len(hits) >= size:
+                        break
+            return hits
 
     def ensure_index(self, index: str, mapping: Optional[Dict[str, Any]] = None) -> None:
-        self._data.setdefault(index, {})
+        with self._lock:
+            self._data.setdefault(index, {})
 
     def count(self, index: str) -> int:
-        return len(self._data.get(index, {}))
+        with self._lock:
+            return len(self._data.get(index, {}))
 
 
 # ---------------------------------------------------------------------------

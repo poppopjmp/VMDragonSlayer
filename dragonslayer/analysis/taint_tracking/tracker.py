@@ -114,6 +114,27 @@ class TaintTracker:
         """Get the taint tag for a register."""
         return self._reg_taint.get(reg.lower(), TaintTag.CLEAN)
 
+    def reset(self) -> None:
+        """Clear all taint state for reuse across analyses."""
+        self._reg_taint.clear()
+        self._mem_taint.clear()
+        self._events.clear()
+        self._flow_graph.clear()
+
+    def process_instruction(self, insn: Any) -> None:
+        """Public API: propagate taint for a single instruction."""
+        self._process_instruction(insn)
+
+    @property
+    def reg_taint(self) -> Dict[str, TaintTag]:
+        """Public read access to register taint map."""
+        return self._reg_taint
+
+    @property
+    def mem_taint(self) -> Dict[int, TaintTag]:
+        """Public read access to memory taint map."""
+        return self._mem_taint
+
     def analyze(self, instructions: list) -> TaintResult:
         """
         Propagate taint through a sequence of lifted instructions.
