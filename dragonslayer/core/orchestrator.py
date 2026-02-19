@@ -148,7 +148,8 @@ class AnalysisResult:
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
-        d["engine_results"] = [asdict(er) for er in self.engine_results]
+        # asdict() already recursively converted engine_results;
+        # no need to re-convert.
         return d
 
 
@@ -647,44 +648,48 @@ class Orchestrator:
             storage_type = self.config.get("plugins.storage", "memory")
             storage = create_storage(storage_type, **self.config.get("plugins.storage_options", {}))
             work_dir = tempfile.mkdtemp(prefix="vmds_")
-            ctx = PluginContext(
-                storage=storage,
-                config=dict(self.config._config) if hasattr(self.config, "_config") else {},
-                shared_data={
-                    "fileinfo": request.file_info.__dict__ if request.file_info else {},
-                },
-                sample_hash=request.file_info.sha256 if request.file_info else "",
-                work_dir=work_dir,
-            )
+            try:
+                ctx = PluginContext(
+                    storage=storage,
+                    config=dict(self.config._config) if hasattr(self.config, "_config") else {},
+                    shared_data={
+                        "fileinfo": request.file_info.__dict__ if request.file_info else {},
+                    },
+                    sample_hash=request.file_info.sha256 if request.file_info else "",
+                    work_dir=work_dir,
+                )
 
-            file_path = request.metadata.get("filename", "")
-            plugin_results: Dict[str, Any] = {}
-            total_confidence = 0.0
-            successes = 0
+                file_path = request.metadata.get("filename", "")
+                plugin_results: Dict[str, Any] = {}
+                total_confidence = 0.0
+                successes = 0
 
-            for plugin in plugins:
-                pr = plugin.safe_execute(file_path, request.binary_data, ctx)
-                plugin_results[plugin.name] = pr.to_dict()
-                if pr.success:
-                    successes += 1
-                    total_confidence += pr.confidence
+                for plugin in plugins:
+                    pr = plugin.safe_execute(file_path, request.binary_data, ctx)
+                    plugin_results[plugin.name] = pr.to_dict()
+                    if pr.success:
+                        successes += 1
+                        total_confidence += pr.confidence
 
-            elapsed = time.monotonic() - t0
-            avg_confidence = total_confidence / successes if successes else 0.0
+                elapsed = time.monotonic() - t0
+                avg_confidence = total_confidence / successes if successes else 0.0
 
-            return EngineResult(
-                engine=label,
-                success=successes > 0,
-                data={
-                    "plugins_run": len(plugins),
-                    "successful": successes,
-                    "failed": len(plugins) - successes,
-                    "results": plugin_results,
-                    "shared_data": ctx.shared_data,
-                },
-                duration=elapsed,
-                confidence=round(avg_confidence, 4),
-            )
+                return EngineResult(
+                    engine=label,
+                    success=successes > 0,
+                    data={
+                        "plugins_run": len(plugins),
+                        "successful": successes,
+                        "failed": len(plugins) - successes,
+                        "results": plugin_results,
+                        "shared_data": ctx.shared_data,
+                    },
+                    duration=elapsed,
+                    confidence=round(avg_confidence, 4),
+                )
+            finally:
+                import shutil
+                shutil.rmtree(work_dir, ignore_errors=True)
         except Exception as exc:
             logger.exception("Local plugin stage %s failed", label)
             return EngineResult(
@@ -805,6 +810,10 @@ class VMDragonSlayerAPI:
 
     def __init__(self) -> None:
         self._orchestrator = Orchestrator()
+
+    def shutdown(self) -> None:
+        """Release resources held by the orchestrator."""
+        self._orchestrator.shutdown()
 
     def analyze_binary_data(
         self,

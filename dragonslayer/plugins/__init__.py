@@ -267,6 +267,11 @@ def register_plugin(cls: Type[Plugin]) -> Type[Plugin]:
     """Class decorator: register *cls* in the global plugin registry."""
     if not cls.name:
         raise ValueError(f"{cls.__qualname__} must set a 'name' class attribute")
+    if cls.name in _REGISTRY:
+        logger.warning(
+            "Plugin name '%s' already registered by %s — overwritten by %s",
+            cls.name, _REGISTRY[cls.name].__qualname__, cls.__qualname__,
+        )
     _REGISTRY[cls.name] = cls
     return cls
 
@@ -277,7 +282,6 @@ def get_plugin(name: str) -> Plugin | None:
     if cls is None:
         return None
     if not cls.available():
-        logger.warning("Plugin '%s' not available (missing dependencies)", name)
         return None
     return cls()
 
@@ -330,9 +334,16 @@ def _auto_discover() -> None:
         for mod_info in pkgutil.iter_modules([str(pkg_dir)]):
             try:
                 importlib.import_module(f"{full_pkg}.{mod_info.name}")
-            except Exception:  # noqa: BLE001
+            except ImportError:
+                # Optional dependency missing — expected, debug-level
                 logger.debug(
-                    "Could not import plugins.%s.%s",
+                    "Could not import plugins.%s.%s (missing dep)",
+                    subpkg, mod_info.name,
+                )
+            except Exception:  # noqa: BLE001
+                # Real bug — surface at WARNING
+                logger.warning(
+                    "Unexpected error importing plugins.%s.%s",
                     subpkg, mod_info.name,
                     exc_info=True,
                 )
