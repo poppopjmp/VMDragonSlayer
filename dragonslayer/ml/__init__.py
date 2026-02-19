@@ -36,6 +36,19 @@ try:
 except (ImportError, AttributeError):
     VMClassifier = None  # type: ignore[assignment,misc]
 
+try:
+    from .handler_classifier import (
+        TrainedHandlerModel,
+        classify_handlers,
+        build_handler_classifier,
+        HANDLER_CATEGORIES,
+    )
+except (ImportError, AttributeError):
+    TrainedHandlerModel = None  # type: ignore[assignment,misc]
+    classify_handlers = None  # type: ignore[assignment,misc]
+    build_handler_classifier = None  # type: ignore[assignment,misc]
+    HANDLER_CATEGORIES = None  # type: ignore[assignment,misc]
+
 __all__ = [
     'FeatureExtractor',
     'FeatureVector',
@@ -48,4 +61,8 @@ __all__ = [
     'EnsembleClassifier',
     'WeightedEnsemble',
     'VMClassifier',
+    'TrainedHandlerModel',
+    'classify_handlers',
+    'build_handler_classifier',
+    'HANDLER_CATEGORIES',
 ]
