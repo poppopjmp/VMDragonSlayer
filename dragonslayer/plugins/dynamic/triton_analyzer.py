@@ -234,6 +234,7 @@ class TritonAnalyzer(Plugin):
                             op.getRegister().getName()
                             for op in inst.getOperands()
                             if hasattr(op, "getRegister") and op.getType() == OPERAND.REG
+                            and tc.isRegisterTainted(op.getRegister())
                         ]
                         taint_entry["tainted_reads"] = tainted_read
                         taint_entry["tainted_writes"] = tainted_write
@@ -259,7 +260,7 @@ class TritonAnalyzer(Plugin):
 
             if local_insns > 0:
                 func_hash = hashlib.md5(
-                    f"{start_addr}:{list(local_counter.items())}".encode()
+                    f"{start_addr}:{sorted(local_counter.items())}".encode()
                 ).hexdigest()
                 functions_data.append({
                     "address": start_addr,

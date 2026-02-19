@@ -138,7 +138,7 @@ class AngrAnalyzer(Plugin):
                     continue
 
             func_hash = hashlib.md5(
-                f"{func.name}:{list(mnemonic_counter.items())}".encode()
+                f"{func.name}:{sorted(mnemonic_counter.items())}".encode()
             ).hexdigest()
 
             func_entry: Dict[str, Any] = {
@@ -206,14 +206,14 @@ class AngrAnalyzer(Plugin):
 
                 # Step until we find paths that return to the dispatcher
                 # or reach a function boundary
-                visited = set()
+                visited: set = set()
                 for step_i in range(max_steps):
                     if not simgr.active:
                         break
                     simgr.step()
 
-                    new_active = []
-                    for s in simgr.active:
+                    keep: list = []
+                    for s in list(simgr.active):  # snapshot list
                         pc = s.addr
                         if pc in visited:
                             # Probably looped back to dispatcher
@@ -223,15 +223,25 @@ class AngrAnalyzer(Plugin):
                                     "path_length": step_i + 1,
                                     "type": "loop_back",
                                 })
-                            simgr.stash(from_stash="active", to_stash="deadended",
-                                        filter_func=lambda s_, target=s: s_ is target)
-                            continue
-                        visited.add(pc)
-                        new_active.append(s)
+                            # Move state out of active
+                            simgr.move(
+                                from_stash="active",
+                                to_stash="deadended",
+                                filter_func=lambda s_, target=s: s_ is target,
+                            )
+                        else:
+                            visited.add(pc)
+                            keep.append(s)
 
-                    # Cap active states
+                    # Cap active states to prevent explosion
                     if len(simgr.active) > 32:
-                        simgr.drop(stash="active", filter_func=lambda s, n=32: simgr.active.index(s) >= n if s in simgr.active else True)
+                        excess = list(simgr.active)[32:]
+                        for s in excess:
+                            simgr.move(
+                                from_stash="active",
+                                to_stash="deadended",
+                                filter_func=lambda s_, tgt=s: s_ is tgt,
+                            )
 
                 total_paths += len(simgr.deadended) + len(simgr.active)
 

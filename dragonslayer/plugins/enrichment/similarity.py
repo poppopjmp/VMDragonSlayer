@@ -77,6 +77,7 @@ def _detect_format(data: bytes) -> str:
 def _extract_pe_features(file_path: str) -> Dict[str, Any]:
     """Extract PE features for similarity comparison."""
     features: Dict[str, Any] = {}
+    pe: Optional[Any] = None
     try:
         pe = pefile.PE(file_path)
         # Imports
@@ -118,6 +119,9 @@ def _extract_pe_features(file_path: str) -> Dict[str, Any]:
             features["imphash"] = pe.get_imphash()
     except Exception as exc:
         logger.warning("PE feature extraction failed: %s", exc)
+    finally:
+        if pe is not None:
+            pe.close()
     return features
 
 
@@ -206,8 +210,13 @@ WEIGHTS = {
 }
 
 
-def compute_similarity(feat_a: Dict[str, Any], feat_b: Dict[str, Any], data_a: bytes = b"", data_b: bytes = b"") -> Dict[str, Any]:
-    """Compute weighted similarity between two feature dicts."""
+def compute_similarity(feat_a: Dict[str, Any], feat_b: Dict[str, Any], data_a: bytes = b"", data_b: bytes = b"",
+                       ssdeep_a: str = "", ssdeep_b: str = "") -> Dict[str, Any]:
+    """Compute weighted similarity between two feature dicts.
+
+    *ssdeep_a* / *ssdeep_b* allow passing pre-computed hashes so that
+    the raw bytes are not required for stored-sample comparisons.
+    """
     scores: Dict[str, float] = {}
     scores["imports"] = _jaccard(set(feat_a.get("imports", [])), set(feat_b.get("imports", [])))
     scores["import_frequency"] = _cosine(
@@ -218,12 +227,15 @@ def compute_similarity(feat_a: Dict[str, Any], feat_b: Dict[str, Any], data_a: b
     scores["exports"] = _jaccard(set(feat_a.get("exports", [])), set(feat_b.get("exports", [])))
     scores["resources"] = _jaccard(set(feat_a.get("resources", [])), set(feat_b.get("resources", [])))
 
-    # ssdeep
-    if _HAS_SSDEEP and data_a and data_b:
+    # ssdeep — prefer pre-computed hashes, fall back to raw bytes
+    if _HAS_SSDEEP:
         try:
-            h_a = ssdeep.hash(data_a)
-            h_b = ssdeep.hash(data_b)
-            scores["ssdeep"] = ssdeep.compare(h_a, h_b) / 100.0
+            h_a = ssdeep_a or (ssdeep.hash(data_a) if data_a else "")
+            h_b = ssdeep_b or (ssdeep.hash(data_b) if data_b else "")
+            if h_a and h_b:
+                scores["ssdeep"] = ssdeep.compare(h_a, h_b) / 100.0
+            else:
+                scores["ssdeep"] = 0.0
         except Exception:
             scores["ssdeep"] = 0.0
     else:
@@ -332,13 +344,26 @@ class SimilarityPlugin(Plugin):
         """Compare current sample against stored feature sets."""
         assert ctx.storage is not None
         hits = ctx.storage.query("similarity_features", {"match": {}}, size=50)
+
+        # Pre-compute our ssdeep hash once
+        our_ssdeep = ""
+        if _HAS_SSDEEP and file_data:
+            try:
+                our_ssdeep = ssdeep.hash(file_data)
+            except Exception:
+                pass
+
         comparisons = []
         for stored in hits:
             stored_hash = stored.get("hash", "")
             if stored_hash == ctx.sample_hash:
                 continue  # skip self
             stored_feats = stored.get("features", {})
-            sim = compute_similarity(features, stored_feats, file_data, b"")
+            stored_ssdeep = stored.get("ssdeep", "")
+            sim = compute_similarity(
+                features, stored_feats,
+                ssdeep_a=our_ssdeep, ssdeep_b=stored_ssdeep,
+            )
             sim["sample_hash"] = stored_hash
             comparisons.append(sim)
         # Sort by descending similarity
