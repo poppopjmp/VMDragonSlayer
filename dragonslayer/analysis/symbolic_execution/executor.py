@@ -16,6 +16,7 @@ the pipeline and LLM analyzer consume.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -385,13 +386,13 @@ class SymbolicExecutor:
             initial_pc=entry_point,
         )
 
-        worklist = [initial_state]
+        worklist: deque[SymbolicState] = deque([initial_state])
         paths = 0
         total_insns = 0
         snapshots: List[Dict[str, Any]] = []
 
         while worklist and paths < self.max_paths:
-            state = worklist.pop(0)
+            state = worklist.popleft()
             path_len = 0
 
             while not state.halted and path_len < self.max_depth:
@@ -556,30 +557,42 @@ class SymbolicExecutor:
 
             elif mnemonic == "push" and len(ops) == 1:
                 val = self._resolve_operand(state, ops[0])
-                sp = state.get_register("rsp" if state.bit_width == 64 else "esp")
+                sp_reg = "rsp" if state.bit_width == 64 else "esp"
+                sp = state.get_register(sp_reg)
+                word_size = state.bit_width // 8
                 if isinstance(sp, int):
-                    sp -= state.bit_width // 8
-                    state.set_register("rsp" if state.bit_width == 64 else "esp", sp)
-                    state.write_memory(sp, val, state.bit_width // 8)
+                    sp -= word_size
+                    state.set_register(sp_reg, sp)
+                    state.write_memory(sp, val, word_size)
                 elif Z3Solver.available() and hasattr(sp, "sort"):
                     import z3 as _z3
-                    dec = _z3.BitVecVal(state.bit_width // 8, state.bit_width)
+                    dec = _z3.BitVecVal(word_size, state.bit_width)
                     sp = sp - dec
-                    state.set_register("rsp" if state.bit_width == 64 else "esp", sp)
+                    state.set_register(sp_reg, sp)
+                    # Write to symbolic address — store in memory log
+                    state.write_memory(0, val, word_size)  # best-effort
 
             elif mnemonic == "pop" and len(ops) == 1:
-                sp = state.get_register("rsp" if state.bit_width == 64 else "esp")
+                sp_reg = "rsp" if state.bit_width == 64 else "esp"
+                sp = state.get_register(sp_reg)
+                word_size = state.bit_width // 8
                 if isinstance(sp, int):
-                    val = state.read_memory(sp, state.bit_width // 8)
+                    val = state.read_memory(sp, word_size)
                     self._write_operand(state, ops[0], val)
-                    sp += state.bit_width // 8
-                    state.set_register("rsp" if state.bit_width == 64 else "esp", sp)
+                    sp += word_size
+                    state.set_register(sp_reg, sp)
+                elif Z3Solver.available() and hasattr(sp, "sort"):
+                    import z3 as _z3
+                    # Can't read from symbolic address — create fresh symbolic
+                    val = _z3.BitVec(f"pop_{state.depth}", state.bit_width)
+                    self._write_operand(state, ops[0], val)
+                    inc = _z3.BitVecVal(word_size, state.bit_width)
+                    state.set_register(sp_reg, sp + inc)
 
             elif mnemonic == "lea" and len(ops) == 2:
-                # LEA doesn't dereference — just computes the address
-                # Simplified: treat as mov for register-register cases
-                val = self._resolve_operand(state, ops[1])
-                self._write_operand(state, ops[0], val)
+                # LEA computes effective address WITHOUT dereferencing
+                addr = self._resolve_effective_address(state, ops[1])
+                self._write_operand(state, ops[0], addr)
 
             elif mnemonic in ("movzx", "movsx", "movsxd") and len(ops) == 2:
                 val = self._resolve_operand(state, ops[1])
@@ -590,7 +603,7 @@ class SymbolicExecutor:
                 # Store comparison info for branch constraint building.
                 left = self._resolve_operand(state, ops[0])
                 right = self._resolve_operand(state, ops[1])
-                state._last_cmp = (mnemonic, left, right)  # type: ignore[attr-defined]
+                state._last_cmp = (mnemonic, left, right)
 
             elif mnemonic == "xchg" and len(ops) == 2:
                 a = self._resolve_operand(state, ops[0])
@@ -598,9 +611,51 @@ class SymbolicExecutor:
                 self._write_operand(state, ops[0], b)
                 self._write_operand(state, ops[1], a)
 
-        except Exception:
-            # Non-fatal: if we can't model an instruction we skip it
-            pass
+        except Exception as exc:
+            # Non-fatal: log for debugging, but continue execution
+            logger.debug("Could not model '%s %s': %s", mnemonic, insn.operands, exc)
+
+    def _resolve_effective_address(self, state: SymbolicState, operand: str) -> Any:
+        """Compute an effective address WITHOUT dereferencing memory.
+
+        Used for LEA instructions: ``lea rax, [rbx+8]`` → computes
+        ``rbx + 8`` and returns the *address*, not the value *at* the address.
+        """
+        operand = operand.strip()
+
+        # Strip size prefixes
+        for prefix in ("byte ptr ", "word ptr ", "dword ptr ", "qword ptr "):
+            if operand.lower().startswith(prefix):
+                operand = operand[len(prefix):]
+                break
+
+        if operand.startswith("[") and operand.endswith("]"):
+            inner = operand[1:-1].strip()
+            for sep in ("+", "-"):
+                if sep in inner:
+                    parts = inner.split(sep, 1)
+                    base_reg = parts[0].strip().lower()
+                    if base_reg in state.registers:
+                        base_val = state.get_register(base_reg)
+                        try:
+                            offset_val = int(parts[1].strip(), 0)
+                            if sep == "-":
+                                offset_val = -offset_val
+                        except ValueError:
+                            offset_val = 0
+                        if isinstance(base_val, int):
+                            return base_val + offset_val
+                        elif Z3Solver.available() and hasattr(base_val, "sort"):
+                            import z3 as _z3
+                            return base_val + _z3.BitVecVal(offset_val, state.bit_width)
+                    break
+            # Simple [reg]
+            inner_lower = inner.lower()
+            if inner_lower in state.registers:
+                return state.get_register(inner_lower)
+
+        # Fallback to _resolve_operand for non-memory operands
+        return self._resolve_operand(state, operand)
 
     def _resolve_operand(self, state: SymbolicState, operand: str) -> Any:
         """Resolve an operand to a symbolic or concrete value."""

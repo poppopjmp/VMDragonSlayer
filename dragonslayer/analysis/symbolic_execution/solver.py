@@ -54,6 +54,7 @@ class Z3Solver:
     def __init__(self, timeout_ms: int = 10000) -> None:
         self.timeout_ms = timeout_ms
         self._constraints: List[Any] = []
+        self._constraint_stack: List[int] = []  # indices for push/pop sync
         if _Z3_AVAILABLE:
             self._solver = z3.Solver()
             self._solver.set("timeout", timeout_ms)
@@ -91,14 +92,21 @@ class Z3Solver:
     def reset(self) -> None:
         """Clear all constraints."""
         self._constraints.clear()
+        self._constraint_stack.clear()
         if self._solver:
             self._solver.reset()
 
     def push(self) -> None:
+        """Save the current constraint count for later pop()."""
+        self._constraint_stack.append(len(self._constraints))
         if self._solver:
             self._solver.push()
 
     def pop(self) -> None:
+        """Restore constraints to the last push() point."""
+        if self._constraint_stack:
+            idx = self._constraint_stack.pop()
+            self._constraints = self._constraints[:idx]
         if self._solver:
             self._solver.pop()
 

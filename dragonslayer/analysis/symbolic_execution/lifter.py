@@ -117,7 +117,8 @@ _MNEMONIC_CATEGORIES: Dict[str, str] = {
     "retn": InstructionCategory.RETURN,
     # NOP
     "nop": InstructionCategory.NOP,
-    "int3": InstructionCategory.NOP,
+    # System (int3 is a trap, not a NOP)
+    "int3": InstructionCategory.SYSTEM,
     # System
     "syscall": InstructionCategory.SYSTEM,
     "sysenter": InstructionCategory.SYSTEM,
@@ -215,6 +216,13 @@ class InstructionLifter:
 
             mnemonic = insn.mnemonic.lower()
             category = _MNEMONIC_CATEGORIES.get(mnemonic, InstructionCategory.UNKNOWN)
+
+            # Refine mov-family category based on first operand (destination).
+            # If destination is a memory reference, it's a write, not a read.
+            if category == InstructionCategory.MEMORY_READ and insn.op_str:
+                dest = insn.op_str.split(",")[0].strip()
+                if dest.startswith("[") or "ptr" in dest.lower():
+                    category = InstructionCategory.MEMORY_WRITE
 
             # Extract read/write registers
             reads: List[str] = []

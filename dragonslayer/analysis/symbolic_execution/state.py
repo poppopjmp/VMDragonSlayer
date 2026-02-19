@@ -82,6 +82,7 @@ class SymbolicState:
         self.constraints: List[Any] = []
         self._memory_log: List[MemoryWrite] = []
         self._visited_pcs: Set[int] = set()
+        self._last_cmp: Any = None  # (mnemonic, left, right) from last cmp/test
 
         # Initialise registers
         reg_names = self.X86_64_REGISTERS if "64" in arch else self.X86_32_REGISTERS
@@ -104,8 +105,13 @@ class SymbolicState:
 
     # -- Memory access -------------------------------------------------------
 
-    def read_memory(self, address: int, size: int = 8) -> Any:
-        """Read *size* bytes from memory at *address*."""
+    def read_memory(self, address: int, size: int = 0) -> Any:
+        """Read *size* bytes from memory at *address*.
+        
+        If *size* is 0 (default), uses the architecture word size.
+        """
+        if size == 0:
+            size = self.bit_width // 8
         val = self.memory.get(address)
         if val is not None:
             return val
@@ -145,6 +151,7 @@ class SymbolicState:
         new.constraints = list(self.constraints)
         new._memory_log = list(self._memory_log)
         new._visited_pcs = set(self._visited_pcs)
+        new._last_cmp = self._last_cmp
         return new
 
     def visit(self, pc: int) -> None:
