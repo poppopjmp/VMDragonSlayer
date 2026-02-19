@@ -4,15 +4,16 @@ VMDragonSlayer API Server
 FastAPI-based REST API server for binary analysis operations.
 """
 
-import logging
+import asyncio
 import base64
+import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
 import tempfile
-import asyncio
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -82,76 +83,91 @@ class StatusResponse(BaseModel):
     supported_types: List[str]
 
 
+# ---------------------------------------------------------------------------
+# Lifespan (replaces deprecated @app.on_event)
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Startup / shutdown lifecycle for the FastAPI app."""
+    logger.info("Starting VMDragonSlayer API server...")
+    try:
+        server_state['api'] = VMDragonSlayerAPI()
+        logger.info("API server started successfully")
+    except Exception as exc:
+        logger.error("Failed to start API server: %s", exc)
+        raise
+    yield
+    # --- shutdown ---
+    logger.info("Shutting down VMDragonSlayer API server...")
+    api = server_state.get('api')
+    if api is not None:
+        api.shutdown()
+    server_state['api'] = None
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="VMDragonSlayer API",
     description="Advanced Virtual Machine Detection and Analysis Framework",
     version="2025.10",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS middleware
+# NOTE: allow_origins=["*"] and allow_credentials=True is invalid per the
+# CORS spec; browsers will reject the response.  Use explicit origins in
+# production and set allow_credentials=True only with a restricted list.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Configure appropriately in production
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Global state
-server_state = {
+server_state: Dict[str, Any] = {
     'start_time': time.time(),
     'total_requests': 0,
     'active_requests': 0,
     'analysis_count': 0,
     'api': None,
-    'rate_limiter': defaultdict(list)  # IP -> [timestamps]
+    'rate_limiter': defaultdict(list),  # IP -> [timestamps]
 }
 
+# Async lock protects rate_limiter dict against concurrent ASGI requests
+_rate_lock = asyncio.Lock()
 
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = 10  # requests per window
 RATE_LIMIT_WINDOW = 60  # seconds
 
 
-def check_rate_limit(request: Request) -> bool:
-    """Check if request exceeds rate limit."""
+async def check_rate_limit(request: Request) -> bool:
+    """Check if request exceeds rate limit (async-safe)."""
     client_ip = request.client.host
     now = time.time()
-    
-    # Clean old entries
-    server_state['rate_limiter'][client_ip] = [
-        t for t in server_state['rate_limiter'][client_ip]
-        if now - t < RATE_LIMIT_WINDOW
-    ]
-    
-    # Check limit
-    if len(server_state['rate_limiter'][client_ip]) >= RATE_LIMIT_REQUESTS:
-        return False
-    
-    # Add current request
-    server_state['rate_limiter'][client_ip].append(now)
-    return True
+
+    async with _rate_lock:
+        # Clean old entries
+        server_state['rate_limiter'][client_ip] = [
+            t for t in server_state['rate_limiter'][client_ip]
+            if now - t < RATE_LIMIT_WINDOW
+        ]
+
+        # Check limit
+        if len(server_state['rate_limiter'][client_ip]) >= RATE_LIMIT_REQUESTS:
+            return False
+
+        # Add current request
+        server_state['rate_limiter'][client_ip].append(now)
+        return True
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize API on startup."""
-    try:
-        logger.info("Starting VMDragonSlayer API server...")
-        server_state['api'] = VMDragonSlayerAPI()
-        logger.info("API server started successfully")
-    except Exception as e:
-        logger.error(f"Failed to start API server: {e}")
-        raise
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
-    logger.info("Shutting down VMDragonSlayer API server...")
+# Startup / shutdown now handled by the ``lifespan`` context manager above.
 
 
 # Middleware for request counting
@@ -321,18 +337,18 @@ async def analyze_binary(
         Analysis results with success status and findings
     """
     # Rate limiting
-    if not check_rate_limit(request):
+    if not await check_rate_limit(request):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded. Please try again later."
         )
-    
+
     api = server_state['api']
-    
+
     try:
         # Decode binary data
         binary_data = base64.b64decode(analysis_request.sample_data)
-        
+
         # Check size limit (default 100MB)
         max_size = 100 * 1024 * 1024  # 100MB
         if len(binary_data) > max_size:
@@ -340,7 +356,7 @@ async def analyze_binary(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"File too large. Maximum size: {max_size / (1024*1024)}MB"
             )
-        
+
         # Perform analysis
         result = api.analyze_binary_data(
             binary_data,
@@ -348,22 +364,21 @@ async def analyze_binary(
             metadata=analysis_request.metadata,
             **analysis_request.options
         )
-        
+
         server_state['analysis_count'] += 1
-        
+
         return AnalysisResponse(**result)
-        
-    except InvalidDataError as e:
-        logger.warning(f"Invalid data error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Analysis failed: {e}")
+
+    except InvalidDataError as exc:
+        # Let the global exception_handler handle it by re-raising
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(e)}"
+            detail=f"Analysis failed: {str(exc)}"
         )
 
 
@@ -386,18 +401,18 @@ async def upload_and_analyze(
         Analysis results
     """
     # Rate limiting
-    if not check_rate_limit(request):
+    if not await check_rate_limit(request):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded. Please try again later."
         )
-    
+
     api = server_state['api']
-    
+
     try:
         # Read file data
         binary_data = await file.read()
-        
+
         # Check size limit
         max_size = 100 * 1024 * 1024  # 100MB
         if len(binary_data) > max_size:
@@ -405,30 +420,32 @@ async def upload_and_analyze(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"File too large. Maximum size: {max_size / (1024*1024)}MB"
             )
-        
+
         # Prepare metadata
         metadata = {
             'filename': file.filename,
             'content_type': file.content_type,
             'size': len(binary_data)
         }
-        
+
         # Perform analysis
         result = api.analyze_binary_data(
             binary_data,
             analysis_type=analysis_type,
             metadata=metadata
         )
-        
+
         server_state['analysis_count'] += 1
-        
+
         return result
-        
-    except Exception as e:
-        logger.error(f"Upload analysis failed: {e}")
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Upload analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(e)}"
+            detail=f"Analysis failed: {str(exc)}"
         )
     finally:
         await file.close()
@@ -442,7 +459,7 @@ if __name__ == "__main__":
     host = getattr(config, 'api_host', 'localhost')
     port = getattr(config, 'api_port', 8000)
     
-    logger.info(f"Starting server on {host}:{port}")
+    logger.info("Starting server on %s:%s", host, port)
     
     uvicorn.run(
         "dragonslayer.api.server:app",

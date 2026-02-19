@@ -311,7 +311,7 @@ class Orchestrator:
         metadata: Dict[str, Any] | None = None,
     ) -> AnalysisResult:
         """Async wrapper that runs the synchronous dispatch in a thread."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor,
             lambda: self.analyze_binary(
