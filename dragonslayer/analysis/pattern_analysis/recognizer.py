@@ -209,6 +209,8 @@ class PatternRecognizer:
         if total_bytes > 0:
             exactness_ratio = exact_bytes / total_bytes
             confidence *= (0.7 + 0.3 * exactness_ratio)  
+        else:
+            exactness_ratio = 0.0
         # Apply variant penalty
         if variant_index > 0:
             confidence *= 0.95
@@ -232,8 +234,10 @@ class PatternRecognizer:
         Convert signature with wildcards to regex pattern.
 
         """
-        # Replace ?? with regex wildcard for any two hex chars
-        regex = signature.replace('??', '.{2}')
+        # Split on wildcard tokens, escape literal parts, rejoin
+        parts = signature.split('??')
+        escaped_parts = [re.escape(p) for p in parts]
+        regex = '.{2}'.join(escaped_parts)
         return regex
     
     def _normalize_bytes(self, byte_string: str) -> str:
@@ -299,10 +303,10 @@ class SequenceRecognizer:
                 architecture=architecture
             )
             
-            # Adjust offsets to account for position in sequence
+            # Adjust offsets to account for window position
+            # The match offsets are byte-level from the combined hex string;
+            # store the window index separately so callers know the context.
             for match in matches:
-                match.start_offset += i
-                match.end_offset += i
                 match.context['window_start'] = i
                 match.context['window_size'] = window_size
             

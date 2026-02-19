@@ -37,6 +37,7 @@ class DispatcherInfo:
     handler_count: int = 0
     loop_detected: bool = False
     confidence: float = 0.0
+    table_entries: List[int] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -46,6 +47,7 @@ class DispatcherInfo:
             "handler_count": self.handler_count,
             "loop_detected": self.loop_detected,
             "confidence": round(self.confidence, 4),
+            "table_entries_count": len(self.table_entries),
         }
 
 
@@ -187,7 +189,7 @@ class DispatcherAnalyzer:
 
             # From jump table extraction
             for td in table_dispatchers:
-                for entry in getattr(td, "_table_entries", []):
+                for entry in td.table_entries:
                     if entry not in seen_addrs:
                         seen_addrs.add(entry)
                         handler_table.append(HandlerEntry(
@@ -263,8 +265,8 @@ class DispatcherAnalyzer:
                                 dispatch_type="table",
                                 handler_count=len(table_entries),
                                 confidence=min(1.0, 0.3 + len(table_entries) * 0.05),
+                                table_entries=table_entries,
                             )
-                            di._table_entries = table_entries  # type: ignore[attr-defined]
                             results.append(di)
                     except (struct.error, IndexError):
                         pass
@@ -279,28 +281,33 @@ class DispatcherAnalyzer:
         data: bytes,
         table_offset: int,
         max_entries: int = 256,
+        entry_size: int = 4,
     ) -> List[int]:
         """
         Extract potential jump table entries starting at table_offset.
 
-        Validates that entries look like plausible code addresses (within
-        the binary's address space).
+        Parameters
+        ----------
+        entry_size : int
+            4 for 32-bit, 8 for 64-bit binaries.
         """
         entries: List[int] = []
         data_len = len(data)
+        fmt = "<I" if entry_size == 4 else "<Q"
+        max_addr = 0x7FFFFFFF if entry_size == 4 else 0x7FFFFFFFFFFF
 
         for i in range(max_entries):
-            off = table_offset + i * 4
-            if off + 4 > data_len:
+            off = table_offset + i * entry_size
+            if off + entry_size > data_len:
                 break
             try:
-                addr = struct.unpack_from("<I", data, off)[0]
+                addr = struct.unpack_from(fmt, data, off)[0]
             except struct.error:
                 break
 
             # Basic validation: address should be non-zero and within
-            # a plausible code range (< 2GB for 32-bit)
-            if addr == 0 or addr > 0x7FFFFFFF:
+            # a plausible code range
+            if addr == 0 or addr > max_addr:
                 break
             entries.append(addr)
 

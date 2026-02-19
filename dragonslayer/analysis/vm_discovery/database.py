@@ -156,11 +156,11 @@ class VMSignatureDatabase:
             # Entry point pattern matching
             if sig.entry_point_patterns and binary_hex:
                 ep_hits = 0
+                import re as _re
                 for pattern in sig.entry_point_patterns:
-                    import re
                     # Convert hex patterns with ?? wildcards to regex
                     regex_pat = pattern.upper().replace("?", ".")
-                    if re.search(regex_pat, binary_hex):
+                    if _re.search(regex_pat, binary_hex):
                         ep_hits += 1
                 if ep_hits:
                     score += 0.2 * (ep_hits / max(len(sig.entry_point_patterns), 1))

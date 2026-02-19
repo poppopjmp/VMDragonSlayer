@@ -120,8 +120,8 @@ def _parse_pe_sections(data: bytes) -> List[Dict[str, Any]]:
             raw_offset = struct.unpack_from("<I", data, off + 20)[0]
             characteristics = struct.unpack_from("<I", data, off + 36)[0]
 
-            # Calculate section entropy
-            sec_data = data[raw_offset:raw_offset + raw_size] if raw_offset + raw_size <= len(data) else b""
+            # Calculate section entropy (slice handles out-of-bounds gracefully)
+            sec_data = data[raw_offset:raw_offset + raw_size]
             entropy = _calculate_entropy(sec_data) if sec_data else 0.0
 
             sections.append({
