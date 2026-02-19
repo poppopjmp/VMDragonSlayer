@@ -21,14 +21,24 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | Domain | Engine / Module | Highlights |
 |--------|-----------------|-----------|
 | VM Discovery | `analysis.vm_discovery` | Dispatcher & handler table identification, signature database matching, nested VM heuristics |
-| Dispatcher Analysis | `analysis.vm_discovery.dispatcher` | Jump-table scanning, handler table reconstruction, opcode→address mapping |
-| Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection), regex entry-point matching |
+| Dispatcher Analysis | `analysis.vm_discovery.dispatcher` | Jump-table scanning, push/ret trampoline detection, handler table reconstruction, opcode→address mapping |
+| Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection), regex entry-point matching, optional YARA backend |
 | Taint Tracking | `analysis.taint_tracking` | Register + memory taint propagation, virtual register mapping (VMProtect/Themida presets), handler boundary detection |
 | Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), z3 branch constraints, opaque predicate detection |
 | Anti-Evasion | `analysis.anti_evasion` | Section-aware instruction scanning (PE/ELF), anti-debug/VM/sandbox detection, binary patching |
+| Binary Parsing | `analysis.binary_format` | Shared LIEF-based PE/ELF parser used across all analysis modules |
+| Trace Ingestion | `analysis.trace_ingestion` | Unified `ExecutionTrace` model; ingestion from text files, angr, Triton, Qiling, and shared plugin data |
+| Handler Boundaries | `analysis.vm_discovery.handler_boundaries` | vIP register identification (monotonic + alignment scoring), trace segmentation into per-handler slices |
+| CFG Reconstruction | `analysis.cfg` | Instruction-level and handler-level CFGs via networkx, basic-block extraction, dominator analysis |
+| Bytecode Extraction | `analysis.bytecode_extract` | Correlates memory reads with handler boundaries to extract the VM bytecode stream |
+| Handler Semantics | `analysis.handler_semantics` | Mnemonic histogram analysis → VMOperation classification (add, xor, load, store, jcc, …), opcode table construction |
+| Pseudocode Emission | `analysis.pseudocode` | Linear listing, structured (if/while/goto), and C-like function output from devirtualised VM programs |
+| Devirtualise Stage | `core.pipeline` (devirtualize) | End-to-end pipeline stage: trace → vIP → boundaries → semantics → pseudocode |
 | LLM-Assisted | `llm.analyzer` | Few-shot handler classification, deobfuscation hints, code recovery, pattern explanation (via litellm) |
+| ML Pipeline | `ml.handler_classifier` | scikit-learn handler classifier with heuristic fallback; `VMClassifier`, `EnsembleClassifier` |
 | Plugin Pipeline | `core.pipeline` | Multi-stage pipeline with ThreadPoolExecutor, per-plugin timeout, thread-safe shared data |
 | Plugin Ecosystem | `plugins/` | 16 plugins across 4 stages (static/dynamic/enrichment/reporting) with angr, Triton, Qiling, etc. |
+| CLI | `dragonslayer.cli` | `vmdragonslayer analyze`, `serve`, `info` — Click-based command-line interface |
 | Reporting | `plugins.reporting.reporter` | VM deobfuscation analysis sections (handler table, taint flow, symbolic results, virtual register map) |
 
 ---
@@ -53,6 +63,14 @@ graph TD
         G --> G4[Reporting]
     end
     
+    subgraph DevirtPipeline ["Devirtualisation Pipeline"]
+        T1[Trace Ingestion] --> T2[vIP Identification]
+        T2 --> T3[Handler Boundaries]
+        T3 --> T4[Bytecode Extraction]
+        T4 --> T5[Handler Semantics]
+        T5 --> T6[Pseudocode Emission]
+    end
+    
     subgraph SharedContext ["Shared PluginContext"]
         H[shared_data — thread-safe]
     end
@@ -63,6 +81,8 @@ graph TD
     F --> H
     G1 --> H
     G2 --> H
+    G2 --> T1
+    T6 --> H
     G4 --> I[Markdown Report]
     
     subgraph LLM ["LLM Assistance (optional)"]
@@ -130,15 +150,22 @@ graph TD
 VMDragonSlayer/
 ├── dragonslayer/                    # Main Python package
 │   ├── analysis/                   # Analysis engines
-│   │   ├── vm_discovery/          # VM detection, dispatcher analysis
-│   │   ├── pattern_analysis/      # Pattern matching and ML classification
+│   │   ├── vm_discovery/          # VM detection, dispatcher analysis, handler boundaries
+│   │   ├── pattern_analysis/      # Pattern matching, ML classification, YARA backend
 │   │   ├── symbolic_execution/    # Symbolic execution with real semantics
 │   │   ├── taint_tracking/        # Register + memory taint, VM-aware tracker
-│   │   └── anti_evasion/          # Section-aware anti-analysis detection
+│   │   ├── anti_evasion/          # Section-aware anti-analysis detection
+│   │   ├── binary_format.py       # Shared LIEF binary parser
+│   │   ├── trace_ingestion.py     # Unified execution trace model
+│   │   ├── cfg.py                 # CFG reconstruction (instruction + handler level)
+│   │   ├── bytecode_extract.py    # VM bytecode stream extraction
+│   │   ├── handler_semantics.py   # Handler-to-VMOperation classification
+│   │   └── pseudocode.py          # Pseudocode emission (linear/structured/C-like)
 │   ├── api/                       # REST API server and client
+│   ├── cli.py                     # Click CLI: analyze, serve, info
 │   ├── core/                      # Pipeline, orchestrator, config
 │   ├── llm/                       # LLM-assisted analysis (litellm)
-│   ├── ml/                        # Machine learning pipeline
+│   ├── ml/                        # Machine learning pipeline + handler classifier
 │   ├── gpu/                       # GPU acceleration support
 │   ├── plugins/                   # 16 plugins (static/dynamic/enrichment/reporting)
 │   └── utils/                     # Utility functions
@@ -152,7 +179,7 @@ VMDragonSlayer/
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # 159 pass, 1 skip (z3-solver optional)
+├── tests/                         # 335 tests (327 pass, 8 skip)
 ├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
@@ -211,27 +238,48 @@ VMDragonSlayer integrates with major reverse engineering tools:
 ## Current Status
 
 ### Test Suite
-- **160 tests** across 8 test files
-- **159 passed**, 1 skipped (z3-solver optional)
-- All 12 Phase 6 commits verified green before merge
-- Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules
+- **335 tests** across 20+ test files
+- **327 passed**, 8 skipped (1 z3-solver, 7 yara-python optional)
+- All Phase 7 commits verified green before merge
+- Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules, CLI, trace ingestion, handler boundaries, CFG, bytecode extraction, handler semantics, pseudocode, handler classifier, pipeline devirt
 
 ### What's Implemented and Working
 
 ```python
-# Pipeline-based analysis (recommended)
-from dragonslayer.core.pipeline import create_full_pipeline
+# CLI — the fastest way to run an analysis
+# vmdragonslayer analyze binary.exe --type vmprotect_devirt
 
-pipeline = create_full_pipeline()
-result = pipeline.run(binary_data=open("binary.exe", "rb").read())
+# Pipeline-based analysis (recommended)
+from dragonslayer.core.pipeline import create_vmprotect_devirt_pipeline
+
+pipe, cfg = create_vmprotect_devirt_pipeline()
+result = pipe.run(binary_data=open("binary.exe", "rb").read(), pipeline_config=cfg)
 # Result includes: vm_discovery, dispatcher_analysis, anti_evasion,
-# taint_analysis, symbolic_execution, pattern classification, plugin stages
+# taint_analysis, symbolic_execution, pattern classification, plugin stages,
+# **devirtualize** (pseudocode, opcode table, handler boundaries)
+
+# Devirtualisation pipeline (trace → pseudocode)
+from dragonslayer.analysis.trace_ingestion import from_shared_data
+from dragonslayer.analysis.vm_discovery.handler_boundaries import identify_vip_register, segment_trace
+from dragonslayer.analysis.handler_semantics import analyse_handler_semantics
+from dragonslayer.analysis.pseudocode import emit_pseudocode
+
+trace = from_shared_data(shared_data)           # Ingest execution trace
+lifted = trace.to_lifted_instructions()          # Re-lift via capstone
+vip = identify_vip_register(lifted, dispatchers) # Find virtual IP register
+seg = segment_trace(lifted, vip, dispatchers)    # Slice into handlers
+table = analyse_handler_semantics(lifted, seg.boundaries)
+pseudo = emit_pseudocode(table, seg.boundaries, style="c_like")
+print(pseudo.text)
 
 # Orchestrator-based analysis
 from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
 
 orchestrator = Orchestrator()
-result = orchestrator.analyze_binary("binary.exe", analysis_type=AnalysisType.VM_DISCOVERY)
+result = orchestrator.analyze_binary(
+    open("binary.exe", "rb").read(),
+    analysis_type=AnalysisType.VM_DISCOVERY,
+)
 ```
 ### Quick Start
 

@@ -4,6 +4,95 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Phase 7 — Devirtualisation Pipeline (15 commits)
+
+The central achievement of Phase 7 is a **complete devirtualisation data path**:
+dynamic traces can now be ingested, segmented into per-handler slices, classified
+by semantic operation, and emitted as human-readable pseudocode.
+
+#### Bug Fixes
+- **Taint analyzer reset ordering** — `reset()` now runs *before* taint application, not after (`ff71676`)
+- **Thread-safe server counters** — `asyncio.Lock` protects `/analyze` request/error counts (`1259112`)
+
+#### New — CLI Entry Point (`dragonslayer.cli`)
+- `vmdragonslayer analyze` — run analysis on a binary file
+- `vmdragonslayer serve` — launch the REST API server
+- `vmdragonslayer info` — print version and config summary
+- 7 Click tests (`118ff91`)
+
+#### New — YARA-based Pattern Matching (`analysis.pattern_analysis.yara_engine`)
+- `YaraEngine` wraps `yara-python` as an optional backend
+- `compile_rules()`, `scan_bytes()`, `YaraMatch` result model
+- Integrated into `PatternRecognizer` as fallback strategy
+- 12 tests (`e859672`)
+
+#### New — Push/Ret Dispatcher Detection (`analysis.vm_discovery.dispatcher`)
+- Detects `push handler; ret` trampolines (common in Themida)
+- Multi-step heuristic: indirect-jump table → computed-jump → push/ret
+- 8 tests (`9422ee8`)
+
+#### New — Shared LIEF Binary Parser (`analysis.binary_format`)
+- `parse_binary()` returns `ParsedBinary` (sections, entrypoint, imports, exports)
+- Replaces duplicate manual PE parsing in `VMDetector` and `EnvironmentNormalizer`
+- 14 tests (`c6d2626`)
+
+#### New — Trace Ingestion (`analysis.trace_ingestion`)
+- `ExecutionTrace` data model: instructions, memory accesses, control flow, handler markers
+- Five ingestion paths: `parse_trace_text()`, `from_shared_data()`, `from_triton_result()`, `from_angr_result()`, `from_qiling_result()`
+- `to_lifted_instructions()` re-lifts via capstone or falls back to `_SimpleInstruction`
+- 17 tests (`b79dc2b`)
+
+#### New — vIP Identification & Handler Boundaries (`analysis.vm_discovery.handler_boundaries`)
+- `identify_vip_register()` scores candidates by monotonic ratio, alignment, dispatcher correlation
+- `segment_trace()` slices execution trace into per-handler `HandlerBoundary` segments
+- Two strategies: dispatcher-address based, vIP-change based
+- 18 tests (`2c2ee99`)
+
+#### New — CFG Reconstruction (`analysis.cfg`)
+- `build_instruction_cfg()` — address-level control flow graph
+- `build_handler_cfg()` — handler-level CFG with back-edge detection
+- `extract_basic_blocks()`, `analyse_cfg()` → `CFGStats`, `find_dominators()`
+- 19 tests (`f8e7c1c`)
+
+#### New — VM Bytecode Extraction (`analysis.bytecode_extract`)
+- `extract_bytecode()` correlates memory reads with handler boundaries
+- `BytecodeStream`, `OpcodeMap`, `VMOpcode` data models
+- Fallback: `_build_from_boundaries_only` when no memory accesses available
+- 13 tests (`01123ef`)
+
+#### New — ML Handler Classifier (`ml.handler_classifier`)
+- `TrainedHandlerModel` bridges scikit-learn to devirt path
+- Heuristic fallback when no trained model is available
+- Feature vector: instruction_count, vip_delta, handler_span, insn_density
+- 10 tests (`ff5ad32`)
+
+#### New — Handler Semantics & Opcode Table (`analysis.handler_semantics`)
+- `analyse_handler_semantics()` maps each handler to a `VMOperation` (add, sub, xor, load, store, push, pop, jcc, jmp, call, ret, nop, …)
+- Mnemonic histogram scoring with push/pop de-weighting (0.3×)
+- `SemanticOpcodeTable` with opcode lookup, summary, and serialisation
+- 24 tests (`ed339fa`)
+
+#### New — Pseudocode Emission (`analysis.pseudocode`)
+- `emit_linear()` — one line per VM instruction, no control flow
+- `emit_structured()` — uses handler-level CFG for `if/while/goto`
+- `emit_c_like()` — wraps structured in typed function with variable declarations
+- `emit_pseudocode()` — convenience style dispatcher
+- 16 tests (`f79717a`)
+
+#### Refactored — Pipeline Engine Runners (`core.pipeline`)
+- `_run_stage()` helper eliminates try/except + timing boilerplate
+- New `devirtualize` pipeline stage chains: trace ingestion → vIP identification → handler segmentation → semantic analysis → pseudocode emission
+- Wired into `create_full_pipeline()` and `create_vmprotect_devirt_pipeline()` profiles
+- 10 tests (`d86cb25`)
+
+#### Documentation (this commit)
+- README: updated architecture diagram, capability table, repo structure, test counts
+- CHANGELOG: Phase 7 entries for all 15 commits
+
+#### Test Suite
+- **335+ tests** (327 pass, 8 skip — 1 z3-solver, 7 yara-python)
+- New test files: `test_cli`, `test_yara_engine`, `test_dispatcher`, `test_binary_format`, `test_trace_ingestion`, `test_handler_boundaries`, `test_cfg`, `test_bytecode_extract`, `test_handler_classifier`, `test_handler_semantics`, `test_pseudocode`, `test_pipeline_devirt`
+
 ### Phase 6 — Hardening & Completeness (12 commits)
 
 #### Critical Bug Fixes
