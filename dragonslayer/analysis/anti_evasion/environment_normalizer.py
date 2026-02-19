@@ -171,7 +171,7 @@ _INSTRUCTION_PATTERNS: List[Tuple[bytes, str, EvasionCategory, str, bool]] = [
     (b"\xcd\x03", "int3_cd03", EvasionCategory.ANTI_DEBUG,
      "INT 3 via CD 03 — breakpoint trap", True),
     (b"\xcc", "int3", EvasionCategory.ANTI_DEBUG,
-     "INT 3 breakpoint instruction", True),
+     "INT 3 breakpoint instruction", False),
     (b"\xf1", "icebp", EvasionCategory.ANTI_DEBUG,
      "ICEBP / INT1 — in-circuit emulator breakpoint", True),
     (b"\x64\xa1\x30\x00\x00\x00", "peb_access_fs30", EvasionCategory.ANTI_DEBUG,
@@ -186,6 +186,14 @@ _ANTI_DISASM_PATTERNS: List[Tuple[bytes, str, str]] = [
     (b"\xe8\x00\x00\x00\x00", "call_next", "CALL $+5 — position-independent code / anti-disasm"),
     (b"\x74\x01\xe8", "conditional_junk", "JZ $+3 over CALL — conditional junk insertion"),
 ]
+
+# Confidence overrides for anti-disasm patterns that are also common in
+# legitimate code (e.g. PIC thunks).  Maps pattern name → confidence.
+_ANTI_DISASM_CONFIDENCE: Dict[str, float] = {
+    "call_next": 0.30,   # very common in PIC / __x86.get_pc_thunk
+    "jmp_overlap": 0.70,
+    "conditional_junk": 0.70,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +479,7 @@ class EnvironmentNormalizer:
                     name=name,
                     description=desc,
                     offset=idx,
-                    confidence=0.70,
+                    confidence=_ANTI_DISASM_CONFIDENCE.get(name, 0.70),
                     severity="low",
                     patchable=False,
                 ))
