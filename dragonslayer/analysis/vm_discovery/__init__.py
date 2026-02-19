@@ -12,6 +12,13 @@ try:
     from .analyzer import VMAnalyzer
     from .database import VMSignature, VMSignatureDatabase
     from .dispatcher import DispatcherAnalyzer, DispatchTableResult
+    from .handler_boundaries import (
+        identify_vip_register,
+        segment_trace,
+        VIPCandidate,
+        HandlerBoundary,
+        SegmentationResult,
+    )
 except ImportError:
     pass
 
@@ -22,4 +29,9 @@ __all__ = [
     "VMSignatureDatabase",
     "DispatcherAnalyzer",
     "DispatchTableResult",
+    "identify_vip_register",
+    "segment_trace",
+    "VIPCandidate",
+    "HandlerBoundary",
+    "SegmentationResult",
 ]
