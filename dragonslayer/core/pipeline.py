@@ -27,6 +27,8 @@ Usage::
 
 from __future__ import annotations
 
+import concurrent.futures
+import hashlib
 import json
 import logging
 import tempfile
@@ -177,12 +179,12 @@ class AnalysisPipeline:
         t0 = time.monotonic()
         cfg = pipeline_config or PipelineConfig()
         metadata = metadata or {}
+        self._current_max_workers = cfg.max_workers
 
         # --- build shared context (ONE context for the entire pipeline) ----
         storage = create_storage(cfg.storage_backend, **cfg.storage_options)
         work_dir = tempfile.mkdtemp(prefix="vmds_pipeline_")
 
-        import hashlib
         sha256 = hashlib.sha256(binary_data).hexdigest()
 
         ctx = PluginContext(
@@ -254,6 +256,13 @@ class AnalysisPipeline:
 
         elapsed = time.monotonic() - t0
         any_success = any(sr.success for sr in stage_results) if stage_results else False
+
+        # Cleanup temp directory
+        import shutil
+        try:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        except Exception:
+            pass
 
         return PipelineResult(
             success=any_success,
@@ -347,9 +356,25 @@ class AnalysisPipeline:
         t0 = time.monotonic()
         try:
             from ..analysis.vm_discovery.detector import VMDetector
+            from ..analysis.vm_discovery.database import VMSignatureDatabase
 
             detector = VMDetector()
             result = detector.detect(binary_data)
+
+            # Add binary hex for entry-point pattern matching in signature DB
+            result["binary_hex"] = binary_data[:0x2000].hex().upper()
+
+            # Match against known protector signatures
+            sig_db = VMSignatureDatabase()
+            sig_matches = sig_db.match(result)
+            result["signature_matches"] = sig_matches
+
+            # Extract dispatcher addresses (offsets → ints) for downstream
+            dispatcher_addrs = [
+                d["offset"] for d in result.get("dispatchers", [])
+                if isinstance(d, dict) and "offset" in d
+            ]
+            result["dispatcher_addresses"] = dispatcher_addrs
 
             ctx.shared_data["vm_discovery"] = result
             ctx.shared_data["vm_detected"] = result.get("vm_detected", False)
@@ -405,15 +430,31 @@ class AnalysisPipeline:
             successes = 0
             total_confidence = 0.0
 
-            for plugin in plugins:
-                pr = plugin.safe_execute(file_path, binary_data, ctx)
-                plugin_results[plugin.name] = pr.to_dict()
-                if pr.success:
-                    successes += 1
-                    total_confidence += pr.confidence
-                    # Merge plugin output into shared_data for downstream
-                    if pr.data:
-                        ctx.shared_data.setdefault("plugin_results", {})[plugin.name] = pr.data
+            max_w = getattr(
+                pipeline_config, "max_workers", 4
+            ) if hasattr(self, "_pipeline_config") else 4
+            # Access from the pipeline run context if stored
+            max_w = getattr(self, "_current_max_workers", 4)
+
+            def _exec_one(plugin):
+                return plugin.name, plugin.safe_execute(file_path, binary_data, ctx)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_w) as pool:
+                futures = {pool.submit(_exec_one, p): p for p in plugins}
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        name, pr = future.result()
+                    except Exception as exc:
+                        plugin = futures[future]
+                        name = plugin.name
+                        logger.warning("Plugin %s raised: %s", name, exc)
+                        continue
+                    plugin_results[name] = pr.to_dict()
+                    if pr.success:
+                        successes += 1
+                        total_confidence += pr.confidence
+                        if pr.data:
+                            ctx.shared_data.setdefault("plugin_results", {})[name] = pr.data
 
             elapsed = time.monotonic() - t0
             avg_confidence = total_confidence / successes if successes else 0.0
@@ -598,8 +639,8 @@ class AnalysisPipeline:
 
             # Use dispatcher address from vm_discovery if available
             vm_info = ctx.shared_data.get("vm_discovery", {})
-            dispatchers = vm_info.get("dispatchers", [])
-            entry = dispatchers[0] if dispatchers else 0
+            dispatcher_addrs = vm_info.get("dispatcher_addresses", [])
+            entry = dispatcher_addrs[0] if dispatcher_addrs else 0
 
             executor = SymbolicExecutor()
             result = executor.analyze(binary_data, entry_point=entry)

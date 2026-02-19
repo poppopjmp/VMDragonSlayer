@@ -581,94 +581,26 @@ class Orchestrator:
 
     def _run_vm_discovery(self, request: AnalysisRequest) -> EngineResult:
         """
-        Lightweight VM-presence heuristics.
+        VM-presence detection delegated to the canonical VMDetector.
 
-        Uses structural cues (entropy, section names, import anomalies) that
-        don't require a full disassembly pass.  Heavier lifting is delegated
-        to Stage-4 plugins (angr, rizin, triton).
+        The detector provides full PE section parsing, entropy analysis,
+        watermark scanning, and dispatcher heuristics — all in one place.
+        Previously this method duplicated a simpler version inline.
         """
         t0 = time.monotonic()
         try:
-            data = request.binary_data
-            indicators: List[Dict[str, Any]] = []
+            from ..analysis.vm_discovery.detector import VMDetector
 
-            # --- Heuristic 1: PE / ELF magic --------------------------------
-            is_pe = data[:2] == b"MZ"
-            is_elf = data[:4] == b"\x7fELF"
-            file_type = "PE" if is_pe else ("ELF" if is_elf else "unknown")
-            indicators.append({"check": "file_type", "value": file_type})
+            detector = VMDetector()
+            result = detector.detect(request.binary_data)
 
-            # --- Heuristic 2: known VM section names -------------------------
-            vm_section_names = [
-                b".vmp0", b".vmp1", b".vmp2",        # VMProtect
-                b".themida", b".winlice",              # Themida / WinLicense
-                b".enigma1", b".enigma2",              # Enigma
-                b".cvirt",                             # Code Virtualizer
-            ]
-            found_sections: List[str] = []
-            for sec in vm_section_names:
-                if sec in data:
-                    found_sections.append(sec.decode(errors="replace"))
-            if found_sections:
-                indicators.append({"check": "vm_sections", "sections": found_sections})
-
-            # --- Heuristic 3: high-entropy regions (> 7.5 bits / byte) -------
-            import math
-            BLOCK = 4096
-            high_entropy_blocks = 0
-            total_blocks = max(1, len(data) // BLOCK)
-            for i in range(0, len(data) - BLOCK + 1, BLOCK):
-                block = data[i: i + BLOCK]
-                freq = [0] * 256
-                for b in block:
-                    freq[b] += 1
-                entropy = -sum(
-                    (c / BLOCK) * math.log2(c / BLOCK) for c in freq if c > 0
-                )
-                if entropy > 7.5:
-                    high_entropy_blocks += 1
-            entropy_ratio = high_entropy_blocks / total_blocks if total_blocks else 0
-            indicators.append({
-                "check": "entropy",
-                "high_entropy_blocks": high_entropy_blocks,
-                "total_blocks": total_blocks,
-                "ratio": round(entropy_ratio, 4),
-            })
-
-            # --- Heuristic 4: VMProtect watermark strings --------------------
-            watermarks = [b"VMProtect", b"vmp_", b"Themida", b"WinLicense"]
-            found_watermarks = [w.decode() for w in watermarks if w in data]
-            if found_watermarks:
-                indicators.append({"check": "watermarks", "found": found_watermarks})
-
-            # --- Confidence scoring ------------------------------------------
-            score = 0.0
-            if found_sections:
-                score += 0.40
-            if entropy_ratio > 0.6:
-                score += 0.25
-            elif entropy_ratio > 0.3:
-                score += 0.10
-            if found_watermarks:
-                score += 0.25
-            if is_pe or is_elf:
-                score += 0.10
-            score = min(score, 1.0)
-
-            vm_detected = score >= 0.35
             elapsed = time.monotonic() - t0
-
             return EngineResult(
                 engine="vm_discovery",
                 success=True,
-                data={
-                    "vm_detected": vm_detected,
-                    "confidence": round(score, 4),
-                    "file_type": file_type,
-                    "indicators": indicators,
-                },
+                data=result,
                 duration=elapsed,
-                confidence=score,
+                confidence=result.get("confidence", 0.0),
             )
         except Exception as exc:
             logger.exception("VM discovery failed")

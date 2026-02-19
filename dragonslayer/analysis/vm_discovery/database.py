@@ -137,6 +137,9 @@ class VMSignatureDatabase:
             if ind.get("check") == "watermarks":
                 detected_watermarks.update(ind.get("found", []))
 
+        # Collect binary hex for entry point pattern matching
+        binary_hex = detection_result.get("binary_hex", "").upper()
+
         for sig in self._signatures.values():
             score = 0.0
             sig_sections = set(sig.section_names)
@@ -144,11 +147,23 @@ class VMSignatureDatabase:
 
             section_overlap = detected_sections & sig_sections
             if section_overlap:
-                score += 0.5 * (len(section_overlap) / max(len(sig_sections), 1))
+                score += 0.4 * (len(section_overlap) / max(len(sig_sections), 1))
 
             watermark_overlap = detected_watermarks & sig_watermarks
             if watermark_overlap:
-                score += 0.5 * (len(watermark_overlap) / max(len(sig_watermarks), 1))
+                score += 0.4 * (len(watermark_overlap) / max(len(sig_watermarks), 1))
+
+            # Entry point pattern matching
+            if sig.entry_point_patterns and binary_hex:
+                ep_hits = 0
+                for pattern in sig.entry_point_patterns:
+                    import re
+                    # Convert hex patterns with ?? wildcards to regex
+                    regex_pat = pattern.upper().replace("?", ".")
+                    if re.search(regex_pat, binary_hex):
+                        ep_hits += 1
+                if ep_hits:
+                    score += 0.2 * (ep_hits / max(len(sig.entry_point_patterns), 1))
 
             score *= sig.confidence_weight
 

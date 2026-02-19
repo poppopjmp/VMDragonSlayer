@@ -85,21 +85,32 @@ class Config:
         self._config = copy.deepcopy(self.DEFAULTS)
     
     def _load_yaml_config(self):
-        """Load YAML configuration file based on environment."""
-        config_file = self.config_dir / f'vmdragonslayer_{self.environment}.yml'
-        
-        if not config_file.exists():
-            logger.warning(f"Config file not found: {config_file}, using defaults")
-            return
-        
-        try:
-            with open(config_file, 'r') as f:
-                yaml_config = yaml.safe_load(f)
-                if yaml_config:
-                    self._merge_config(yaml_config)
-                    logger.info(f"Loaded config from {config_file}")
-        except Exception as e:
-            logger.warning(f"Failed to load config from {config_file}: {e}")
+        """Load YAML configuration file based on environment.
+
+        Checks for environment-specific file first (e.g. vmdragonslayer_development.yml),
+        then falls back to the generic vmdragonslayer.yml.
+        """
+        candidates = [
+            self.config_dir / f'vmdragonslayer_{self.environment}.yml',
+            self.config_dir / 'vmdragonslayer.yml',
+        ]
+
+        for config_file in candidates:
+            if config_file.exists():
+                try:
+                    with open(config_file, 'r') as f:
+                        yaml_config = yaml.safe_load(f)
+                        if yaml_config:
+                            self._merge_config(yaml_config)
+                            logger.info(f"Loaded config from {config_file}")
+                            return
+                except Exception as e:
+                    logger.warning(f"Failed to load config from {config_file}: {e}")
+
+        logger.warning(
+            "No config file found (tried %s), using defaults",
+            ", ".join(str(c) for c in candidates),
+        )
     
     def _load_env_variables(self):
         """Load configuration from environment variables."""
