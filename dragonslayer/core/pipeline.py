@@ -214,6 +214,7 @@ class AnalysisPipeline:
             "taint_analysis": lambda: self._run_taint_analysis(binary_data, ctx),
             "symbolic_execution": lambda: self._run_symbolic_execution(binary_data, ctx),
             "dispatcher_analysis": lambda: self._run_dispatcher_analysis(binary_data, ctx),
+            "devirtualize": lambda: self._run_devirtualize(binary_data, ctx),
             "static": lambda: self._run_plugin_stage(binary_data, file_path, ctx, Stage.STATIC, "static"),
             "dynamic": lambda: self._run_plugin_stage(binary_data, file_path, ctx, Stage.DYNAMIC, "dynamic"),
             "enrichment": lambda: self._run_plugin_stage(binary_data, file_path, ctx, Stage.ENRICHMENT, "enrichment"),
@@ -274,6 +275,52 @@ class AnalysisPipeline:
             total_duration=elapsed,
             errors=errors,
         )
+
+    # -- stage runner helper ------------------------------------------------
+
+    def _run_stage(
+        self,
+        stage_name: str,
+        fn: Callable[[], Dict[str, Any]],
+        ctx: Any | None = None,
+    ) -> StageResult:
+        """Execute *fn* and wrap its return value in a :class:`StageResult`.
+
+        This eliminates the repetitive try/except + timing boilerplate that
+        every ``_run_*`` method previously duplicated.
+
+        Parameters
+        ----------
+        stage_name : str
+            Key for the stage (used in ``StageResult.stage``).
+        fn : callable
+            Zero-argument callable that performs the work and returns a
+            ``dict`` of result data.  It may also return a :class:`StageResult`
+            directly for full control.
+        ctx : PluginContext | None
+            If provided, result data are stored into ``ctx.shared_data[stage_name]``.
+
+        Returns
+        -------
+        StageResult
+        """
+        t0 = time.monotonic()
+        try:
+            out = fn()
+            elapsed = time.monotonic() - t0
+            if isinstance(out, StageResult):
+                out.duration = elapsed
+                return out
+            data = out if isinstance(out, dict) else {}
+            if ctx is not None:
+                ctx.shared_data[stage_name] = data
+            return StageResult(stage=stage_name, success=True, data=data, duration=elapsed)
+        except Exception as exc:
+            logger.exception("%s stage failed", stage_name)
+            return StageResult(
+                stage=stage_name, success=False, error=str(exc),
+                duration=time.monotonic() - t0,
+            )
 
     # -- built-in engine stages --------------------------------------------
 
@@ -731,6 +778,105 @@ class AnalysisPipeline:
 
     # -- LLM stages --------------------------------------------------------
 
+    def _run_devirtualize(
+        self,
+        binary_data: bytes,
+        ctx: Any,
+    ) -> StageResult:
+        """
+        End-to-end devirtualisation pipeline stage.
+
+        Chains:
+        1. :func:`trace_ingestion.from_shared_data` — convert dynamic plugin
+           output to a unified :class:`ExecutionTrace`.
+        2. :func:`handler_boundaries.identify_vip_register` +
+           :func:`handler_boundaries.segment_trace` — locate the virtual IP
+           register and slice the trace into per-handler segments.
+        3. :func:`handler_semantics.analyse_handler_semantics` — determine
+           the VM-level operation each handler performs.
+        4. :func:`pseudocode.emit_pseudocode` — emit human-readable output.
+
+        Results (including pseudocode text) are stored in
+        ``ctx.shared_data["devirtualize"]``.
+        """
+        def _do_devirt() -> Dict[str, Any]:
+            from ..analysis.trace_ingestion import from_shared_data, ExecutionTrace
+            from ..analysis.vm_discovery.handler_boundaries import (
+                identify_vip_register,
+                segment_trace,
+            )
+            from ..analysis.handler_semantics import analyse_handler_semantics
+            from ..analysis.pseudocode import emit_pseudocode
+
+            # --- 1. Obtain an ExecutionTrace --------------------------------
+            trace: ExecutionTrace | None = None
+            # Prefer shared_data from dynamic plugins (angr/triton/qiling)
+            try:
+                trace = from_shared_data(ctx.shared_data)
+            except Exception:
+                pass
+
+            if trace is None or not trace.instructions:
+                return {
+                    "skipped": True,
+                    "reason": "No execution trace available — run dynamic analysis first",
+                }
+
+            # --- 2. Identify vIP and segment into handler boundaries --------
+            dispatcher_addrs = ctx.shared_data.get("vm_discovery", {}).get(
+                "dispatcher_addresses", [],
+            )
+
+            lifted = trace.to_lifted_instructions()
+            vip_candidate = identify_vip_register(lifted, dispatcher_addrs)
+
+            if vip_candidate is None:
+                return {
+                    "skipped": True,
+                    "reason": "Could not identify virtual instruction pointer register",
+                }
+
+            seg = segment_trace(lifted, vip_candidate, dispatcher_addrs)
+            boundaries = seg.boundaries
+
+            if not boundaries:
+                return {
+                    "skipped": True,
+                    "reason": "Trace segmentation produced no handler boundaries",
+                }
+
+            # --- 3. Semantic analysis per handler ---------------------------
+            opcode_table = analyse_handler_semantics(lifted, boundaries)
+
+            # --- 4. Pseudocode emission ------------------------------------
+            pseudocode_result = emit_pseudocode(
+                opcode_table, boundaries, style="c_like",
+            )
+
+            result_data: Dict[str, Any] = {
+                "vip_register": vip_candidate.register,
+                "handler_count": len(boundaries),
+                "unique_operations": opcode_table.unique_operations,
+                "opcode_table": opcode_table.to_dict(),
+                "pseudocode": pseudocode_result.to_dict(),
+                "pseudocode_text": pseudocode_result.text,
+            }
+
+            # Also store the boundaries for downstream stages
+            ctx.shared_data["devirt_boundaries"] = [
+                {
+                    "vip_value": b.vip_value,
+                    "handler_address": b.handler_address,
+                    "vip_delta": b.vip_delta,
+                    "instruction_count": b.instruction_count,
+                }
+                for b in boundaries
+            ]
+
+            return result_data
+
+        return self._run_stage("devirtualize", _do_devirt, ctx)
+
     def _run_llm_analysis(
         self,
         binary_data: bytes,
@@ -898,6 +1044,7 @@ def create_full_pipeline(**kwargs: Any) -> tuple[AnalysisPipeline, PipelineConfi
         "taint_analysis",
         "symbolic_execution",
         "dispatcher_analysis",
+        "devirtualize",
         "enrichment",
         "llm_analysis",
         "reporting",
@@ -935,6 +1082,7 @@ def create_vmprotect_devirt_pipeline(**kwargs: Any) -> tuple[AnalysisPipeline, P
         "taint_analysis",
         "symbolic_execution",
         "dispatcher_analysis",
+        "devirtualize",
         "llm_analysis",
         "enrichment",
         "reporting",
