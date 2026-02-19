@@ -19,13 +19,15 @@ class TestConfig:
 
     def test_defaults_loaded(self):
         cfg = Config()
-        assert cfg.get("analysis.timeout") == 1800
+        # Values come from config/vmdragonslayer.yml (development defaults)
+        assert cfg.get("analysis.timeout") == 600
         assert cfg.get("api.port") == 8000
         assert cfg.get("api.host") == "127.0.0.1"
 
     def test_dot_notation_get(self):
         cfg = Config()
-        assert cfg.get("logging.level") == "INFO"
+        # vmdragonslayer.yml sets logging.level to DEBUG for development
+        assert cfg.get("logging.level") == "DEBUG"
 
     def test_missing_key_returns_default(self):
         cfg = Config()

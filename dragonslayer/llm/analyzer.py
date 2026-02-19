@@ -177,6 +177,35 @@ Known indicators:
 {indicators}
 """
 
+_PATTERN_EXPLANATION_PROMPT = """\
+Explain what the following byte-pattern match means in the context \
+of VM-based obfuscation.  Be specific about which packer or protector \
+likely produced it.
+
+Pattern: {pattern_name} ({pattern_id})
+Matched bytes: {matched_bytes}
+Offset: {offset}
+Handler type: {handler_type}
+Architecture: {architecture}
+
+Example:
+Pattern: vmp_dispatcher_entry (vmp-dispatch-001)
+Matched bytes: 55 8b ec 83 e4 f8 81 ec
+Offset: 0x401000
+Handler type: dispatcher
+Architecture: x86
+
+Result:
+{{"explanation": "This is a VMProtect dispatcher entry prologue. The sequence 'push ebp; mov ebp,esp; and esp,-8; sub esp,...' sets up a stack frame with 8-byte alignment, typical of VMProtect's VM entry stub that transitions from native code to virtualised execution.", "packer": "VMProtect", "purpose": "VM entry — initialises the virtual machine context and prepares the virtual stack before dispatching the first handler.", "confidence": 0.88}}
+
+Now explain this pattern:
+Provide a JSON object:
+  explanation  – 2-3 sentence description
+  packer       – most likely packer name
+  purpose      – what this pattern accomplishes
+  confidence   – float 0..1
+"""
+
 _CODE_RECOVERY_PROMPT = """\
 Given the following lifted IR / instruction trace from a VM-protected \
 binary, reconstruct the most likely high-level pseudocode.
