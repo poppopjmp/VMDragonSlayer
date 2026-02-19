@@ -195,6 +195,10 @@ _ANTI_DISASM_PATTERNS: List[Tuple[bytes, str, str]] = [
 class EnvironmentNormalizer:
     """
     Scans a binary for anti-analysis techniques and generates patches.
+
+    By default, instruction-pattern scanning is restricted to executable
+    sections (identified from PE/ELF headers) to avoid false positives
+    from data that happens to match opcode byte sequences.
     """
 
     def __init__(self, *, generate_patches: bool = True) -> None:
@@ -213,21 +217,26 @@ class EnvironmentNormalizer:
         indicators: List[EvasionIndicator] = []
         patches: List[Patch] = []
 
-        # 1. Import-based detection
+        # Determine executable section ranges
+        exec_ranges = self._identify_executable_sections(binary_data)
+
+        # 1. Import-based detection (full binary — searches for name strings)
         indicators.extend(self._scan_imports(binary_data))
 
-        # 2. Instruction-pattern detection
-        instr_indicators, instr_patches = self._scan_instructions(binary_data)
+        # 2. Instruction-pattern detection (executable sections only)
+        instr_indicators, instr_patches = self._scan_instructions(
+            binary_data, exec_ranges,
+        )
         indicators.extend(instr_indicators)
         patches.extend(instr_patches)
 
-        # 3. Environment artefact strings
+        # 3. Environment artefact strings (full binary — string matching)
         indicators.extend(self._scan_artefact_strings(binary_data))
 
-        # 4. Anti-disassembly patterns
-        indicators.extend(self._scan_anti_disasm(binary_data))
+        # 4. Anti-disassembly patterns (executable sections only)
+        indicators.extend(self._scan_anti_disasm(binary_data, exec_ranges))
 
-        # 5. Self-modifying code indicators
+        # 5. Self-modifying code indicators (full binary — import names)
         indicators.extend(self._scan_self_modifying(binary_data))
 
         # Build category counts & risk score
@@ -280,6 +289,86 @@ class EnvironmentNormalizer:
 
     # -- scanners -----------------------------------------------------------
 
+    @staticmethod
+    def _identify_executable_sections(
+        data: bytes,
+    ) -> List[Tuple[int, int]]:
+        """
+        Parse PE or ELF headers to extract (offset, end) ranges of
+        executable sections.
+
+        Falls back to the entire binary if the format is unrecognised so
+        that non-PE/ELF inputs still get scanned.
+        """
+        ranges: List[Tuple[int, int]] = []
+
+        # ── PE ─────────────────────────────────────────────────────────
+        if data[:2] == b"MZ" and len(data) > 0x40:
+            try:
+                pe_off = struct.unpack_from("<I", data, 0x3C)[0]
+                if data[pe_off : pe_off + 4] == b"PE\x00\x00":
+                    num_sections = struct.unpack_from("<H", data, pe_off + 6)[0]
+                    opt_size = struct.unpack_from("<H", data, pe_off + 20)[0]
+                    section_table = pe_off + 24 + opt_size
+                    IMAGE_SCN_MEM_EXECUTE = 0x20000000
+                    for i in range(num_sections):
+                        entry = section_table + i * 40
+                        if entry + 40 > len(data):
+                            break
+                        characteristics = struct.unpack_from("<I", data, entry + 36)[0]
+                        if characteristics & IMAGE_SCN_MEM_EXECUTE:
+                            raw_size = struct.unpack_from("<I", data, entry + 16)[0]
+                            raw_offset = struct.unpack_from("<I", data, entry + 20)[0]
+                            ranges.append((raw_offset, raw_offset + raw_size))
+            except (struct.error, IndexError):
+                pass
+
+        # ── ELF ────────────────────────────────────────────────────────
+        elif data[:4] == b"\x7fELF" and len(data) > 0x40:
+            try:
+                ei_class = data[4]  # 1 = 32-bit, 2 = 64-bit
+                if ei_class == 1:
+                    e_shoff = struct.unpack_from("<I", data, 0x20)[0]
+                    e_shentsize = struct.unpack_from("<H", data, 0x2E)[0]
+                    e_shnum = struct.unpack_from("<H", data, 0x30)[0]
+                    SHF_EXECINSTR = 0x4
+                    for i in range(e_shnum):
+                        off = e_shoff + i * e_shentsize
+                        if off + e_shentsize > len(data):
+                            break
+                        sh_flags = struct.unpack_from("<I", data, off + 8)[0]
+                        if sh_flags & SHF_EXECINSTR:
+                            sh_offset = struct.unpack_from("<I", data, off + 16)[0]
+                            sh_size = struct.unpack_from("<I", data, off + 20)[0]
+                            ranges.append((sh_offset, sh_offset + sh_size))
+                elif ei_class == 2:
+                    e_shoff = struct.unpack_from("<Q", data, 0x28)[0]
+                    e_shentsize = struct.unpack_from("<H", data, 0x3A)[0]
+                    e_shnum = struct.unpack_from("<H", data, 0x3C)[0]
+                    SHF_EXECINSTR = 0x4
+                    for i in range(e_shnum):
+                        off = e_shoff + i * e_shentsize
+                        if off + e_shentsize > len(data):
+                            break
+                        sh_flags = struct.unpack_from("<Q", data, off + 8)[0]
+                        if sh_flags & SHF_EXECINSTR:
+                            sh_offset = struct.unpack_from("<Q", data, off + 24)[0]
+                            sh_size = struct.unpack_from("<Q", data, off + 32)[0]
+                            ranges.append((sh_offset, sh_offset + sh_size))
+            except (struct.error, IndexError):
+                pass
+
+        # Fallback: treat entire binary as executable
+        if not ranges:
+            ranges = [(0, len(data))]
+
+        return ranges
+
+    @staticmethod
+    def _in_exec_range(offset: int, exec_ranges: List[Tuple[int, int]]) -> bool:
+        """Check whether *offset* falls within any executable section."""
+        return any(start <= offset < end for start, end in exec_ranges)
+
     def _scan_imports(self, data: bytes) -> List[EvasionIndicator]:
         """Scan for anti-debug API import names in the binary."""
         results: List[EvasionIndicator] = []
@@ -300,16 +389,23 @@ class EnvironmentNormalizer:
     def _scan_instructions(
         self,
         data: bytes,
+        exec_ranges: Optional[List[Tuple[int, int]]] = None,
     ) -> Tuple[List[EvasionIndicator], List[Patch]]:
-        """Scan for anti-debug / timing instruction patterns."""
+        """Scan executable sections for anti-debug / timing instruction patterns."""
         indicators: List[EvasionIndicator] = []
         patches: List[Patch] = []
+        ranges = exec_ranges or [(0, len(data))]
+
         for pattern, name, category, desc, patchable in _INSTRUCTION_PATTERNS:
             offset = 0
             while True:
                 idx = data.find(pattern, offset)
                 if idx == -1:
                     break
+                # Only flag if the match is within an executable section
+                if not self._in_exec_range(idx, ranges):
+                    offset = idx + len(pattern)
+                    continue
                 indicators.append(EvasionIndicator(
                     category=category,
                     name=name,
@@ -350,9 +446,15 @@ class EnvironmentNormalizer:
                 ))
         return results
 
-    def _scan_anti_disasm(self, data: bytes) -> List[EvasionIndicator]:
-        """Scan for anti-disassembly tricks."""
+    def _scan_anti_disasm(
+        self,
+        data: bytes,
+        exec_ranges: Optional[List[Tuple[int, int]]] = None,
+    ) -> List[EvasionIndicator]:
+        """Scan executable sections for anti-disassembly tricks."""
         results: List[EvasionIndicator] = []
+        ranges = exec_ranges or [(0, len(data))]
+
         for pattern, name, desc in _ANTI_DISASM_PATTERNS:
             offset = 0
             count = 0
@@ -360,6 +462,9 @@ class EnvironmentNormalizer:
                 idx = data.find(pattern, offset)
                 if idx == -1:
                     break
+                if not self._in_exec_range(idx, ranges):
+                    offset = idx + len(pattern)
+                    continue
                 count += 1
                 results.append(EvasionIndicator(
                     category=EvasionCategory.ANTI_DISASSEMBLY,
