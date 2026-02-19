@@ -187,6 +187,17 @@ class LocalFileBackend(StorageBackend):
         self._flush(index)
         return True
 
+    def store_bulk(self, index: str, documents: List[Dict[str, Any]], id_field: str = "id") -> int:
+        """Override to batch-flush: write the file only once after all inserts."""
+        bucket = self._load(index)
+        ok = 0
+        for doc in documents:
+            doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode()).hexdigest())
+            bucket[str(doc_id)] = doc
+            ok += 1
+        self._flush(index)
+        return ok
+
     def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
         return self._load(index).get(doc_id)
 

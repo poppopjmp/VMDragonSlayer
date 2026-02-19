@@ -327,6 +327,7 @@ class AnalysisPipeline:
                 "matches": matches_data,
                 "total_matches": len(matches),
                 "patterns_checked": len(recognizer.database),
+                "avg_confidence": round(avg_confidence, 4),
             }
 
             # Store in shared_data for downstream stages
@@ -463,6 +464,7 @@ class AnalysisPipeline:
                 "successful": successes,
                 "failed": len(plugins) - successes,
                 "results": plugin_results,
+                "avg_confidence": round(avg_confidence, 4),
             }
 
             # Store aggregated stage results in shared_data
