@@ -14,6 +14,7 @@ try:
     from .dispatcher import DispatcherAnalyzer, DispatchTableResult
     from .handler_boundaries import (
         identify_vip_register,
+        score_vip_from_symbolic,
         segment_trace,
         VIPCandidate,
         HandlerBoundary,
@@ -30,6 +31,7 @@ __all__ = [
     "DispatcherAnalyzer",
     "DispatchTableResult",
     "identify_vip_register",
+    "score_vip_from_symbolic",
     "segment_trace",
     "VIPCandidate",
     "HandlerBoundary",

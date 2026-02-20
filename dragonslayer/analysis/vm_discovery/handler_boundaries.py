@@ -37,6 +37,7 @@ from dragonslayer.analysis.trace_ingestion import (
     TraceInstruction,
     HandlerMarker,
 )
+from dragonslayer.analysis.symbolic_execution.executor import HandlerSymbolicSummary
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ class VIPCandidate:
     monotonic_ratio: float = 0.0
     aligned_ratio: float = 0.0
     dispatcher_correlation: float = 0.0
+    symbolic_score: float = 0.0
     detail: str = ""
 
 
@@ -151,6 +153,7 @@ def identify_vip_register(
     dispatcher_addresses: Sequence[int] = (),
     *,
     candidates: Optional[Sequence[str]] = None,
+    symbolic_summaries: Optional[Sequence[HandlerSymbolicSummary]] = None,
 ) -> Optional[VIPCandidate]:
     """Heuristically identify which native register acts as the vIP.
 
@@ -165,6 +168,7 @@ def identify_vip_register(
        - **Alignment** (vIP often changes by fixed amounts: 1, 2, 4, 8)
        - **Dispatcher-correlation** (changes occur near dispatcher addr)
        - **Prior weight** (known vIP registers get a bonus)
+       - **Symbolic self-advance** (optional; from handler summaries)
     3. Return the :class:`VIPCandidate` with the highest score, or
        ``None`` if the trace has insufficient register data.
 
@@ -172,6 +176,10 @@ def identify_vip_register(
         trace: An ExecutionTrace with register snapshots.
         dispatcher_addresses: Known dispatcher native addresses.
         candidates: Optional list of register names to consider.
+        symbolic_summaries: Optional handler symbolic summaries from
+            :meth:`SymbolicExecutor.execute_handler`.  When provided,
+            the symbolic self-advance score is blended into the
+            composite (weight 0.30).
     """
     if not trace.instructions:
         return None
@@ -195,9 +203,19 @@ def identify_vip_register(
 
     disp_set = set(dispatcher_addresses)
 
+    # Pre-compute symbolic scores if summaries are provided.
+    sym_scores: Dict[str, float] = {}
+    if symbolic_summaries:
+        sym_scores = score_vip_from_symbolic(
+            symbolic_summaries, candidates=candidates,
+        )
+
     results: List[VIPCandidate] = []
     for reg in sorted(gp_regs):
-        cand = _score_register(trace.instructions, reg, disp_set)
+        cand = _score_register(
+            trace.instructions, reg, disp_set,
+            symbolic_bonus=sym_scores.get(reg.lower(), 0.0),
+        )
         if cand is not None:
             results.append(cand)
 
@@ -219,6 +237,8 @@ def _score_register(
     instructions: List[TraceInstruction],
     reg: str,
     dispatcher_addrs: Set[int],
+    *,
+    symbolic_bonus: float = 0.0,
 ) -> Optional[VIPCandidate]:
     """Score a single register as vIP candidate."""
 
@@ -269,12 +289,23 @@ def _score_register(
     prior = 1.2 if reg.lower() in _VIP_LIKELY else 1.0
 
     # ---- composite score ------------------------------------------------
-    score = (
-        0.35 * mono_ratio
-        + 0.25 * aligned_ratio
-        + 0.25 * disp_corr
-        + 0.15 * min(change_count / max(len(instructions) * 0.1, 1), 1.0)
-    ) * prior
+    # When symbolic evidence is available, blend it in (weight 0.30)
+    # and scale the trace-based factors down proportionally.
+    if symbolic_bonus > 0:
+        score = (
+            0.25 * mono_ratio
+            + 0.18 * aligned_ratio
+            + 0.17 * disp_corr
+            + 0.10 * min(change_count / max(len(instructions) * 0.1, 1), 1.0)
+            + 0.30 * symbolic_bonus
+        ) * prior
+    else:
+        score = (
+            0.35 * mono_ratio
+            + 0.25 * aligned_ratio
+            + 0.25 * disp_corr
+            + 0.15 * min(change_count / max(len(instructions) * 0.1, 1), 1.0)
+        ) * prior
 
     return VIPCandidate(
         name=reg,
@@ -283,6 +314,7 @@ def _score_register(
         monotonic_ratio=round(mono_ratio, 4),
         aligned_ratio=round(aligned_ratio, 4),
         dispatcher_correlation=round(disp_corr, 4),
+        symbolic_score=round(symbolic_bonus, 4),
         detail=f"diffs_mode={_safe_mode(abs_diffs)}",
     )
 
@@ -296,6 +328,103 @@ def _safe_mode(values: List[int]) -> int:
     except statistics.StatisticsError:
         counter = Counter(values)
         return counter.most_common(1)[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Symbolic vIP identification
+# ---------------------------------------------------------------------------
+
+# Pattern to extract ``in_{register}`` symbolic input names from
+# HandlerSymbolicSummary.final_registers expressions.
+import re as _re
+
+_IN_REG_RE = _re.compile(r"\bin_(\w+)\b")
+
+
+def score_vip_from_symbolic(
+    summaries: Sequence[HandlerSymbolicSummary],
+    *,
+    candidates: Optional[Sequence[str]] = None,
+) -> Dict[str, float]:
+    """Score registers as vIP candidates using symbolic handler summaries.
+
+    For each handler summary, the function inspects *final_registers* for
+    registers whose final expression references exactly one ``in_{reg}``
+    input symbol via an arithmetic advance pattern (e.g. ``in_rsi + 4``).
+    The intuition is that the vIP register is typically the **only** input
+    symbol that appears in its own output expression as a simple additive
+    update (``vIP_out = vIP_in + delta``).
+
+    Additionally, if a register's final expression appears inside other
+    registers' expressions (suggesting it's used as a memory address or
+    branch target), it gets a bonus.
+
+    Args:
+        summaries: One or more :class:`HandlerSymbolicSummary` from
+            symbolic execution of handlers.
+        candidates: If given, only score these register names.
+
+    Returns:
+        A dict mapping register name → [0.0, 1.0] score.
+    """
+    if not summaries:
+        return {}
+
+    # Counters across all summaries.
+    self_advance_count: Dict[str, int] = defaultdict(int)
+    total_appearances: Dict[str, int] = defaultdict(int)
+    referenced_by_others: Dict[str, int] = defaultdict(int)
+    handler_count = 0
+
+    for summary in summaries:
+        if summary.error or not summary.final_registers:
+            continue
+        handler_count += 1
+
+        # Collect all in_{reg} mentions per output register.
+        reg_inputs: Dict[str, Set[str]] = {}
+        for out_reg, expr_str in summary.final_registers.items():
+            mentions = set(_IN_REG_RE.findall(expr_str))
+            reg_inputs[out_reg] = mentions
+            for m in mentions:
+                total_appearances[m] += 1
+
+        # Check self-advance: out_reg expression mentions in_{out_reg}
+        # and ideally not many other in_ symbols (simple update).
+        for out_reg, mentions in reg_inputs.items():
+            canonical = out_reg.lower()
+            if canonical in mentions and len(mentions) <= 2:
+                self_advance_count[canonical] += 1
+
+        # Check cross-reference: does in_{reg} appear in other regs'
+        # expressions?  That suggests it's used as a pointer/index.
+        for out_reg, mentions in reg_inputs.items():
+            canonical = out_reg.lower()
+            for m in mentions:
+                if m != canonical:
+                    referenced_by_others[m] += 1
+
+    if handler_count == 0:
+        return {}
+
+    # Build scores.
+    all_regs = set(self_advance_count) | set(total_appearances)
+    if candidates:
+        all_regs &= {c.lower() for c in candidates}
+
+    scores: Dict[str, float] = {}
+    for reg in all_regs:
+        # Self-advance ratio: how often does this register update itself?
+        sa = self_advance_count.get(reg, 0) / handler_count
+
+        # Cross-reference ratio: how often do other regs depend on this one?
+        cr = min(referenced_by_others.get(reg, 0) / max(handler_count, 1), 1.0)
+
+        # Combine: self-advance is the strongest signal, cross-ref is secondary.
+        score = 0.60 * sa + 0.40 * cr
+        scores[reg] = round(score, 4)
+
+    return scores
 
 
 # ---------------------------------------------------------------------------
