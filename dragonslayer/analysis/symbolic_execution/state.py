@@ -196,6 +196,9 @@ class SymbolicState:
         # Counter for generating unique symbolic memory read names
         self._sym_read_counter: int = 0
 
+        # B45: Alias query result cache  {(id(a1), id(a2)): result}
+        self._alias_cache: Dict[tuple, str] = {}
+
         # Explicit EFLAGS: ZF (zero), CF (carry/borrow), SF (sign), OF (overflow)
         self.flags: Dict[str, Any] = {
             "ZF": False,
@@ -584,10 +587,20 @@ class SymbolicState:
 
         Returns one of :attr:`AliasResult.MUST`, :attr:`AliasResult.MAY`,
         or :attr:`AliasResult.NO`.
+
+        B45: results are cached by (id(addr1), id(addr2)) to avoid
+        redundant Z3 queries when the same symbolic pair is checked
+        multiple times during store forwarding.
         """
         # Both concrete → trivial
         if isinstance(addr1, int) and isinstance(addr2, int):
             return AliasResult.MUST if addr1 == addr2 else AliasResult.NO
+
+        # B45: check cache
+        cache_key = (id(addr1), id(addr2))
+        cached = self._alias_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         if not _Z3_AVAILABLE:
             return AliasResult.MAY  # conservative
@@ -609,17 +622,36 @@ class SymbolicState:
             s_eq.add(*self.constraints)
             s_eq.add(a1 != a2)
             if s_eq.check() == z3.unsat:
+                self._alias_cache[cache_key] = AliasResult.MUST
                 return AliasResult.MUST  # can never differ → must alias
 
             s_neq = z3.Solver()
             s_neq.add(*self.constraints)
             s_neq.add(a1 == a2)
             if s_neq.check() == z3.unsat:
+                self._alias_cache[cache_key] = AliasResult.NO
                 return AliasResult.NO  # can never be equal → no alias
 
+            self._alias_cache[cache_key] = AliasResult.MAY
             return AliasResult.MAY
         except Exception:
             return AliasResult.MAY
+
+    def alias_analysis_batch(
+        self,
+        addresses: List[Any],
+    ) -> Dict[tuple, str]:
+        """Batch alias analysis for a list of addresses (B45).
+
+        Returns a dictionary mapping ``(i, j)`` index-pairs to alias
+        results.  Exploits the cache so previously-resolved pairs are
+        instant.
+        """
+        results: Dict[tuple, str] = {}
+        for i in range(len(addresses)):
+            for j in range(i + 1, len(addresses)):
+                results[(i, j)] = self.query_alias(addresses[i], addresses[j])
+        return results
 
     def _forward_from_symbolic_store(self, address: Any, size: int) -> Optional[Any]:
         """Search the symbolic store (most recent first) for a must-aliasing write.
@@ -627,13 +659,21 @@ class SymbolicState:
         If a prior write to a *must-alias* address of the same size is
         found, the stored value is forwarded.  Returns ``None`` when no
         forwarding is possible.
+
+        B45: also handles partial-width forwarding — if a wider write
+        must-aliases the read address, the low bytes are extracted.
         """
         for write in reversed(self._symbolic_store):
-            if write.size != size:
-                continue
             alias = self.query_alias(write.address, address)
             if alias == AliasResult.MUST:
-                return write.value
+                if write.size == size:
+                    return write.value
+                # B45: Partial-width forwarding (read narrower than write).
+                if write.size > size and _Z3_AVAILABLE and hasattr(write.value, "sort"):
+                    try:
+                        return z3.Extract(size * 8 - 1, 0, write.value)
+                    except Exception:
+                        pass
         return None
 
     def _make_symbolic_read_name(self, address: Any, size: int) -> str:
@@ -820,6 +860,7 @@ class SymbolicState:
         new.flags = dict(self.flags)
         new._regions = dict(self._regions)
         new._sym_read_counter = self._sym_read_counter
+        new._alias_cache = dict(self._alias_cache)
         return new
 
     def visit(self, pc: int) -> None:

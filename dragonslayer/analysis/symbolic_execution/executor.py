@@ -553,6 +553,11 @@ class SymbolicExecutor:
 
             prev_insn = insn
 
+        # Phase 2.5 (B45): Two-variable MBA opaque predicates.
+        # Detect patterns like ``(x & y) | (~x & y) == y`` which are
+        # Boolean-algebra tautologies VMProtect sometimes inserts.
+        opaque.extend(self._detect_mba_opaques(_z3, instructions, flagged))
+
         # Phase 3: Detect common arithmetic opaque predicates.
         opaque.extend(self._detect_arithmetic_opaques(_z3, instructions, flagged))
 
@@ -645,6 +650,13 @@ class SymbolicExecutor:
         _ARITH_PATTERNS = [
             ("x*(x-1)%2==0", (x * (x - 1)) % 2 == 0, 0.92),
             ("x|1 != 0", (x | 1) != 0, 0.95),
+            # B45: additional arithmetic/bit-manipulation tautologies
+            ("x^x==0", x ^ x == 0, 0.99),
+            ("x&x==x", (x & x) == x, 0.98),
+            ("(x|x)==x", (x | x) == x, 0.98),
+            ("x-x==0", (x - x) == 0, 0.99),
+            ("~~x==x", ~(~x) == x, 0.97),
+            ("(x&1)|(x&~1)==x", ((x & 1) | (x & ~_z3.BitVecVal(1, 64))) == x, 0.94),
         ]
 
         # Scan for mul → and/test → jz sequences (3-instruction window).
@@ -674,6 +686,56 @@ class SymbolicExecutor:
                         })
                         break
 
+        return results
+
+    @staticmethod
+    def _detect_mba_opaques(
+        _z3: Any,
+        instructions: List[LiftedInstruction],
+        already_flagged: set,
+    ) -> List[Dict[str, Any]]:
+        """Detect mixed-boolean-arithmetic (MBA) opaque predicates (B45).
+
+        Scans for instruction sequences that combine XOR/AND/OR/NOT
+        followed by a conditional branch.  Builds symbolic models for
+        two-variable tautologies such as ``(x & y) | (x & ~y) == x``.
+        """
+        results: List[Dict[str, Any]] = []
+        x = _z3.BitVec("mba_x", 64)
+        y = _z3.BitVec("mba_y", 64)
+
+        _MBA_PATTERNS = [
+            ("(x&y)|(x&~y)==x", ((x & y) | (x & ~y)) == x, 0.93),
+            ("(x|y)&(x|~y)==x", ((x | y) & (x | ~y)) == x, 0.93),
+            ("(x^y)^y==x", (x ^ y) ^ y == x, 0.96),
+            ("(x+y)-(y)==x", (x + y) - y == x, 0.94),
+            ("(x&y)|(~x&y)==y", ((x & y) | (~x & y)) == y, 0.93),
+        ]
+
+        # Scan 3-instruction windows: bitwise op → bitwise op → branch.
+        _BITWISE = {"xor", "and", "or", "not", "andn"}
+        for i in range(len(instructions) - 2):
+            if instructions[i + 2].address in already_flagged:
+                continue
+            i0, i1, i2 = instructions[i], instructions[i + 1], instructions[i + 2]
+            if (
+                i0.mnemonic in _BITWISE
+                and i1.mnemonic in _BITWISE | {"cmp", "test"}
+                and i2.category == InstructionCategory.BRANCH_COND
+            ):
+                for name, cond, conf in _MBA_PATTERNS:
+                    s = _z3.Solver()
+                    s.set("timeout", 500)
+                    s.add(_z3.Not(cond))
+                    if s.check() == _z3.unsat:
+                        results.append({
+                            "address": i2.address,
+                            "pattern": name,
+                            "always_true": True,
+                            "confidence": conf,
+                            "source": "mba",
+                        })
+                        break
         return results
 
     # -- Path exploration with instruction semantics --------------------------
@@ -783,8 +845,19 @@ class SymbolicExecutor:
                     elif insn.branch_target is not None:
                         state.pc = insn.branch_target
                     else:
-                        state.halt("indirect branch")
-                        break
+                        # B45: Attempt Z3-based indirect dispatch resolution.
+                        targets = self._resolve_indirect_branch(state, insn)
+                        if targets:
+                            # Fork paths for each resolved target.
+                            for t in targets[1:]:
+                                if len(worklist) < self.max_paths:
+                                    fork = state.fork()
+                                    fork.pc = t
+                                    worklist.append(fork)
+                            state.pc = targets[0]
+                        else:
+                            state.halt("indirect branch")
+                            break
                 else:
                     next_addr = insn.address + insn.size
                     if next_addr in insn_map:
@@ -1907,3 +1980,74 @@ class SymbolicExecutor:
                 import z3 as _z3
                 return _z3.BoolVal(True)
             return result
+
+    # -- B45: Indirect dispatch resolution -----------------------------------
+
+    def _resolve_indirect_branch(
+        self,
+        state: SymbolicState,
+        insn: LiftedInstruction,
+        max_targets: int = 256,
+    ) -> List[int]:
+        """Resolve an indirect jump/call to concrete target addresses via Z3.
+
+        For VMProtect-style dispatch (``jmp [table + rax*8]``), the
+        jump target is a symbolic expression over registers constrained
+        by the prior path.  This method uses :meth:`Z3Solver.enumerate_values`
+        to find *all* distinct concrete addresses the branch may reach.
+
+        Parameters
+        ----------
+        state : SymbolicState
+            Current executor state (with accumulated path constraints).
+        insn : LiftedInstruction
+            The indirect branch instruction.
+        max_targets : int
+            Upper bound on target enumeration (default 256).
+
+        Returns
+        -------
+        list of int
+            Sorted list of possible concrete target addresses.  Empty
+            if the target cannot be resolved.
+        """
+        if not Z3Solver.available():
+            return []
+
+        # Determine the symbolic target expression.
+        target_expr = self._extract_branch_target_expr(state, insn)
+        if target_expr is None:
+            return []
+
+        # Enumerate all concrete values under accumulated path constraints.
+        return self._solver.enumerate_values(
+            target_expr,
+            constraints=list(state.constraints),
+            max_values=max_targets,
+        )
+
+    def _extract_branch_target_expr(
+        self,
+        state: SymbolicState,
+        insn: LiftedInstruction,
+    ) -> Any:
+        """Extract the symbolic expression for an indirect jump target.
+
+        Handles ``jmp reg``, ``jmp [mem]``, ``call reg``, ``call [mem]``
+        by resolving the operand through the current state.
+        """
+        operands = insn.operands.strip()
+        if not operands:
+            return None
+
+        try:
+            # Memory-indirect jump: ``jmp [rax + rbx*8 + 0x10]``
+            if "[" in operands:
+                return self._resolve_effective_address(state, operands)
+            # Register-indirect jump: ``jmp rax``
+            val = state.get_register(operands)
+            if val is not None:
+                return val
+        except Exception:
+            pass
+        return None

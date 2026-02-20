@@ -203,6 +203,45 @@ class Z3Solver:
         """Simplify a z3 expression."""
         return z3.simplify(expr)
 
+    def enumerate_values(
+        self,
+        expr: Any,
+        constraints: List[Any] | None = None,
+        max_values: int = 256,
+    ) -> List[int]:
+        """Enumerate all distinct concrete values of *expr* under constraints.
+
+        Used for indirect dispatch resolution: given a symbolic jump
+        target expression, enumerate all concrete addresses the jump may
+        resolve to (up to *max_values*).
+
+        Returns a sorted list of concrete ``int`` values.
+        """
+        s = z3.Solver()
+        s.set("timeout", self.timeout_ms)
+
+        all_constraints = list(self._constraints) + (constraints or [])
+        if all_constraints:
+            s.add(*all_constraints)
+
+        values: List[int] = []
+        bits = expr.sort().size() if hasattr(expr, "sort") else 64
+
+        for _ in range(max_values):
+            if s.check() != z3.sat:
+                break
+            model = s.model()
+            val = model.eval(expr, model_completion=True)
+            try:
+                concrete = val.as_long()
+            except (AttributeError, z3.Z3Exception):
+                break
+            values.append(concrete)
+            # Exclude this value and continue
+            s.add(expr != z3.BitVecVal(concrete, bits))
+
+        return sorted(values)
+
     def solve_for(self, target_var: Any, constraints: List[Any] | None = None) -> SolverResult:
         """
         Solve for a specific variable given constraints.
