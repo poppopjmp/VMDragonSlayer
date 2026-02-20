@@ -64,6 +64,8 @@ class PseudocodeResult:
     line_count: int = 0
     style: str = "linear"   # "linear" | "structured" | "c_like"
     warnings: List[str] = field(default_factory=list)
+    var_widths: Dict[str, int] = field(default_factory=dict)
+    """Mapping of SSA variable name → operand width in bytes."""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -107,6 +109,23 @@ _OP_TEMPLATES: Dict[str, str] = {
     VMOperation.UNKNOWN: "/* unknown handler 0x{handler_addr:X} */",
 }
 
+# Width-qualified load/store templates (used when operand_width is known).
+# Maps operand_width in bytes → C-style pointer cast.
+_WIDTH_CAST: Dict[int, str] = {
+    1: "BYTE",
+    2: "WORD",
+    4: "DWORD",
+    8: "QWORD",
+}
+
+# Width → C type name for variable declarations.
+_WIDTH_TYPE: Dict[int, str] = {
+    1: "uint8_t",
+    2: "uint16_t",
+    4: "uint32_t",
+    8: "uint64_t",
+}
+
 
 # ---------------------------------------------------------------------------
 # Linear emission
@@ -142,6 +161,7 @@ def emit_linear(
         line_count=len(lines),
         style="linear",
         warnings=warnings,
+        var_widths=namer.all_var_widths(),
     )
 
 
@@ -215,6 +235,8 @@ class _DefUseNamer:
         self._counters: Dict[str, int] = {}
         self._stack: List[str] = []  # simulated VM stack of variable names
         self._last_def: Optional[str] = None
+        # Track width (bytes) per variable name.
+        self._var_widths: Dict[str, int] = {}
 
     def _next_name(self, op: str) -> str:
         prefix = self._OP_PREFIX.get(op, "v")
@@ -236,24 +258,37 @@ class _DefUseNamer:
     def peek(self) -> str:
         return self._stack[-1] if self._stack else "???"
 
-    def define(self, op: str) -> str:
-        """Create a new SSA variable for the result of *op*."""
+    def define(self, op: str, *, width: int = 0) -> str:
+        """Create a new SSA variable for the result of *op*.
+
+        If *width* is non-zero, record the operand width in bytes.
+        """
         name = self._next_name(op)
         self._last_def = name
+        if width > 0:
+            self._var_widths[name] = width
         return name
 
-    def consume_binary(self, op: str) -> tuple[str, str, str]:
+    def var_width(self, name: str) -> int:
+        """Return the recorded width for *name*, or 0 if unknown."""
+        return self._var_widths.get(name, 0)
+
+    def all_var_widths(self) -> Dict[str, int]:
+        """Return a copy of ``{var_name: width_bytes}``."""
+        return dict(self._var_widths)
+
+    def consume_binary(self, op: str, *, width: int = 0) -> tuple[str, str, str]:
         """Pop two operands, define result. Returns (dst, src2, src1)."""
         src2 = self.pop()
         src1 = self.pop()
-        dst = self.define(op)
+        dst = self.define(op, width=width)
         self.push(dst)
         return dst, src1, src2
 
-    def consume_unary(self, op: str) -> tuple[str, str]:
+    def consume_unary(self, op: str, *, width: int = 0) -> tuple[str, str]:
         """Pop one operand, define result. Returns (dst, src)."""
         src = self.pop()
-        dst = self.define(op)
+        dst = self.define(op, width=width)
         self.push(dst)
         return dst, src
 
@@ -278,8 +313,15 @@ def _format_instruction_ssa(
     index: int,
     namer: _DefUseNamer,
 ) -> str:
-    """Format one pseudocode line using SSA def-use chain naming."""
+    """Format one pseudocode line using SSA def-use chain naming.
+
+    When *entry.semantic.operand_width* is set (1/2/4/8 bytes), LOAD and
+    STORE operations emit width-qualified pointer casts (e.g.
+    ``*(DWORD*)(addr)``), and variables receive per-width type
+    declarations in the C-like output.
+    """
     op = entry.semantic.operation
+    ow = entry.semantic.operand_width  # bytes: 0/1/2/4/8
     template = _OP_TEMPLATES.get(op, f"/* {op} */")
 
     imm = f"0x{entry.vip_delta:X}" if entry.vip_delta else "0"
@@ -287,9 +329,9 @@ def _format_instruction_ssa(
 
     # Model VM stack operations
     if op in _BINARY_OPS:
-        dst, src, src2 = namer.consume_binary(op)
+        dst, src, src2 = namer.consume_binary(op, width=ow)
     elif op in _UNARY_OPS:
-        dst, src = namer.consume_unary(op)
+        dst, src = namer.consume_unary(op, width=ow)
         src2 = "0"
     elif op in _CMP_OPS:
         src2 = namer.pop()
@@ -297,7 +339,7 @@ def _format_instruction_ssa(
         dst = "flags"
     elif op == VMOperation.PUSH:
         # PUSH puts a value on the stack — name it by the immediate/address
-        name = namer.define(op)
+        name = namer.define(op, width=ow)
         namer.push(name)
         src = imm if imm != "0" else name
         dst = name
@@ -310,10 +352,18 @@ def _format_instruction_ssa(
     elif op == VMOperation.LOAD:
         # Memory load: src is address (pop), result is loaded value
         addr_var = namer.pop() if namer._stack else "addr"
-        dst = namer.define(op)
+        dst = namer.define(op, width=ow)
         namer.push(dst)
         src = addr_var
         src2 = "0"
+        # Width-qualified load: ld_0 = *(DWORD*)(addr_var)
+        cast = _WIDTH_CAST.get(ow)
+        if cast:
+            return f"{dst} = *({cast}*)({src})"
+        return template.format(
+            dst=dst, src=src, src2=src2, imm=imm, label=label,
+            handler_addr=entry.handler_address,
+        )
     elif op == VMOperation.STORE:
         # Memory store: pop value and address
         val = namer.pop()
@@ -321,6 +371,14 @@ def _format_instruction_ssa(
         dst = addr_var
         src = val
         src2 = "0"
+        # Width-qualified store: *(DWORD*)(addr_var) = val
+        cast = _WIDTH_CAST.get(ow)
+        if cast:
+            return f"*({cast}*)({dst}) = {src}"
+        return template.format(
+            dst=dst, src=src, src2=src2, imm=imm, label=label,
+            handler_addr=entry.handler_address,
+        )
     elif op in (VMOperation.JMP, VMOperation.JCC):
         dst = "pc"
         src = namer.peek() if namer._stack else "0"
@@ -430,6 +488,7 @@ def emit_structured(
         line_count=len(lines),
         style="structured",
         warnings=warnings,
+        var_widths=namer.all_var_widths(),
     )
 
 
@@ -459,14 +518,23 @@ def emit_c_like(
     import re as _re
     var_names = set(_re.findall(r"\b([a-z]+_\d+)\b", inner.text))
     if var_names:
-        width = 8 if any(
+        # Group variables by their width for per-type declarations.
+        width_groups: Dict[int, List[str]] = {}
+        fallback_width = 8 if any(
             e.semantic.operand_width == 8 for e in opcode_table.entries
         ) else 4
-        type_name = "uint64_t" if width == 8 else "uint32_t"
-        sorted_vars = sorted(var_names)
-        # Group declarations by prefix for readability
-        var_decls = ", ".join(sorted_vars)
-        header_lines.append(f"  {type_name} {var_decls};")
+        for vn in sorted(var_names):
+            w = inner.var_widths.get(vn, 0)
+            width_groups.setdefault(w, []).append(vn)
+
+        # Emit typed declarations: known widths first, then fallback.
+        for w in sorted(width_groups):
+            names = width_groups[w]
+            if w in _WIDTH_TYPE:
+                type_name = _WIDTH_TYPE[w]
+            else:
+                type_name = _WIDTH_TYPE.get(fallback_width, "uint32_t")
+            header_lines.append(f"  {type_name} {', '.join(names)};")
         header_lines.append("")
 
     footer_lines = ["}", ""]
