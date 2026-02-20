@@ -6,17 +6,44 @@ optional dependencies (scikit-learn, PyTorch, etc.) are missing.
 """
 
 try:
-    from .pipeline import FeatureExtractor, FeatureVector
+    from .pipeline import (
+        FeatureExtractor,
+        FeatureVector,
+        extract_extended_features,
+        extract_bigram_features,
+        extract_register_effects,
+        extract_operand_pattern_features,
+        EXTENDED_FEATURE_NAMES,
+        VMPROTECT_BIGRAMS,
+    )
 except (ImportError, AttributeError):
     FeatureExtractor = None  # type: ignore[assignment,misc]
     FeatureVector = None  # type: ignore[assignment,misc]
+    extract_extended_features = None  # type: ignore[assignment,misc]
+    extract_bigram_features = None  # type: ignore[assignment,misc]
+    extract_register_effects = None  # type: ignore[assignment,misc]
+    extract_operand_pattern_features = None  # type: ignore[assignment,misc]
+    EXTENDED_FEATURE_NAMES = None  # type: ignore[assignment,misc]
+    VMPROTECT_BIGRAMS = None  # type: ignore[assignment,misc]
 
 try:
-    from .trainer import ModelTrainer, TrainingResult, prepare_training_data
+    from .trainer import (
+        ModelTrainer,
+        TrainingResult,
+        prepare_training_data,
+        prepare_extended_training_data,
+        generate_synthetic_handlers,
+        feature_importance,
+        train_full_pipeline,
+    )
 except (ImportError, AttributeError):
     ModelTrainer = None  # type: ignore[assignment,misc]
     TrainingResult = None  # type: ignore[assignment,misc]
     prepare_training_data = None  # type: ignore[assignment,misc]
+    prepare_extended_training_data = None  # type: ignore[assignment,misc]
+    generate_synthetic_handlers = None  # type: ignore[assignment,misc]
+    feature_importance = None  # type: ignore[assignment,misc]
+    train_full_pipeline = None  # type: ignore[assignment,misc]
 
 try:
     from .model import BaseModel, VMHandlerModel, PredictionResult
@@ -52,9 +79,19 @@ except (ImportError, AttributeError):
 __all__ = [
     'FeatureExtractor',
     'FeatureVector',
+    'extract_extended_features',
+    'extract_bigram_features',
+    'extract_register_effects',
+    'extract_operand_pattern_features',
+    'EXTENDED_FEATURE_NAMES',
+    'VMPROTECT_BIGRAMS',
     'ModelTrainer',
     'TrainingResult',
     'prepare_training_data',
+    'prepare_extended_training_data',
+    'generate_synthetic_handlers',
+    'feature_importance',
+    'train_full_pipeline',
     'BaseModel',
     'VMHandlerModel',
     'PredictionResult',

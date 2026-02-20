@@ -20,7 +20,13 @@ from typing import Any, Dict, List, Sequence
 import logging
 
 from .model import BaseModel, PredictionResult, VMHandlerModel, HANDLER_CATEGORIES
-from .pipeline import FeatureVector, extract_handler_features
+from .pipeline import (
+    FeatureVector,
+    extract_handler_features,
+    extract_extended_features,
+    EXTENDED_FEATURE_NAMES,
+    HANDLER_FEATURE_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -228,3 +234,273 @@ class ModelTrainer:
             if pred.label == true_label:
                 correct += 1
         return {"accuracy": correct / total if total else 0.0, "total": total}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Synthetic training data generator
+# ═══════════════════════════════════════════════════════════════════════════
+
+import random as _random
+
+# Realistic VMProtect handler instruction templates keyed by category.
+# Each value is a list of "handler body templates" — lists of (mnemonic, operands)
+# tuples that mimic real VM handler bodies.
+
+_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
+    "arithmetic": [
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("add", "rax, rcx"),
+            ("mov", "[rbp+8], rax"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("sub", "rax, rcx"),
+            ("mov", "[rbp+8], rax"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("neg", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("imul", "rax, rcx"),
+            ("mov", "[rbp+8], rax"),
+        ],
+    ],
+    "logic": [
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("xor", "rax, rcx"),
+            ("mov", "[rbp+8], rax"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("and", "rax, rcx"),
+            ("mov", "[rbp+8], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("not", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "cl, [rbp+8]"),
+            ("shl", "rax, cl"),
+            ("mov", "[rbp+8], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "cl, [rbp+8]"),
+            ("shr", "rax, cl"),
+            ("mov", "[rbp+8], rax"),
+        ],
+    ],
+    "stack": [
+        [
+            ("mov", "rax, [rsi]"),
+            ("sub", "rbp, 8"),
+            ("mov", "[rbp], rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("add", "rbp, 8"),
+            ("mov", "[rsi], rax"),
+        ],
+        [
+            ("push", "rax"),
+            ("mov", "rax, [rsi]"),
+            ("mov", "[rbp], rax"),
+        ],
+    ],
+    "load_store": [
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rax]"),
+            ("mov", "[rbp], rcx"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("mov", "[rax], rcx"),
+            ("add", "rbp, 8"),
+        ],
+        [
+            ("movzx", "eax, byte ptr [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("mov", "[rcx], al"),
+        ],
+    ],
+    "branch": [
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rsi, rax"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("test", "rax, rax"),
+            ("cmove", "rsi, rcx"),
+        ],
+        [
+            ("mov", "rax, [rbp]"),
+            ("cmp", "rax, 0"),
+            ("jne", "0x1234"),
+        ],
+    ],
+    "nop": [
+        [
+            ("nop", ""),
+        ],
+        [
+            ("nop", ""),
+            ("nop", ""),
+        ],
+    ],
+}
+
+
+def generate_synthetic_handlers(
+    n_per_category: int = 50,
+    *,
+    seed: int = 42,
+    jitter: bool = True,
+) -> List[Dict[str, Any]]:
+    """Generate synthetic VM handler dicts for training.
+
+    For each handler category, produces *n_per_category* handler dicts
+    by randomly selecting a template and optionally injecting jitter
+    (nop padding, register renaming).
+
+    Returns a list of dicts with keys: ``instructions``, ``mnemonics``,
+    ``category``, ``operation``, ``operand_width``, ``block_count``.
+    """
+    rng = _random.Random(seed)
+    handlers: List[Dict[str, Any]] = []
+
+    for cat, templates in _HANDLER_TEMPLATES.items():
+        for _ in range(n_per_category):
+            tmpl = rng.choice(templates)
+            body: List[tuple[str, str]] = list(tmpl)
+
+            if jitter:
+                # Possibly insert 0-2 nop instructions at random positions
+                n_nops = rng.randint(0, 2)
+                for __ in range(n_nops):
+                    pos = rng.randint(0, len(body))
+                    body.insert(pos, ("nop", ""))
+
+            # Build instruction dicts
+            instructions: List[Dict[str, str]] = []
+            mnemonics: List[str] = []
+            for mnem, ops in body:
+                instructions.append({"mnemonic": mnem, "operands": ops})
+                mnemonics.append(mnem.lower())
+
+            # Map category to an operation name
+            _cat_to_op = {
+                "arithmetic": "vm_add",
+                "logic": "vm_xor",
+                "stack": "vm_push",
+                "load_store": "vm_load",
+                "branch": "vm_jmp",
+                "nop": "vm_nop",
+            }
+
+            handlers.append({
+                "instructions": instructions,
+                "mnemonics": mnemonics,
+                "category": cat,
+                "operation": _cat_to_op.get(cat, "vm_unknown"),
+                "operand_width": rng.choice([4, 8]),
+                "block_count": rng.randint(1, 3),
+                "reads": [],
+                "writes": [],
+            })
+
+    rng.shuffle(handlers)
+    return handlers
+
+
+def prepare_extended_training_data(
+    handlers: List[Dict[str, Any]],
+    label_key: str = "",
+) -> tuple[list[FeatureVector], list[str]]:
+    """Like :func:`prepare_training_data` but uses extended features."""
+    features: list[FeatureVector] = []
+    labels: list[str] = []
+    for h in handlers:
+        fv = extract_extended_features(h)
+        if label_key and label_key in h:
+            lbl = str(h[label_key])
+        else:
+            lbl = label_from_heuristics(h)
+        features.append(fv)
+        labels.append(lbl)
+    return features, labels
+
+
+def feature_importance(
+    model: VMHandlerModel,
+    feature_names: Sequence[str] | None = None,
+    top_n: int = 15,
+) -> List[tuple[str, float]]:
+    """Return top-N feature importances from a trained sklearn model.
+
+    Returns list of ``(feature_name, importance)`` tuples sorted
+    descending.  Returns empty list if no sklearn model is loaded.
+    """
+    clf = getattr(model, "_sklearn_model", None)
+    if clf is None or not hasattr(clf, "feature_importances_"):
+        return []
+
+    importances = clf.feature_importances_
+    names = list(feature_names) if feature_names else [f"f{i}" for i in range(len(importances))]
+    if len(names) != len(importances):
+        names = [f"f{i}" for i in range(len(importances))]
+
+    ranked = sorted(zip(names, importances), key=lambda x: x[1], reverse=True)
+    return ranked[:top_n]
+
+
+def train_full_pipeline(
+    n_per_category: int = 50,
+    *,
+    seed: int = 42,
+    extended: bool = True,
+    n_estimators: int = 100,
+) -> tuple[VMHandlerModel, TrainingResult, List[tuple[str, float]]]:
+    """End-to-end: generate data, extract features, train, report.
+
+    Returns ``(model, training_result, top_importances)``.
+    """
+    handlers = generate_synthetic_handlers(n_per_category=n_per_category, seed=seed)
+
+    if extended:
+        features, labels = prepare_extended_training_data(handlers, label_key="category")
+        names = EXTENDED_FEATURE_NAMES
+    else:
+        features, labels = prepare_training_data(handlers, label_key="category")
+        names = list(HANDLER_FEATURE_NAMES)
+
+    model = VMHandlerModel()
+    trainer = ModelTrainer(model)
+    result = trainer.train(features, labels, n_estimators=n_estimators)
+
+    imp = feature_importance(model, feature_names=names)
+    return model, result, imp

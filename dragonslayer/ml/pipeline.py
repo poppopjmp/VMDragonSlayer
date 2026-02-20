@@ -10,6 +10,16 @@ vectors consumed by :class:`~dragonslayer.ml.model.BaseModel`.
 :class:`HandlerFeatureExtractor` is a concrete extractor for VM handler
 classification — it takes a handler dict (from handler_semantics or
 trace ingestion) and produces a fixed-length numeric feature vector.
+
+Extended features (see :func:`extract_extended_features`):
+
+* **Mnemonic bigrams** — capture sequential instruction patterns that
+  distinguish handler categories (e.g. ``push→mov`` for stack,
+  ``xor→shr`` for logic).
+* **Register-effect features** — which general-purpose registers are
+  net-read or net-written, normalised across the register file.
+* **Operand pattern features** — memory dereference patterns,
+  immediate usage, register-only vs. memory-register mix.
 """
 
 from __future__ import annotations
@@ -177,4 +187,229 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
         values=values,
         feature_names=list(HANDLER_FEATURE_NAMES),
         metadata={"source": "handler"},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Extended features — n-grams, register effects, operand patterns
+# ═══════════════════════════════════════════════════════════════════════════
+
+import re as _re
+from collections import Counter as _Counter
+
+# -- Mnemonic bigrams -------------------------------------------------------
+# The top-25 mnemonic bigrams that empirically distinguish VMProtect handler
+# categories.  We compute a fixed-length vector of bigram frequencies.
+
+VMPROTECT_BIGRAMS: List[tuple[str, str]] = [
+    # Arithmetic
+    ("mov", "add"),
+    ("add", "mov"),
+    ("mov", "sub"),
+    ("sub", "mov"),
+    ("mov", "imul"),
+    ("mov", "neg"),
+    # Logic
+    ("mov", "xor"),
+    ("xor", "mov"),
+    ("mov", "and"),
+    ("and", "mov"),
+    ("mov", "or"),
+    ("mov", "shl"),
+    ("shl", "or"),
+    ("xor", "shr"),
+    ("mov", "not"),
+    # Stack
+    ("push", "mov"),
+    ("mov", "pop"),
+    ("push", "push"),
+    ("pop", "pop"),
+    # Load/Store
+    ("mov", "mov"),
+    ("movzx", "mov"),
+    ("mov", "movzx"),
+    # Branch
+    ("cmp", "jne"),
+    ("test", "je"),
+    ("cmp", "jmp"),
+]
+
+_BIGRAM_INDEX: Dict[tuple[str, str], int] = {
+    bg: i for i, bg in enumerate(VMPROTECT_BIGRAMS)
+}
+
+# General-purpose register names (x86-64) for register-effect features.
+_GP_REGS_64: List[str] = [
+    "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+]
+
+
+def extract_bigram_features(mnemonics: List[str]) -> List[float]:
+    """Compute normalised bigram frequency vector for *mnemonics*.
+
+    Returns a float list of length ``len(VMPROTECT_BIGRAMS)`` where each
+    element is the fraction of consecutive mnemonic pairs that match the
+    corresponding bigram.
+    """
+    n_pairs = max(len(mnemonics) - 1, 1)
+    counts = [0] * len(VMPROTECT_BIGRAMS)
+    for i in range(len(mnemonics) - 1):
+        pair = (mnemonics[i], mnemonics[i + 1])
+        idx = _BIGRAM_INDEX.get(pair)
+        if idx is not None:
+            counts[idx] += 1
+    return [c / n_pairs for c in counts]
+
+
+def extract_register_effects(handler: Dict[str, Any]) -> List[float]:
+    """Extract per-register read/write indicators (32 floats).
+
+    For each of the 16 GP registers, produces two values:
+    ``(read_indicator, write_indicator)`` in {0.0, 1.0}.
+
+    Sources (checked in order):
+    1. ``handler["reg_reads"]`` / ``handler["reg_writes"]`` -- explicit sets.
+    2. ``handler["instructions"]`` -- parsed from operand strings.
+    3. All zeros if no information available.
+    """
+    reg_reads: set[str] = set()
+    reg_writes: set[str] = set()
+
+    # Source 1: explicit
+    if "reg_reads" in handler:
+        reg_reads = {r.lower() for r in handler["reg_reads"]}
+    if "reg_writes" in handler:
+        reg_writes = {r.lower() for r in handler["reg_writes"]}
+
+    # Source 2: infer from instructions
+    if not reg_reads and not reg_writes:
+        for insn in handler.get("instructions", []):
+            ops_raw = insn.get("operands", "")
+            if isinstance(ops_raw, str):
+                ops = [o.strip().lower() for o in ops_raw.split(",")]
+            elif isinstance(ops_raw, (list, tuple)):
+                ops = [str(o).strip().lower() for o in ops_raw]
+            else:
+                continue
+            mnem = insn.get("mnemonic", "").lower()
+            for i, op in enumerate(ops):
+                regs_found = _re.findall(
+                    r'\b(r(?:ax|bx|cx|dx|si|di|bp|sp|[89]|1[0-5]))\b', op
+                )
+                for r in regs_found:
+                    reg_reads.add(r)
+                    if i == 0 and mnem not in ("push", "cmp", "test"):
+                        reg_writes.add(r)
+
+    # Build the 32-element vector: [rax_r, rax_w, rbx_r, rbx_w, ...]
+    result: List[float] = []
+    for reg in _GP_REGS_64:
+        result.append(1.0 if reg in reg_reads else 0.0)
+        result.append(1.0 if reg in reg_writes else 0.0)
+    return result
+
+
+def extract_operand_pattern_features(handler: Dict[str, Any]) -> List[float]:
+    """Extract operand-pattern features (6 floats).
+
+    Returns:
+        [imm_ratio, mem_deref_ratio, reg_only_ratio,
+         avg_operand_count, has_scale_index, has_rip_relative]
+    """
+    instructions = handler.get("instructions", [])
+    if not instructions:
+        return [0.0] * 6
+
+    total_ops = 0
+    imm_count = 0
+    mem_deref_count = 0
+    reg_only_count = 0
+    has_scale = 0.0
+    has_rip = 0.0
+
+    for insn in instructions:
+        ops_raw = insn.get("operands", "")
+        if isinstance(ops_raw, str):
+            ops = [o.strip() for o in ops_raw.split(",")] if ops_raw else []
+        elif isinstance(ops_raw, (list, tuple)):
+            ops = [str(o).strip() for o in ops_raw]
+        else:
+            continue
+
+        for op in ops:
+            total_ops += 1
+            op_l = op.lower()
+            if "[" in op_l:
+                mem_deref_count += 1
+                if "*" in op_l:
+                    has_scale = 1.0
+                if "rip" in op_l:
+                    has_rip = 1.0
+            elif _re.match(r'^-?(?:0x)?[0-9a-f]+$', op_l):
+                imm_count += 1
+            else:
+                reg_only_count += 1
+
+    n = max(total_ops, 1)
+    avg_ops = total_ops / max(len(instructions), 1)
+    return [
+        imm_count / n,
+        mem_deref_count / n,
+        reg_only_count / n,
+        avg_ops,
+        has_scale,
+        has_rip,
+    ]
+
+
+# -- Extended feature names --------------------------------------------------
+
+BIGRAM_FEATURE_NAMES: List[str] = [
+    f"bg_{a}_{b}" for a, b in VMPROTECT_BIGRAMS
+]
+REGISTER_FEATURE_NAMES: List[str] = []
+for _r in _GP_REGS_64:
+    REGISTER_FEATURE_NAMES.append(f"reg_read_{_r}")
+    REGISTER_FEATURE_NAMES.append(f"reg_write_{_r}")
+
+OPERAND_PATTERN_NAMES: List[str] = [
+    "imm_ratio", "mem_deref_ratio", "reg_only_ratio",
+    "avg_operand_count", "has_scale_index", "has_rip_relative",
+]
+
+EXTENDED_FEATURE_NAMES: List[str] = (
+    list(HANDLER_FEATURE_NAMES)
+    + BIGRAM_FEATURE_NAMES
+    + REGISTER_FEATURE_NAMES
+    + OPERAND_PATTERN_NAMES
+)
+
+
+def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
+    """Extract a rich feature vector for ML training.
+
+    Combines the base 15 handler features with mnemonic bigrams (25),
+    register effects (32), and operand patterns (6) for a total of
+    **78 features**.
+    """
+    base = extract_handler_features(handler)
+
+    # Recover mnemonics for bigram extraction
+    mnemonics: List[str] = handler.get("mnemonics", [])
+    if not mnemonics:
+        for insn in handler.get("instructions", []):
+            m = insn.get("mnemonic", "")
+            if m:
+                mnemonics.append(m.lower())
+
+    bigram_vals = extract_bigram_features(mnemonics)
+    reg_vals = extract_register_effects(handler)
+    op_vals = extract_operand_pattern_features(handler)
+
+    all_values = base.values + bigram_vals + reg_vals + op_vals
+    return FeatureVector(
+        values=all_values,
+        feature_names=list(EXTENDED_FEATURE_NAMES),
+        metadata={"source": "handler_extended"},
     )
