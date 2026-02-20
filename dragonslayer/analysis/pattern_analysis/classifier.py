@@ -156,6 +156,129 @@ _INSTRUCTION_SEQ_SIGNATURES: List[tuple[List[str], HandlerType, str, float]] = [
     (["test", "*", "mov"], HandlerType.COMPARISON, "vm_test", 0.6),
 ]
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# B61: Mutation-resilient matching helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Known VMProtect junk mnemonics / patterns that should be stripped before
+# sequence matching.  These are NOPs, identity moves, and dead computations
+# that VMProtect inserts to obscure handler bodies.
+_JUNK_MNEMONICS: Set[str] = {"nop", "fnop", "pause", "int3", "ud2"}
+
+# Additional junk detection: identity instructions like "mov eax, eax" or
+# "xchg eax, eax" or "lea eax, [eax+0]".  We detect these using a simple
+# operand-equality check.
+_IDENTITY_MNEMONICS: Set[str] = {"mov", "xchg", "lea"}
+
+
+def _is_junk_instruction(mnemonic: str, operands: str = "") -> bool:
+    """Return True if the instruction is likely junk / dead code.
+
+    Recognised junk patterns:
+    - Pure NOPs and equivalents (nop, fnop, pause)
+    - Identity moves: ``mov rax, rax``, ``xchg rax, rax``
+    - Zero-displacement LEA: ``lea rax, [rax]``
+    """
+    mnem = mnemonic.lower()
+    if mnem in _JUNK_MNEMONICS:
+        return True
+    if mnem in _IDENTITY_MNEMONICS and operands:
+        # Normalise and split
+        parts = [p.strip().lower() for p in operands.split(",")]
+        if len(parts) == 2:
+            a, b = parts
+            if a == b:
+                return True
+            # LEA with zero displacement: lea rax, [rax] or lea rax, [rax+0]
+            if mnem == "lea":
+                clean_b = b.strip("[]").replace("+0", "").replace("+ 0", "").strip()
+                if a == clean_b:
+                    return True
+    return False
+
+
+def strip_junk(mnemonics: List[str], operands_list: List[str] | None = None) -> List[str]:
+    """Remove junk instructions from a mnemonic list.
+
+    When *operands_list* is provided (parallel to *mnemonics*), identity
+    instructions are also detected.  Returns the filtered mnemonic list.
+    """
+    if operands_list is None:
+        operands_list = [""] * len(mnemonics)
+    return [
+        m for m, o in zip(mnemonics, operands_list)
+        if not _is_junk_instruction(m, o)
+    ]
+
+
+# Register-class normalisation for register-agnostic matching.
+_GP64 = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"}
+_GP32 = {r.replace("r", "e", 1) if r.startswith("r") and not r[1:].isdigit() else f"{r}d"
+         for r in _GP64}
+_GP32 |= {"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp",
+           "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d"}
+
+
+def normalize_operands(operands: str) -> str:
+    """Replace concrete register names with class tokens.
+
+    ``mov eax, [ecx+0x10]`` → ``mov GP32, [GP32+0x10]``
+
+    This allows signatures to match regardless of which specific
+    register VMProtect selects after register allocation.
+    """
+    result = operands
+    # Sort longest first to avoid partial replacement
+    for reg in sorted(_GP64, key=len, reverse=True):
+        result = result.replace(reg, "GP64")
+    for reg in sorted(_GP32, key=len, reverse=True):
+        result = result.replace(reg, "GP32")
+    return result
+
+
+def _match_instruction_sequence_gap(
+    mnemonics: List[str],
+    pattern: List[str],
+    max_gap: int = 2,
+) -> bool:
+    """Gap-tolerant sequence matching.
+
+    Like :func:`_match_instruction_sequence` but allows up to *max_gap*
+    non-matching instructions between each pair of consecutive pattern
+    elements.  ``\"*\"`` still matches any single mnemonic.  This makes
+    the matcher resilient to junk instructions that survive the strip
+    pass (e.g. ``push; <junk>; mov`` matches ``[push, mov]`` with gap=1).
+    """
+    if not pattern:
+        return True
+    n = len(mnemonics)
+    plen = len(pattern)
+    if plen > n:
+        return False
+
+    def _matches(mnem: str, pat: str) -> bool:
+        return pat == "*" or mnem == pat
+
+    def _search(mi: int, pi: int) -> bool:
+        if pi == plen:
+            return True
+        for i in range(mi, n):
+            if _matches(mnemonics[i], pattern[pi]):
+                # Check gap constraint: gap = i - mi (skipped instructions)
+                if pi > 0 and (i - mi) > max_gap:
+                    return False
+                if _search(i + 1, pi + 1):
+                    return True
+        return False
+
+    # Try every starting position
+    for start in range(n):
+        if _matches(mnemonics[start], pattern[0]):
+            if _search(start + 1, 1):
+                return True
+    return False
+
 
 def _match_instruction_sequence(
     mnemonics: List[str],
@@ -307,6 +430,12 @@ class PatternClassifier:
         d.setdefault("handler_type", getattr(match, "handler_type", "unknown"))
         d["matched_bytes"] = getattr(match, "matched_bytes", "")
         d["confidence"] = getattr(match, "confidence", 0.0)
+        # Preserve internal analysis fields (B56+ mnemonics, B61 operands)
+        for internal_key in ("_mnemonics", "_operands"):
+            if isinstance(match, dict) and internal_key in match:
+                d[internal_key] = match[internal_key]
+            elif hasattr(match, internal_key.lstrip("_")):
+                d[internal_key] = getattr(match, internal_key.lstrip("_"))
         return d
 
     def _classify_single(self, match: Any) -> ClassificationResult:
@@ -342,12 +471,39 @@ class PatternClassifier:
         if ht == HandlerType.UNKNOWN:
             mnems = d.get("_mnemonics", [])
             if mnems:
+                # 3a) Strict sliding-window match (original B56)
                 for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
                     if _match_instruction_sequence(mnems, sig_pattern):
                         ht = sig_type
                         seq_sub_cat = sig_sub
                         reasoning_parts.append(f"instruction-seq match: {sig_sub}")
                         break
+
+                # 3b) B61: If strict failed, try junk-stripped strict match
+                if ht == HandlerType.UNKNOWN:
+                    operands_list = d.get("_operands", None)
+                    stripped = strip_junk(mnems, operands_list)
+                    if len(stripped) < len(mnems):  # stripping had effect
+                        for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
+                            if _match_instruction_sequence(stripped, sig_pattern):
+                                ht = sig_type
+                                seq_sub_cat = sig_sub
+                                reasoning_parts.append(
+                                    f"junk-stripped seq match: {sig_sub}"
+                                )
+                                break
+
+                # 3c) B61: Gap-tolerant fuzzy match as final fallback
+                if ht == HandlerType.UNKNOWN:
+                    for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
+                        if _match_instruction_sequence_gap(mnems, sig_pattern, max_gap=2):
+                            ht = sig_type
+                            seq_sub_cat = sig_sub
+                            # Slightly lower confidence for fuzzy
+                            reasoning_parts.append(
+                                f"gap-tolerant seq match: {sig_sub}"
+                            )
+                            break
 
         # 4) If still unknown, try byte-level heuristics
         if ht == HandlerType.UNKNOWN:

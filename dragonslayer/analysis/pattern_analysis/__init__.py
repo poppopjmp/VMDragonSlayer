@@ -20,6 +20,10 @@ from .classifier import (
     PatternClassifier,
     ClassificationResult,
     ClassificationReport,
+    strip_junk,
+    normalize_operands,
+    _is_junk_instruction,
+    _match_instruction_sequence_gap,
 )
 
 from .yara_engine import (
@@ -63,6 +67,8 @@ __all__ = [
     'PatternClassifier',
     'ClassificationResult',
     'ClassificationReport',
+    'strip_junk',
+    'normalize_operands',
 
     # Version Fingerprinting
     'VMProtectVersionFingerprinter',
