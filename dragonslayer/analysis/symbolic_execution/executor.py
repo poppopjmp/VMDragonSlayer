@@ -61,6 +61,7 @@ class ExecutionResult:
     handler_table: Dict[int, str] = field(default_factory=dict)
     opaque_predicates: List[Dict[str, Any]] = field(default_factory=list)
     state_snapshots: List[Dict[str, Any]] = field(default_factory=list)
+    vmprotect_dispatcher: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,6 +74,7 @@ class ExecutionResult:
             "handler_table": {hex(k): v for k, v in self.handler_table.items()},
             "opaque_predicates": self.opaque_predicates,
             "state_snapshot_count": len(self.state_snapshots),
+            "vmprotect_dispatcher": self.vmprotect_dispatcher,
             "error": self.error,
         }
 
@@ -150,10 +152,16 @@ class SymbolicExecutor:
             # Step 2: Find basic blocks
             blocks = self._find_basic_blocks(instructions)
 
-            # Step 3: Identify dispatcher (most-targeted indirect jump)
+            # Step 3: Identify dispatcher using VMProtect pattern matching
             dispatcher_addr = self._find_dispatcher(instructions)
+            # Also run the new VMProtect-specific dispatcher identification
+            self._vmprotect_dispatcher = self._find_vmprotect_dispatcher(
+                instructions, code, entry_point,
+            )
+            if self._vmprotect_dispatcher is not None and dispatcher_addr is None:
+                dispatcher_addr = self._vmprotect_dispatcher.entry_address
 
-            # Step 4: Classify handlers
+            # Step 4: Classify handlers (uses VMProtect dispatcher context)
             handlers = self._classify_handlers(blocks, insn_map)
 
             # Step 5: Build handler table
@@ -181,6 +189,10 @@ class SymbolicExecutor:
                 handler_table=handler_table,
                 opaque_predicates=opaque,
                 state_snapshots=snapshots,
+                vmprotect_dispatcher=(
+                    self._vmprotect_dispatcher.to_dict()
+                    if self._vmprotect_dispatcher else None
+                ),
             )
 
         except Exception as exc:
@@ -270,6 +282,32 @@ class SymbolicExecutor:
 
         return best_addr
 
+    def _find_vmprotect_dispatcher(
+        self,
+        instructions: List[LiftedInstruction],
+        code: bytes,
+        entry_point: int,
+    ) -> Optional[Any]:
+        """Run VMProtect-specific dispatcher pattern matching.
+
+        Uses :func:`~dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher`
+        to identify the canonical fetch→decode→advance→dispatch cycle.
+        Returns a :class:`VMProtectDispatcherMatch` or ``None``.
+        """
+        try:
+            from dragonslayer.analysis.vm_discovery.dispatcher import (
+                find_vmprotect_dispatcher,
+            )
+            return find_vmprotect_dispatcher(
+                instructions,
+                bit_width=self.bit_width,
+                binary_data=code,
+                base_address=entry_point,
+            )
+        except Exception as exc:
+            logger.debug("VMProtect dispatcher analysis failed: %s", exc)
+            return None
+
     # -- Handler classification -----------------------------------------------
 
     def _classify_handlers(
@@ -277,8 +315,22 @@ class SymbolicExecutor:
         blocks: List[List[LiftedInstruction]],
         insn_map: Dict[int, LiftedInstruction],
     ) -> List[HandlerInfo]:
-        """Classify basic blocks into handler categories."""
+        """Classify basic blocks into handler categories.
+
+        When a VMProtect dispatcher has been identified, blocks that
+        overlap with the dispatcher loop are marked as "dispatcher" and
+        blocks that end with a jump back to the dispatcher are tagged as
+        handler candidates with higher confidence.
+        """
         handlers: List[HandlerInfo] = []
+
+        # Determine dispatcher address range for overlap detection
+        dispatcher_range: Optional[range] = None
+        vmp_disp = getattr(self, "_vmprotect_dispatcher", None)
+        if vmp_disp is not None:
+            lo = vmp_disp.entry_address
+            hi = vmp_disp.indirect_jump_address
+            dispatcher_range = range(min(lo, hi), max(lo, hi) + 16)
 
         for block in blocks:
             if not block:
@@ -305,8 +357,25 @@ class SymbolicExecutor:
             total = sum(cat_counts.values())
             confidence = cat_counts.get(dominant, 0) / total if total else 0.0
 
+            # ── VMProtect-aware adjustments ──
+            block_start = block[0].address
+            block_end = block[-1].address
+
+            # Mark blocks overlapping the dispatcher loop
+            if dispatcher_range is not None and block_start in dispatcher_range:
+                dominant = "dispatcher"
+                confidence = 0.9
+
+            # Boost confidence for blocks ending with jmp back to dispatcher
+            if dispatcher_range is not None:
+                last = block[-1]
+                if (last.is_branch
+                        and last.branch_target is not None
+                        and last.branch_target in dispatcher_range):
+                    confidence = min(confidence + 0.2, 1.0)
+
             handlers.append(HandlerInfo(
-                address=block[0].address,
+                address=block_start,
                 category=dominant,
                 instruction_count=len(block),
                 instructions=[insn.to_dict() for insn in block[:20]],  # cap for serialisation
