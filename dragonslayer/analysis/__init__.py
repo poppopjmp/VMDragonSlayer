@@ -107,3 +107,20 @@ from .mba_simplifier import (  # noqa: F401
 from .devirtualisation_result import (  # noqa: F401
     DevirtualisationResult,
 )
+
+try:
+    from .expr_simplify import (  # noqa: F401
+        simplify_pseudocode,
+        fold_constants,
+        fold_identities,
+        fold_self_cancel,
+        fold_redundant_casts,
+        propagate_types,
+    )
+except (ImportError, AttributeError):
+    simplify_pseudocode = None  # type: ignore[assignment,misc]
+    fold_constants = None  # type: ignore[assignment,misc]
+    fold_identities = None  # type: ignore[assignment,misc]
+    fold_self_cancel = None  # type: ignore[assignment,misc]
+    fold_redundant_casts = None  # type: ignore[assignment,misc]
+    propagate_types = None  # type: ignore[assignment,misc]

@@ -1408,6 +1408,10 @@ def emit_c_like(
     # ── Dead variable elimination (B43) ─────────────────────────────
     body = _eliminate_trivial_dead(body)
 
+    # ── Expression simplification & type propagation (B47) ──────────
+    from .expr_simplify import simplify_pseudocode as _simplify_pseudocode
+    body = _simplify_pseudocode(body, var_widths=inner.var_widths or {})
+
     text = "\n".join(header_lines) + "\n" + body + "\n" + "\n".join(footer_lines)
     total_lines = text.count("\n") + 1
 
