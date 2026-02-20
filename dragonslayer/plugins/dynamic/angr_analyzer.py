@@ -165,14 +165,19 @@ class AngrAnalyzer(Plugin):
 
         # --- Handler boundary detection via SimulationManager ---------------
         handler_exploration: Dict[str, Any] = {}
+        handler_traces: List[Dict[str, Any]] = []
         if vm_detected and dispatcher_addrs:
             handler_exploration = self._explore_handlers(
                 proj, dispatcher_addrs, max_steps=2000,
             )
+            # Extract per-handler instruction-level traces
+            handler_traces = self._extract_handler_traces(
+                proj, handler_exploration.get("handler_details", []),
+            )
 
         confidence = min(1.0, len(functions_data) / 50) if functions_data else 0.0
 
-        return {
+        result = {
             "arch": str(proj.arch),
             "entry_point": hex(proj.entry),
             "function_count": len(functions_data),
@@ -180,8 +185,108 @@ class AngrAnalyzer(Plugin):
             "functions": functions_data,
             "guidance_addresses": len(guidance),
             "handler_exploration": handler_exploration,
+            "handler_traces": handler_traces,
             "confidence": round(confidence, 4),
         }
+
+        # Publish to shared context for downstream stages
+        ctx.shared_data["angr"] = result
+        return result
+
+    # ------------------------------------------------------------------ #
+
+    def _extract_handler_traces(
+        self,
+        proj: Any,
+        handler_details: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        For each discovered handler, lift VEX IR and extract instruction-
+        level detail (address, mnemonic, operands) with symbolic register
+        state snapshots from a handler-local symbolic execution.
+        """
+        traces: List[Dict[str, Any]] = []
+
+        for hinfo in handler_details[:20]:
+            d_addr = hinfo.get("dispatcher", 0)
+            if not d_addr:
+                continue
+
+            try:
+                # Start fresh symbolic state at the dispatcher
+                state = proj.factory.blank_state(addr=d_addr)
+                simgr = proj.factory.simulation_manager(state)
+
+                instruction_records: List[Dict[str, Any]] = []
+                reg_names = self._get_reg_names(proj)
+                visited: set[int] = set()
+
+                for _ in range(hinfo.get("path_length", 200)):
+                    if not simgr.active:
+                        break
+                    s = simgr.active[0]
+                    pc = s.addr
+
+                    if pc in visited or pc == d_addr and len(visited) > 0:
+                        break
+                    visited.add(pc)
+
+                    # Lift block at current PC
+                    try:
+                        block = proj.factory.block(pc)
+                        cap_insns = block.capstone.insns
+                        for ci in cap_insns:
+                            reg_snapshot: Dict[str, int] = {}
+                            for rname in reg_names:
+                                try:
+                                    rv = getattr(s.regs, rname, None)
+                                    if rv is not None and not rv.symbolic:
+                                        reg_snapshot[rname] = s.solver.eval(rv)
+                                except Exception:
+                                    pass
+
+                            instruction_records.append({
+                                "address": ci.address,
+                                "size": ci.size,
+                                "raw_bytes": bytes(ci.insn.bytes).hex(),
+                                "disassembly": f"{ci.insn.mnemonic} {ci.insn.op_str}".strip(),
+                                "registers": reg_snapshot,
+                            })
+                    except Exception:
+                        pass
+
+                    # Step one block
+                    try:
+                        simgr.step()
+                    except Exception:
+                        break
+
+                traces.append({
+                    "dispatcher": d_addr,
+                    "instruction_count": len(instruction_records),
+                    "instructions": instruction_records,
+                })
+            except Exception as exc:
+                logger.debug("Handler trace extraction for %#x failed: %s", d_addr, exc)
+
+        return traces
+
+    @staticmethod
+    def _get_reg_names(proj: Any) -> List[str]:
+        """Return a list of general-purpose register names for the arch."""
+        arch_name = proj.arch.name.lower()
+        if "amd64" in arch_name or "x86_64" in arch_name:
+            return [
+                "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+                "rbp", "rsp", "r8", "r9", "r10", "r11",
+                "r12", "r13", "r14", "r15", "rip",
+            ]
+        elif "x86" in arch_name:
+            return [
+                "eax", "ebx", "ecx", "edx", "esi", "edi",
+                "ebp", "esp", "eip",
+            ]
+        return []
 
     def _explore_handlers(
         self,
