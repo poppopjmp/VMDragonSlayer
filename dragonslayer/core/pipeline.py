@@ -986,6 +986,14 @@ class AnalysisPipeline:
                     "reason": "No execution trace available — run dynamic analysis first",
                 }
 
+            # Derive base address from PE analysis or shared_data.
+            base_address: int = 0
+            pe_info = ctx.shared_data.get("pe_analyzer", {})
+            if isinstance(pe_info, dict):
+                base_address = pe_info.get("image_base", 0) or pe_info.get("base_address", 0)
+            if not base_address:
+                base_address = ctx.shared_data.get("base_address", 0)
+
             # ── 2. Anti-evasion hook-set (Batch 17) ──────────────────────
             hook_set_data: Optional[Dict[str, Any]] = None
             try:
@@ -1044,6 +1052,42 @@ class AnalysisPipeline:
                     ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
             except Exception as exc:
                 logger.debug("VMProtect dispatcher identification skipped: %s", exc)
+
+            # ── 3b. Rolling-key decryptor + handler table decrypt (B24/25) ─
+            bytecode_decryptor = None
+            try:
+                from ..analysis.bytecode_decrypt import (
+                    make_decryptor_from_dispatcher,
+                    decrypt_handler_table,
+                )
+                if vmprotect_match is not None:
+                    bytecode_decryptor = make_decryptor_from_dispatcher(
+                        vmprotect_match, trace,
+                    )
+                    if bytecode_decryptor is not None:
+                        ctx.shared_data["bytecode_decryptor"] = {
+                            "initial_key": bytecode_decryptor.initial_key,
+                            "key_width": bytecode_decryptor.key_width,
+                            "transform_count": len(bytecode_decryptor.transforms),
+                        }
+
+                    # Decrypt handler table if table_base is available
+                    tbl_base = vmprotect_match.get("table_base", 0)
+                    if tbl_base and binary_data and len(binary_data) > 64:
+                        known_addrs = vmprotect_match.get(
+                            "handler_addresses", [],
+                        )
+                        dec_table = decrypt_handler_table(
+                            binary_data, tbl_base, base_address,
+                            bit_width=64,
+                            known_handler_addresses=known_addrs or None,
+                        )
+                        if dec_table.count > 0:
+                            ctx.shared_data["decrypted_handler_table"] = (
+                                dec_table.to_dict()
+                            )
+            except Exception as exc:
+                logger.debug("Bytecode decryptor / table decrypt skipped: %s", exc)
 
             # ── 4. Identify vIP and segment into handler boundaries ──────
             dispatcher_addrs: list = list(
@@ -1162,11 +1206,14 @@ class AnalysisPipeline:
             except Exception as exc:
                 logger.debug("Handler clustering skipped: %s", exc)
 
-            # ── 7b. Handler-level CFG construction (Batch 19) ────────────
+            # ── 7b. Handler-level CFG construction (Batch 19 + B24) ────
             handler_cfg = None
             handler_cfg_data: Optional[Dict[str, Any]] = None
             try:
-                from ..analysis.bytecode_cfg import build_handler_cfg
+                from ..analysis.bytecode_cfg import (
+                    build_handler_cfg,
+                    build_static_cfg,
+                )
                 handler_cfg_obj = build_handler_cfg(
                     opcode_table, boundaries, trace,
                 )
@@ -1174,6 +1221,31 @@ class AnalysisPipeline:
                     handler_cfg = handler_cfg_obj.graph  # networkx DiGraph
                     handler_cfg_data = handler_cfg_obj.to_dict()
                     ctx.shared_data["handler_cfg"] = handler_cfg_data
+
+                # If we have a decryptor and raw bytecode, also build
+                # a static CFG (covers paths not in the trace).
+                if bytecode_decryptor is not None and binary_data:
+                    vip_start = boundaries[0].vip_value if boundaries else 0
+                    # Extract bytecode region from binary
+                    bc_offset = vip_start - base_address
+                    if 0 <= bc_offset < len(binary_data):
+                        bc_end = min(len(binary_data), bc_offset + 0x10000)
+                        bc_bytes = binary_data[bc_offset:bc_end]
+                        static_cfg_obj = build_static_cfg(
+                            bc_bytes, opcode_table, vip_start,
+                            decryptor=bytecode_decryptor,
+                        )
+                        if static_cfg_obj.blocks:
+                            ctx.shared_data["static_handler_cfg"] = (
+                                static_cfg_obj.to_dict()
+                            )
+                            # If trace-based CFG was empty, use static
+                            if handler_cfg is None:
+                                handler_cfg = static_cfg_obj.graph
+                                handler_cfg_data = static_cfg_obj.to_dict()
+                                ctx.shared_data["handler_cfg"] = (
+                                    handler_cfg_data
+                                )
             except Exception as exc:
                 logger.debug("Handler CFG construction skipped: %s", exc)
 
@@ -1210,6 +1282,15 @@ class AnalysisPipeline:
                 result_data["handler_cfg"] = handler_cfg_data
             if vm_entry_data is not None:
                 result_data["vm_entry_points"] = vm_entry_data
+            dec_table = ctx.shared_data.get("decrypted_handler_table")
+            if dec_table is not None:
+                result_data["decrypted_handler_table"] = dec_table
+            dec_info = ctx.shared_data.get("bytecode_decryptor")
+            if dec_info is not None:
+                result_data["bytecode_decryptor"] = dec_info
+            static_cfg = ctx.shared_data.get("static_handler_cfg")
+            if static_cfg is not None:
+                result_data["static_handler_cfg"] = static_cfg
 
             # Store boundaries for downstream stages.
             ctx.shared_data["devirt_boundaries"] = [

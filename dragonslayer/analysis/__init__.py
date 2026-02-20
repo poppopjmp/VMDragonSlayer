@@ -77,6 +77,18 @@ from .symbolic_depth import (  # noqa: F401
     collect_symbolic_summaries,
 )
 
+from .bytecode_decrypt import (  # noqa: F401
+    BytecodeDecryptor,
+    KeyTransform,
+    TransformOp,
+    parse_decode_transforms,
+    detect_initial_key,
+    decrypt_handler_table,
+    make_decryptor_from_dispatcher,
+    DecryptedHandlerTable,
+    HandlerTableEntry,
+)
+
 from .mba_simplifier import (  # noqa: F401
     simplify_mba,
     simplify_expr,

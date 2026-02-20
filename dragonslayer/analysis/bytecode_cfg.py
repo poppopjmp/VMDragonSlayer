@@ -743,7 +743,7 @@ def build_handler_cfg(
 
 
 # ---------------------------------------------------------------------------
-# Static bytecode walker (for future expansion)
+# Static bytecode walker (with optional rolling-key decryption)
 # ---------------------------------------------------------------------------
 
 
@@ -753,6 +753,7 @@ def walk_static_bytecode(
     start_vip: int = 0,
     *,
     max_instructions: int = 10000,
+    decryptor: Any = None,
 ) -> List[VMInstruction]:
     """Disassemble raw VM bytecode statically.
 
@@ -760,11 +761,19 @@ def walk_static_bytecode(
     using the opcode table.  No execution trace is required — this is
     purely a static disassembly of the VM program.
 
+    When a *decryptor*
+    (:class:`~dragonslayer.analysis.bytecode_decrypt.BytecodeDecryptor`)
+    is provided, each opcode byte is decrypted via the rolling-key
+    transform **before** lookup in the opcode table.  Operand bytes
+    after the opcode are NOT encrypted in standard VMProtect and are
+    left unchanged.
+
     Args:
         bytecode: Raw VM bytecode bytes.
         opcode_table: Semantic opcode table mapping opcodes → handlers.
         start_vip: Starting virtual address.
         max_instructions: Safety limit.
+        decryptor: Optional ``BytecodeDecryptor`` for encrypted bytecodes.
 
     Returns:
         Ordered list of :class:`VMInstruction`.
@@ -781,6 +790,20 @@ def walk_static_bytecode(
     max_opcode = max(opcode_map.keys(), default=0)
     opcode_width = 2 if max_opcode > 255 else 1
 
+    # Rolling-key state (when decryptor is provided).
+    has_decrypt = decryptor is not None and hasattr(decryptor, "decrypt_single")
+    rolling_key: int = 0
+    if has_decrypt:
+        rolling_key = getattr(decryptor, "initial_key", 0)
+        # Ensure opcode widths agree.
+        dec_width = getattr(decryptor, "opcode_width", opcode_width)
+        if dec_width != opcode_width:
+            logger.debug(
+                "Decryptor opcode_width=%d != table-inferred width=%d; "
+                "using decryptor's width.", dec_width, opcode_width,
+            )
+            opcode_width = dec_width
+
     instructions: List[VMInstruction] = []
     offset = 0
     visited_offsets: Set[int] = set()
@@ -791,22 +814,30 @@ def walk_static_bytecode(
             break
         visited_offsets.add(offset)
 
-        # Read opcode.
+        # Read raw (possibly encrypted) opcode.
         if opcode_width == 1 and offset < len(bytecode):
-            opcode_val = bytecode[offset]
+            raw_opcode = bytecode[offset]
         elif opcode_width == 2 and offset + 1 < len(bytecode):
-            opcode_val = int.from_bytes(
+            raw_opcode = int.from_bytes(
                 bytecode[offset:offset + 2], byteorder="little",
             )
         else:
             break
+
+        # Decrypt opcode if a rolling-key decryptor is active.
+        if has_decrypt:
+            opcode_val, rolling_key = decryptor.decrypt_single(
+                raw_opcode, rolling_key,
+            )
+        else:
+            opcode_val = raw_opcode
 
         entry = opcode_map.get(opcode_val)
         vip = start_vip + offset
 
         if entry is not None:
             delta = entry.vip_delta if entry.vip_delta > 0 else opcode_width
-            # Extract any operand bytes after the opcode.
+            # Extract any operand bytes after the opcode (NOT encrypted).
             operand_start = offset + opcode_width
             operand_end = offset + delta
             operand_bytes = bytecode[operand_start:operand_end] if operand_end > operand_start else b""
@@ -846,15 +877,19 @@ def build_static_cfg(
     start_vip: int = 0,
     *,
     max_instructions: int = 10000,
+    decryptor: Any = None,
 ) -> HandlerCFG:
     """Build a handler-level CFG from raw bytecode (static disassembly).
 
     Same as :func:`build_handler_cfg` but works from raw bytes instead
-    of an execution trace.
+    of an execution trace.  Pass a *decryptor*
+    (:class:`~dragonslayer.analysis.bytecode_decrypt.BytecodeDecryptor`)
+    to transparently handle VMProtect's rolling-key opcode encryption.
     """
     vm_insns = walk_static_bytecode(
         bytecode, opcode_table, start_vip,
         max_instructions=max_instructions,
+        decryptor=decryptor,
     )
 
     if not vm_insns:
