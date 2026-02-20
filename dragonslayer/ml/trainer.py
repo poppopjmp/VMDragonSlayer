@@ -31,13 +31,23 @@ from .pipeline import (
 logger = logging.getLogger(__name__)
 
 _HAS_SKLEARN = False
+_HAS_GB = False
 try:
     from sklearn.ensemble import RandomForestClassifier  # type: ignore[import-untyped]
+    from sklearn.ensemble import GradientBoostingClassifier  # type: ignore[import-untyped]
     from sklearn.model_selection import cross_val_score  # type: ignore[import-untyped]
+    from sklearn.metrics import classification_report as _sklearn_report  # type: ignore[import-untyped]
     import numpy as np  # type: ignore[import-untyped]
     _HAS_SKLEARN = True
+    _HAS_GB = True
 except ImportError:
-    pass
+    try:
+        from sklearn.ensemble import RandomForestClassifier  # type: ignore[import-untyped]
+        from sklearn.model_selection import cross_val_score  # type: ignore[import-untyped]
+        import numpy as np  # type: ignore[import-untyped]
+        _HAS_SKLEARN = True
+    except ImportError:
+        pass
 
 
 @dataclass
@@ -178,10 +188,21 @@ class ModelTrainer:
         *,
         epochs: int = 100,
         n_estimators: int = 100,
+        algorithm: str = "auto",
         **kwargs: Any,
     ) -> TrainingResult:
+        """Train the model.
+
+        Parameters
+        ----------
+        algorithm : str
+            ``"auto"`` (GradientBoosting if available, else RandomForest),
+            ``"rf"`` (RandomForest), ``"gb"`` (GradientBoosting).
+        """
         if _HAS_SKLEARN:
-            return self._train_sklearn(features, labels, n_estimators=n_estimators)
+            return self._train_sklearn(
+                features, labels, n_estimators=n_estimators, algorithm=algorithm,
+            )
         return self._validate_heuristic(features, labels)
 
     def _train_sklearn(
@@ -189,11 +210,29 @@ class ModelTrainer:
         features: Sequence[FeatureVector],
         labels: Sequence[str],
         n_estimators: int = 100,
+        algorithm: str = "auto",
     ) -> TrainingResult:
         X = np.array([fv.values for fv in features])
         y = np.array(list(labels))
 
-        clf = RandomForestClassifier(n_estimators=n_estimators, random_state=42, n_jobs=-1)
+        # Choose estimator
+        use_gb = (algorithm == "gb") or (algorithm == "auto" and _HAS_GB)
+        if use_gb and _HAS_GB:
+            clf = GradientBoostingClassifier(
+                n_estimators=n_estimators,
+                max_depth=5,
+                learning_rate=0.1,
+                random_state=42,
+            )
+            algo_name = "GradientBoosting"
+        else:
+            clf = RandomForestClassifier(
+                n_estimators=n_estimators,
+                random_state=42,
+                n_jobs=-1,
+            )
+            algo_name = "RandomForest"
+
         clf.fit(X, y)
 
         # Cross-validation accuracy (if enough data).
@@ -204,15 +243,33 @@ class ModelTrainer:
         else:
             accuracy = float((clf.predict(X) == y).mean())
 
+        # Per-class metrics
+        per_class: Dict[str, Any] = {}
+        try:
+            y_pred = clf.predict(X)
+            report = _sklearn_report(y, y_pred, output_dict=True, zero_division=0)
+            for cls_name, cls_metrics in report.items():
+                if isinstance(cls_metrics, dict):
+                    per_class[cls_name] = {
+                        k: round(v, 4) for k, v in cls_metrics.items()
+                    }
+        except Exception:
+            pass
+
         # Attach to the model.
         if isinstance(self._model, VMHandlerModel):
             self._model._sklearn_model = clf
 
-        logger.info("Trained RF with %d estimators, accuracy=%.3f", n_estimators, accuracy)
+        logger.info("Trained %s with %d estimators, accuracy=%.3f", algo_name, n_estimators, accuracy)
         return TrainingResult(
             epochs=1,
             accuracy=round(accuracy, 4),
-            metrics={"n_estimators": n_estimators, "n_samples": len(y)},
+            metrics={
+                "n_estimators": n_estimators,
+                "n_samples": len(y),
+                "algorithm": algo_name,
+                "per_class": per_class,
+            },
         )
 
     def _validate_heuristic(
@@ -638,9 +695,15 @@ def train_full_pipeline(
     seed: int = 42,
     extended: bool = True,
     n_estimators: int = 100,
+    algorithm: str = "auto",
     save_path: str | None = None,
 ) -> tuple[VMHandlerModel, TrainingResult, List[tuple[str, float]]]:
     """End-to-end: generate data, extract features, train, report.
+
+    Parameters
+    ----------
+    algorithm : str
+        ``"auto"`` (GradientBoosting if available), ``"rf"``, ``"gb"``.
 
     If *save_path* is provided, the trained model is serialised there.
 
@@ -657,7 +720,7 @@ def train_full_pipeline(
 
     model = VMHandlerModel()
     trainer = ModelTrainer(model)
-    result = trainer.train(features, labels, n_estimators=n_estimators)
+    result = trainer.train(features, labels, n_estimators=n_estimators, algorithm=algorithm)
 
     imp = feature_importance(model, feature_names=names)
 

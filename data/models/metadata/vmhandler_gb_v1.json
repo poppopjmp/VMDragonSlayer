@@ -1,0 +1,70 @@
+{
+  "model_name": "vmhandler_gb_v1",
+  "algorithm": "GradientBoosting",
+  "accuracy": 1.0,
+  "n_samples": 800,
+  "feature_count": 78,
+  "categories": 9,
+  "top_features": [
+    {
+      "name": "reg_only_ratio",
+      "importance": 0.16
+    },
+    {
+      "name": "mem_deref_ratio",
+      "importance": 0.1563
+    },
+    {
+      "name": "logic_ratio",
+      "importance": 0.1057
+    },
+    {
+      "name": "reg_read_rdi",
+      "importance": 0.0812
+    },
+    {
+      "name": "arith_ratio",
+      "importance": 0.079
+    },
+    {
+      "name": "imm_ratio",
+      "importance": 0.0663
+    },
+    {
+      "name": "nop_ratio",
+      "importance": 0.0645
+    },
+    {
+      "name": "reg_write_rsi",
+      "importance": 0.0382
+    },
+    {
+      "name": "reg_read_rsi",
+      "importance": 0.0377
+    },
+    {
+      "name": "avg_operand_count",
+      "importance": 0.0325
+    },
+    {
+      "name": "reg_write_rcx",
+      "importance": 0.0294
+    },
+    {
+      "name": "reg_read_rax",
+      "importance": 0.0199
+    },
+    {
+      "name": "bg_mov_mov",
+      "importance": 0.0179
+    },
+    {
+      "name": "reg_read_rcx",
+      "importance": 0.0166
+    },
+    {
+      "name": "mem_ratio",
+      "importance": 0.0147
+    }
+  ]
+}
