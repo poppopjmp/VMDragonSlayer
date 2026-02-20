@@ -464,15 +464,11 @@ class TestZ3Solver:
     def test_satisfiability(self):
         from dragonslayer.analysis.symbolic_execution.solver import Z3Solver
         solver = Z3Solver()
-        try:
-            x = solver.bitvec("x", 32)
-            solver.add(x == 42)
-            result = solver.check()
-            assert result.satisfiable is True
-        except RuntimeError as e:
-            if "z3 not available" in str(e):
-                pytest.skip("z3-solver not installed")
-            raise
+        x = solver.bitvec("x", 32)
+        solver.add(x == 42)
+        result = solver.check()
+        assert result.satisfiable is True
+        assert result.model["x"] == 42
 
 
 # ---------------------------------------------------------------------------

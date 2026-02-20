@@ -19,13 +19,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-try:
-    import z3
-
-    _Z3_AVAILABLE = True
-except ImportError:
-    z3 = None  # type: ignore[assignment]
-    _Z3_AVAILABLE = False
+import z3
 
 
 @dataclass
@@ -55,30 +49,24 @@ class Z3Solver:
         self.timeout_ms = timeout_ms
         self._constraints: List[Any] = []
         self._constraint_stack: List[int] = []  # indices for push/pop sync
-        if _Z3_AVAILABLE:
-            self._solver = z3.Solver()
-            self._solver.set("timeout", timeout_ms)
-        else:
-            self._solver = None
+        self._solver = z3.Solver()
+        self._solver.set("timeout", timeout_ms)
 
     @staticmethod
     def available() -> bool:
-        return _Z3_AVAILABLE
+        """Always True — z3 is a required dependency."""
+        return True
 
     # -- Variable creation --------------------------------------------------
 
     @staticmethod
     def bitvec(name: str, bits: int = 64) -> Any:
         """Create a symbolic bit-vector variable."""
-        if not _Z3_AVAILABLE:
-            raise RuntimeError("z3 not available")
         return z3.BitVec(name, bits)
 
     @staticmethod
     def bitvec_val(value: int, bits: int = 64) -> Any:
         """Create a concrete bit-vector value."""
-        if not _Z3_AVAILABLE:
-            raise RuntimeError("z3 not available")
         return z3.BitVecVal(value, bits)
 
     # -- Constraint management -----------------------------------------------
@@ -86,36 +74,30 @@ class Z3Solver:
     def add(self, *constraints: Any) -> None:
         """Add constraints."""
         self._constraints.extend(constraints)
-        if self._solver:
-            self._solver.add(*constraints)
+        self._solver.add(*constraints)
 
     def reset(self) -> None:
         """Clear all constraints."""
         self._constraints.clear()
         self._constraint_stack.clear()
-        if self._solver:
-            self._solver.reset()
+        self._solver.reset()
 
     def push(self) -> None:
         """Save the current constraint count for later pop()."""
         self._constraint_stack.append(len(self._constraints))
-        if self._solver:
-            self._solver.push()
+        self._solver.push()
 
     def pop(self) -> None:
         """Restore constraints to the last push() point."""
         if self._constraint_stack:
             idx = self._constraint_stack.pop()
             self._constraints = self._constraints[:idx]
-        if self._solver:
-            self._solver.pop()
+        self._solver.pop()
 
     # -- Solving -------------------------------------------------------------
 
     def check(self) -> SolverResult:
         """Check satisfiability and extract a model if SAT."""
-        if not _Z3_AVAILABLE or self._solver is None:
-            return SolverResult(satisfiable=False, error="z3 not available")
 
         try:
             result = self._solver.check()
@@ -147,9 +129,6 @@ class Z3Solver:
         * ``False`` — always false (contradiction).
         * ``None`` — genuinely conditional.
         """
-        if not _Z3_AVAILABLE:
-            return None
-
         s = z3.Solver()
         s.set("timeout", self.timeout_ms)
 
@@ -175,8 +154,6 @@ class Z3Solver:
     @staticmethod
     def simplify(expr: Any) -> Any:
         """Simplify a z3 expression."""
-        if not _Z3_AVAILABLE:
-            return expr
         return z3.simplify(expr)
 
     def solve_for(self, target_var: Any, constraints: List[Any] | None = None) -> SolverResult:
@@ -185,9 +162,6 @@ class Z3Solver:
 
         Returns the concrete value of *target_var* (if SAT).
         """
-        if not _Z3_AVAILABLE:
-            return SolverResult(satisfiable=False, error="z3 not available")
-
         s = z3.Solver()
         s.set("timeout", self.timeout_ms)
         all_constraints = list(self._constraints) + (constraints or [])

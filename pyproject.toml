@@ -31,16 +31,16 @@ classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Monitoring"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     # Core dependencies
     "numpy>=1.21.0",
@@ -68,7 +68,14 @@ dependencies = [
     
     # Networking (for API functionality)
     "httpx>=0.24.0",
-    "requests>=2.28.0"
+    "requests>=2.28.0",
+
+    # Binary analysis
+    "lief>=0.14.0",
+    "networkx>=3.0",
+
+    # CLI
+    "click>=8.0"
 ]
 
 [project.optional-dependencies]
@@ -183,7 +190,7 @@ exclude = ["tests*", "docs*", "plugins*"]
 # Black configuration
 [tool.black]
 line-length = 88
-target-version = ["py38", "py39", "py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312", "py313", "py314"]
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -209,7 +216,7 @@ src_paths = ["dragonslayer", "tests"]
 # Ruff configuration
 [tool.ruff]
 line-length = 88
-target-version = "py38"
+target-version = "py310"
 exclude = [
     "plugins/",
     "data/",
