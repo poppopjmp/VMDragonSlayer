@@ -132,6 +132,56 @@ class ParsedBinary:
                 return sec
         return None
 
+    def section_at_va(self, va: int) -> Optional[Section]:
+        """Return the section containing virtual address *va*, or ``None``."""
+        rva = va - self.image_base
+        for sec in self.sections:
+            if sec.virtual_address <= rva < sec.virtual_address + max(sec.virtual_size, sec.raw_size):
+                return sec
+        return None
+
+    def va_to_offset(self, va: int) -> Optional[int]:
+        """Convert a virtual address to a file offset, or ``None``."""
+        sec = self.section_at_va(va)
+        if sec is None:
+            return None
+        rva = va - self.image_base
+        return sec.raw_offset + (rva - sec.virtual_address)
+
+    def offset_to_va(self, offset: int) -> Optional[int]:
+        """Convert a file offset to a virtual address, or ``None``."""
+        sec = self.section_containing(offset)
+        if sec is None:
+            return None
+        return self.image_base + sec.virtual_address + (offset - sec.raw_offset)
+
+    def load_sections(self, data: bytes) -> Dict[int, bytes]:
+        """Map each section into a dict keyed by virtual address.
+
+        Returns ``{va: section_bytes}`` for each section whose raw data
+        is present in *data*.
+        """
+        loaded: Dict[int, bytes] = {}
+        for sec in self.sections:
+            start = sec.raw_offset
+            end = start + sec.raw_size
+            if start < len(data) and sec.raw_size > 0:
+                sec_data = data[start:min(end, len(data))]
+                va = self.image_base + sec.virtual_address
+                loaded[va] = sec_data
+        return loaded
+
+    def read_va(self, data: bytes, va: int, size: int) -> Optional[bytes]:
+        """Read *size* bytes from the binary at virtual address *va*.
+
+        *data* is the full raw binary content.  Returns ``None`` if the
+        address does not map to a valid file offset.
+        """
+        off = self.va_to_offset(va)
+        if off is None or off < 0 or off + size > len(data):
+            return None
+        return data[off:off + size]
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "format": self.format.value,

@@ -160,3 +160,82 @@ class TestParsedBinaryHelpers:
         found = parsed.section_containing(sec.raw_offset + 1)
         assert found is not None
         assert found.name == sec.name
+
+
+class TestVAMapping:
+    """Tests for VA ↔ file-offset conversion and section loading."""
+
+    def _parsed(self):
+        pe = _make_pe_stub()
+        return parse_binary(pe), pe
+
+    def test_section_at_va(self):
+        parsed, _ = self._parsed()
+        # .text at RVA 0x1000, image_base 0x400000 → VA 0x401000
+        sec = parsed.section_at_va(0x401000)
+        assert sec is not None
+        assert sec.name.startswith(".text")
+
+    def test_section_at_va_miss(self):
+        parsed, _ = self._parsed()
+        sec = parsed.section_at_va(0xDEAD0000)
+        assert sec is None
+
+    def test_va_to_offset(self):
+        parsed, _ = self._parsed()
+        sec = parsed.sections[0]
+        # VA = image_base + virtual_address
+        va = parsed.image_base + sec.virtual_address
+        off = parsed.va_to_offset(va)
+        assert off == sec.raw_offset
+
+    def test_va_to_offset_with_displacement(self):
+        parsed, _ = self._parsed()
+        sec = parsed.sections[0]
+        va = parsed.image_base + sec.virtual_address + 0x10
+        off = parsed.va_to_offset(va)
+        assert off == sec.raw_offset + 0x10
+
+    def test_va_to_offset_invalid(self):
+        parsed, _ = self._parsed()
+        assert parsed.va_to_offset(0xBADBAD00) is None
+
+    def test_offset_to_va(self):
+        parsed, _ = self._parsed()
+        sec = parsed.sections[0]
+        va = parsed.offset_to_va(sec.raw_offset)
+        assert va == parsed.image_base + sec.virtual_address
+
+    def test_offset_to_va_invalid(self):
+        parsed, _ = self._parsed()
+        assert parsed.offset_to_va(0xFFFFFFF) is None
+
+    def test_roundtrip_va_offset(self):
+        parsed, _ = self._parsed()
+        sec = parsed.sections[0]
+        va = parsed.image_base + sec.virtual_address + 0x42
+        off = parsed.va_to_offset(va)
+        assert off is not None
+        va2 = parsed.offset_to_va(off)
+        assert va2 == va
+
+    def test_load_sections(self):
+        parsed, pe = self._parsed()
+        loaded = parsed.load_sections(pe)
+        assert len(loaded) > 0
+        for va, data in loaded.items():
+            assert isinstance(va, int)
+            assert isinstance(data, bytes)
+            assert len(data) > 0
+
+    def test_read_va(self):
+        parsed, pe = self._parsed()
+        sec = parsed.sections[0]
+        va = parsed.image_base + sec.virtual_address
+        data = parsed.read_va(pe, va, 4)
+        assert data is not None
+        assert len(data) == 4
+
+    def test_read_va_invalid(self):
+        parsed, pe = self._parsed()
+        assert parsed.read_va(pe, 0xBADBAD00, 4) is None
