@@ -48,6 +48,13 @@ try:
         SemanticCluster,
         ClusteringResult,
     )
+    from .vm_entry_locator import (
+        locate_vm_entries,
+        locate_entries_from_pe_result,
+        VmEntryCandidate,
+        VmEntryReport,
+        SectionInfo,
+    )
 except ImportError:
     pass
 
@@ -80,4 +87,9 @@ __all__ = [
     "NormalizedEffect",
     "SemanticCluster",
     "ClusteringResult",
+    "locate_vm_entries",
+    "locate_entries_from_pe_result",
+    "VmEntryCandidate",
+    "VmEntryReport",
+    "SectionInfo",
 ]

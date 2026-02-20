@@ -1003,6 +1003,28 @@ class AnalysisPipeline:
             except Exception as exc:
                 logger.debug("Anti-evasion hook-set skipped: %s", exc)
 
+            # ── 2b. VM entry point locator (Batch 21) ────────────────────
+            vm_entry_data: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.vm_discovery.vm_entry_locator import (
+                    locate_entries_from_pe_result,
+                    locate_vm_entries,
+                )
+                pe_result = ctx.shared_data.get("pe_analyzer")
+                if pe_result and isinstance(pe_result, dict):
+                    entry_report = locate_entries_from_pe_result(
+                        binary_data, pe_result)
+                elif len(binary_data) > 64 and binary_data[:2] == b"MZ":
+                    entry_report = locate_vm_entries(binary_data)
+                else:
+                    entry_report = None
+
+                if entry_report is not None and entry_report.count > 0:
+                    vm_entry_data = entry_report.to_dict()
+                    ctx.shared_data["vm_entry_points"] = vm_entry_data
+            except Exception as exc:
+                logger.debug("VM entry locator skipped: %s", exc)
+
             # ── 3. VMProtect dispatcher identification (Batch 13) ────────
             vmprotect_match: Optional[Dict[str, Any]] = None
             try:
@@ -1167,6 +1189,8 @@ class AnalysisPipeline:
                 result_data["handler_clustering"] = clustering_data
             if handler_cfg_data is not None:
                 result_data["handler_cfg"] = handler_cfg_data
+            if vm_entry_data is not None:
+                result_data["vm_entry_points"] = vm_entry_data
 
             # Store boundaries for downstream stages.
             ctx.shared_data["devirt_boundaries"] = [
