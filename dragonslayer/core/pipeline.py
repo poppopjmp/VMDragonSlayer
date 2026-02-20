@@ -56,8 +56,9 @@ class PipelineConfig:
     stages : list[str]
         Ordered list of stage keys to execute.  Valid keys:
         ``"pattern_analysis"``, ``"vm_discovery"``, ``"static"``,
-        ``"dynamic"``, ``"enrichment"``, ``"llm_analysis"``,
-        ``"reporting"``, ``"llm_summary"``.
+        ``"dynamic"``, ``"dispatcher_analysis"``, ``"devirtualize"``,
+        ``"enrichment"``, ``"llm_analysis"``, ``"reporting"``,
+        ``"llm_summary"``.
     storage_backend : str
         Backend name for :func:`create_storage`.
     storage_options : dict
@@ -81,6 +82,7 @@ class PipelineConfig:
         "taint_analysis",
         "symbolic_execution",
         "dispatcher_analysis",
+        "devirtualize",
         "enrichment",
         "llm_analysis",
         "reporting",
@@ -840,9 +842,22 @@ class AnalysisPipeline:
                 }
 
             # --- 2. Identify vIP and segment into handler boundaries --------
-            dispatcher_addrs = ctx.shared_data.get("vm_discovery", {}).get(
-                "dispatcher_addresses", [],
+            dispatcher_addrs: list = list(
+                ctx.shared_data.get("vm_discovery", {}).get(
+                    "dispatcher_addresses", [],
+                )
             )
+
+            # Supplement dispatcher_addrs with handler addresses from
+            # the DispatcherAnalyzer's handler_table (Batch 4 wiring).
+            handler_table = ctx.shared_data.get("handler_table", [])
+            if handler_table:
+                ht_addrs = set(dispatcher_addrs)
+                for entry in handler_table:
+                    addr = entry.get("handler_address") if isinstance(entry, dict) else getattr(entry, "handler_address", None)
+                    if addr and addr not in ht_addrs:
+                        dispatcher_addrs.append(addr)
+                        ht_addrs.add(addr)
 
             vip_candidate = identify_vip_register(trace, dispatcher_addrs)
 
@@ -862,7 +877,16 @@ class AnalysisPipeline:
                 }
 
             # --- 3. Semantic analysis per handler ---------------------------
-            opcode_table = analyse_handler_semantics(trace, boundaries)
+            # Feed symbolic summaries from the symbolic_execution stage
+            # so handler classification uses expression matching (Batch 4).
+            sym_summaries = ctx.shared_data.get(
+                "symbolic_execution", {},
+            ).get("handler_summaries", None)
+
+            opcode_table = analyse_handler_semantics(
+                trace, boundaries,
+                symbolic_summaries=sym_summaries,
+            )
 
             # --- 4. Pseudocode emission ------------------------------------
             pseudocode_result = emit_pseudocode(
