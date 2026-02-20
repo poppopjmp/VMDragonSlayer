@@ -26,6 +26,14 @@ try:
         HandlerBoundary,
         SegmentationResult,
     )
+    from .handler_extraction import (
+        extract_handler_bodies,
+        fingerprint_handler,
+        deduplicate_handlers,
+        HandlerBody,
+        HandlerGroup,
+        ExtractionResult,
+    )
 except ImportError:
     pass
 
@@ -42,4 +50,10 @@ __all__ = [
     "VIPCandidate",
     "HandlerBoundary",
     "SegmentationResult",
+    "extract_handler_bodies",
+    "fingerprint_handler",
+    "deduplicate_handlers",
+    "HandlerBody",
+    "HandlerGroup",
+    "ExtractionResult",
 ]
