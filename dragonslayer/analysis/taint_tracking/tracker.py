@@ -202,6 +202,76 @@ class TaintTag(IntFlag):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Pointer-tracking memory alias detector  (B76)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class MemoryAliasTracker:
+    """Lightweight must-alias detector for concrete pointer values.
+
+    Tracks register→address bindings from observed ``mov reg, addr``
+    and ``lea reg, [addr]`` instructions.  When two registers hold
+    the same concrete address, stores through one are visible via the
+    other.
+
+    Usage::
+
+        mat = MemoryAliasTracker()
+        mat.bind("rax", 0x1000)
+        mat.bind("rbx", 0x1000)
+        assert mat.must_alias("rax", "rbx")
+    """
+
+    def __init__(self) -> None:
+        self._bindings: Dict[str, int] = {}
+        # Reverse: address → set of register names
+        self._addr_to_regs: Dict[int, set[str]] = {}
+
+    def bind(self, reg: str, addr: int) -> None:
+        """Record that *reg* now points to concrete *addr*."""
+        reg = reg.lower()
+        # Unbind old
+        old = self._bindings.get(reg)
+        if old is not None and old in self._addr_to_regs:
+            self._addr_to_regs[old].discard(reg)
+            if not self._addr_to_regs[old]:
+                del self._addr_to_regs[old]
+        self._bindings[reg] = addr
+        self._addr_to_regs.setdefault(addr, set()).add(reg)
+
+    def unbind(self, reg: str) -> None:
+        """Remove *reg* from alias tracking (e.g. on write to reg)."""
+        reg = reg.lower()
+        old = self._bindings.pop(reg, None)
+        if old is not None and old in self._addr_to_regs:
+            self._addr_to_regs[old].discard(reg)
+            if not self._addr_to_regs[old]:
+                del self._addr_to_regs[old]
+
+    def resolve(self, reg: str) -> Optional[int]:
+        """Return the concrete address *reg* is known to hold, or None."""
+        return self._bindings.get(reg.lower())
+
+    def must_alias(self, reg_a: str, reg_b: str) -> bool:
+        """Return True if *reg_a* and *reg_b* are known to hold the same address."""
+        a = self._bindings.get(reg_a.lower())
+        b = self._bindings.get(reg_b.lower())
+        return a is not None and a == b
+
+    def aliases_of(self, reg: str) -> Set[str]:
+        """Return all registers that must-alias *reg* (excluding itself)."""
+        addr = self._bindings.get(reg.lower())
+        if addr is None:
+            return set()
+        return self._addr_to_regs.get(addr, set()) - {reg.lower()}
+
+    def clear(self) -> None:
+        """Remove all bindings."""
+        self._bindings.clear()
+        self._addr_to_regs.clear()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Byte-level taint map  (B58)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -428,6 +498,10 @@ class TaintTracker:
         # call boundaries so cross-function analysis is possible.
         self._context_stack: List[tuple[Dict[str, TaintTag], Dict[str, List[TaintTag]]]] = []
         self._call_depth: int = 0
+
+        # B76: Pointer-tracking alias detector — tracks concrete register
+        # values to detect must-alias relationships for memory operands.
+        self._pointer_tracker = MemoryAliasTracker()
 
     # ── B72: Interprocedural context management ─────────────────────────────
 
@@ -661,6 +735,35 @@ class TaintTracker:
     def get_taint(self, reg: str) -> TaintTag:
         """Get the taint tag for a register (checking aliases)."""
         return self._collect_taint(reg)
+
+    # ── B76: Pointer-alias convenience ──────────────────────────────────
+
+    def bind_pointer(self, reg: str, addr: int) -> None:
+        """Record that *reg* holds concrete pointer value *addr*.
+
+        Future queries via :meth:`must_alias` or :meth:`memory_taint_via_reg`
+        will use this binding for must-alias detection.
+        """
+        self._pointer_tracker.bind(reg, addr)
+
+    def must_alias(self, reg_a: str, reg_b: str) -> bool:
+        """Return True if *reg_a* and *reg_b* hold the same concrete address."""
+        return self._pointer_tracker.must_alias(reg_a, reg_b)
+
+    def memory_taint_via_reg(self, reg: str) -> TaintTag:
+        """Look up memory taint at the address held by *reg*.
+
+        If no binding is known, returns CLEAN.
+        """
+        addr = self._pointer_tracker.resolve(reg)
+        if addr is None:
+            return TaintTag.CLEAN
+        return self._mem_taint.get(addr, TaintTag.CLEAN)
+
+    @property
+    def pointer_tracker(self) -> MemoryAliasTracker:
+        """Public access to the pointer-alias tracker."""
+        return self._pointer_tracker
 
     def process_instruction(self, insn: Any) -> None:
         """Public API: propagate taint for a single instruction."""
@@ -1068,5 +1171,6 @@ class TaintTracker:
         self._events.clear()
         self._flow_graph.clear()
         self._byte_taint.clear()
+        self._pointer_tracker.clear()
         self._implicit_scope_remaining = 0
         self._implicit_scope_tag = TaintTag.CLEAN

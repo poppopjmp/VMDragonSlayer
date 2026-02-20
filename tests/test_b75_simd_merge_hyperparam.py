@@ -163,7 +163,10 @@ class TestHyperparameterSearch:
             cv=2, n_iter=4,
         )
 
-        assert r2.accuracy >= 0.0
+        # Hyperparameter search should match or nearly match basic training
+        assert r2.accuracy >= r1.accuracy - 0.05, (
+            f"search {r2.accuracy} much worse than basic {r1.accuracy}"
+        )
         assert model2.is_trained
         assert r2.metrics.get("method") == "randomized_search"
 

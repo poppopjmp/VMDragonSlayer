@@ -16,6 +16,7 @@ try:
         TaintEvent,
         TaintResult,
         ByteTaintMap,
+        MemoryAliasTracker,
         subreg_canonical,
         subreg_aliases,
         subreg_info,

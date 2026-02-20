@@ -31,11 +31,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest pytest-cov
+          pip install -e .
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
-          python -m pytest --tb=short -q
+          python -m pytest --tb=short -q --cov=dragonslayer --cov-report=term-missing --cov-fail-under=60
 
   lint:
     runs-on: ubuntu-latest
@@ -52,3 +53,22 @@ jobs:
 
       - name: Ruff check
         run: ruff check dragonslayer/ --select E,W,F --ignore E501
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install mypy
+          pip install -e .
+
+      - name: Mypy (non-strict)
+        run: mypy dragonslayer/ --ignore-missing-imports --no-strict-optional || true
