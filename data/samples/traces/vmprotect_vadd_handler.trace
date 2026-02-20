@@ -1,0 +1,46 @@
+# VMProtect 3.x — vAdd handler trace (synthetic, based on known VMP handler patterns)
+# This trace represents a VMP "virtual ADD" handler that:
+#   1. Pops two operands from the virtual stack (vSP in rbp)
+#   2. Adds them
+#   3. Pushes the result and flags onto the virtual stack
+#   4. Advances vIP (rsi) and dispatches to the next handler
+#
+# VM context registers:
+#   rsi = vIP (virtual instruction pointer)
+#   rbp = vSP (virtual stack pointer)
+#   rdi = VM context base
+#
+# Ground truth: this handler performs  vSP[0] = vSP[0] + vSP[1]; push flags
+---
+# Handler entry — dispatcher has jumped here via jmp [handler_table + opcode*8]
+h: 1 | 0x140023A00 | vm_add
+# Pop first operand from virtual stack
+i: 0x140023A00 | 3 | 488B4500 | mov rax, [rbp+0x0] | rax=0xDEAD0000,rbp=0x7FFFA000,rsi=0x140050010,rdi=0x7FFFC000
+m: R | 0x7FFFA000 | 8 | 0x0000000000001234
+# Pop second operand from virtual stack
+i: 0x140023A04 | 4 | 488B4D08 | mov rcx, [rbp+0x8] | rax=0x1234,rbp=0x7FFFA000,rcx=0x0
+m: R | 0x7FFFA008 | 8 | 0x0000000000005678
+# Perform addition
+i: 0x140023A08 | 3 | 4801C8 | add rax, rcx | rax=0x1234,rcx=0x5678
+# Store result to virtual stack slot 1 (overwriting second operand)
+i: 0x140023A0B | 4 | 48894508 | mov [rbp+0x8], rax | rax=0x68AC,rbp=0x7FFFA000
+m: W | 0x7FFFA008 | 8 | 0x00000000000068AC
+# Read flags from rflags (pushfq emulation via lahf/seto path)
+i: 0x140023A0F | 1 | 9F | lahf | rax=0x68AC
+# Adjust vSP: skip past the consumed first operand (vSP += 8)
+i: 0x140023A10 | 4 | 4883C508 | add rbp, 0x8 | rbp=0x7FFFA000
+# Store flags below current vSP
+i: 0x140023A14 | 4 | 488945F8 | mov [rbp-0x8], rax | rax=0x68AC0206,rbp=0x7FFFA008
+m: W | 0x7FFFA000 | 8 | 0x0000000068AC0206
+# Adjust vSP to account for pushed flags (vSP -= 8)
+i: 0x140023A18 | 4 | 4883ED08 | sub rbp, 0x8 | rbp=0x7FFFA008
+# Advance vIP (4-byte VMP bytecode instruction consumed)
+i: 0x140023A1C | 3 | 4883C604 | add rsi, 0x4 | rsi=0x140050010
+# Fetch next opcode byte
+i: 0x140023A20 | 3 | 0FB63E | movzx edi, byte ptr [rsi] | rsi=0x140050014,rdi=0x7FFFC000
+m: R | 0x140050014 | 1 | 0x42
+# Dispatcher: indirect jump through handler table
+i: 0x140023A23 | 7 | 48FF24FD00200014 | jmp [r13+rdi*8] | rdi=0x42,r13=0x140002000
+m: R | 0x140002210 | 8 | 0x0000000140023B00
+c: dispatch | 0x140023A23 | 0x140023B00
+---
