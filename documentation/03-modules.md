@@ -2,7 +2,7 @@
 
 Index of primary packages and key modules. Paths link to source and docs where available.
 
-> **Note**: This listing reflects modules that actually exist in the codebase as of Phase 6 (dev-0.9.1).
+> **Note**: This listing reflects modules that actually exist in the codebase as of Phase 9 (dev-0.9.1).
 
 ## Core System
 
@@ -11,7 +11,7 @@ Index of primary packages and key modules. Paths link to source and docs where a
 	- `dragonslayer/core/orchestrator.py` — Coordinates analysis workflows; temp-dir cleanup via try/finally; `shutdown()` method
 	- `dragonslayer/core/config.py` — Typed configuration with recursive `_deep_merge`, thread-safe `get_config()` singleton
 	- `dragonslayer/core/exceptions.py` — Error hierarchy and validators (`from __future__ import annotations` for 3.14 compat)
-	- `dragonslayer/core/pipeline.py` — Multi-stage analysis pipeline; wires `avg_confidence` into result_data
+	- `dragonslayer/core/pipeline.py` — Multi-stage analysis pipeline; per-stage timeout (`ThreadPoolExecutor` + `cancel_futures`); wires `avg_confidence` into result_data
 
 - **api**
 	- `dragonslayer/api/server.py` — FastAPI server with lifespan context manager, async rate limiter (`asyncio.Lock`), CORS fix
@@ -31,15 +31,15 @@ Index of primary packages and key modules. Paths link to source and docs where a
 		- `classifier.py` — ML-enhanced pattern classification
 		- `database.py` — Pattern database management
 	- `taint_tracking/` — Dynamic taint analysis engine
-		- `tracker.py` — Register + memory taint propagation; `reset()`, public `process_instruction()`, `reg_taint`/`mem_taint` properties
+		- `tracker.py` — Register + memory taint propagation with SIB addressing (`[base+index*scale+disp]`); `reset()`, public `process_instruction()`, `reg_taint`/`mem_taint` properties
 		- `analyzer.py` — TaintAnalyzer orchestration (calls `reset()` before each run)
 		- `dtt_executor.py` — DTT execution driver
 		- `vm_taint_tracker.py` — VM-aware tracker with virtual register presets (vmprotect_x64/x86, themida_x64)
 	- `symbolic_execution/` — Symbolic execution and path exploration
-		- `executor.py` — Core symbolic executor; test vs cmp distinction, LEA `_resolve_effective_address()`, deque worklist
+	- `executor.py` — Core symbolic executor; explicit EFLAGS (ZF/CF/SF/OF) branch constraints, dispatcher back-edge scoring, concrete SP for push/pop, LEA `_resolve_effective_address()`, deque worklist
 		- `lifter.py` — Binary lifting; int3→SYSTEM, mov MEMORY_WRITE
 		- `solver.py` — z3 constraint solving; `_constraint_stack` push/pop sync
-		- `state.py` — Symbolic state; `_last_cmp` attribute, fork propagation, `read_memory` size from `bit_width`
+		- `state.py` — Symbolic state; `flags` dict (ZF/CF/SF/OF), `update_flags_arith/logic/inc_dec`, fork deep-copies flags, concrete stack base
 	- `anti_evasion/` — Anti-analysis countermeasures
 		- `environment_normalizer.py` — Section-aware scanning; per-pattern confidence (`_ANTI_DISASM_CONFIDENCE`), int3 non-patchable
 

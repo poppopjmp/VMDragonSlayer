@@ -4,6 +4,74 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Phase 9 — Correctness & Depth Improvements (12 commits)
+
+Phase 9 addresses the top-10 correctness and depth issues identified by an expert
+audit. Every change is backed by targeted unit tests and cross-module integration
+tests, bringing the total to **430 tests (430 pass, 7 skip)**.
+
+#### Enhanced — Symbolic Execution EFLAGS (`analysis.symbolic_execution`)
+- **Explicit flag modelling** — `SymbolicState.flags` dict tracks ZF/CF/SF/OF individually, replacing the fragile `_last_cmp` hack (`f70085a`)
+- `update_flags_arith()`, `update_flags_logic()`, `update_flags_inc_dec()` update flags correctly for arithmetic (sub/cmp), logic (and/or/xor/test), and inc/dec instructions
+- `_build_branch_constraint` in `SymbolicExecutor` reads `state.flags` directly for jz/jnz/jl/jg/etc.
+- `fork()` deep-copies flags so child states are independent
+- 8 unit tests
+
+#### Enhanced — Memory-Aware Taint Tracking (`analysis.taint_tracking.tracker`)
+- **SIB addressing support** — `_extract_memory_address` rewritten to parse `[base+index*scale+disp]` patterns with Intel and AT&T syntax (`85884b8`)
+- `_resolve_addr_expr()` evaluates x86 SIB address expressions given concrete register values
+- `_process_instruction` and `analyze` thread `register_values` from trace instructions for concrete address resolution
+- 8 unit tests
+
+#### Enhanced — Dispatcher Back-Edge Scoring (`analysis.symbolic_execution.executor`)
+- `_find_dispatcher` now scores each indirect jump by counting back-edges within ±64 bytes, preferring the dispatcher with most inbound control flow (`0e803ef`)
+- 3 unit tests
+
+#### Fixed — Push/Pop with Symbolic SP (`analysis.symbolic_execution.executor`)
+- SP initialised to concrete stack base (`0x7FFF0000`) in `execute_handler`, keeping SP concrete while other registers are symbolic (`52f35ce`)
+- Symbolic SP fallback attempts z3 concretisation via `solver.check()`
+- 2 unit tests
+
+#### Enhanced — MBA 3-Variable Support (`analysis.mba_simplifier`)
+- Added `_known_rules_3` with 5 proven 3-variable rewrite rules (triple XOR commutativity, De Morgan's 3-var, XOR+AND distribution, etc.) (`3251b37`)
+- `simplify_expr` tries all permutations of 2-var and 3-var rule templates
+- `simplify_mba` auto-detects variable names from expression text
+- 4 unit tests
+
+#### Fixed — `emit_structured` Loop Depth (`analysis.pseudocode`)
+- Tracks `open_loops` counter, emits one `}` per opened `while(true){` block, preventing unbalanced braces (`da2d7fd`)
+- 1 unit test
+
+#### Enhanced — Pipeline Per-Stage Timeout (`core.pipeline`)
+- Each stage runs in a `ThreadPoolExecutor` future with `cfg.timeout` deadline (`eab1f15`)
+- **Fixed**: `shutdown(wait=False, cancel_futures=True)` so a timed-out stage no longer blocks the pipeline (`1798b03`)
+- 1 unit test
+
+#### Fixed — `has_indirect_branch` Feature (`ml.pipeline`)
+- Now inspects operand strings for register names or memory dereferences (e.g., `[rax]`, `jmp rcx`) instead of the broken positional heuristic (`02b0da5`)
+- 4 unit tests
+
+#### Fixed — Register Extraction Heuristic (`analysis.trace_ingestion`, `analysis.handler_semantics`)
+- Replaced broken set-iteration "first-reg = write" with mnemonic-aware `_extract_reg_reads_writes()` classifying each operand as read, write, or both (`e123436`)
+- Handles mov, add, sub, cmp, test, push, pop, xchg, lea, mul, div, and more
+- Word-boundary regex (`_REG_RE`) prevents r8/r12/r15 false matches
+- Shared by `trace_ingestion` and `handler_semantics._taint_slice`
+- 8 unit tests
+
+#### New — VMProtect vAdd Handler End-to-End Test (`tests/test_vmprotect_trace.py`)
+- Synthetic-but-faithful VMProtect vAdd trace (11 instructions, 4+ memory accesses, handler marker, dispatch control flow) (`78237d4`)
+- 8 tests exercising trace ingestion, taint propagation, handler semantics, symbolic execution, pseudocode emission, and full pipeline
+
+#### New — Phase 9 Integration Tests (`tests/test_phase9_integration.py`)
+- 21 cross-module integration tests covering EFLAGS→branch, SIB memory taint, dispatcher→semantics, MBA 2/3-var, pipeline timeout, register extraction, pseudocode emission, symbolic state fork, and full trace→pseudocode chain (`1798b03`)
+
+#### Test Suite
+- **430 tests** (430 pass, 7 skip — all yara-python)
+- New test files: `test_vmprotect_trace`, `test_phase9_integration`
+- Trajectory: 362 (Phase 8 end) → 401 (9 fixes) → 409 (VMProtect trace) → 430 (integration)
+
+---
+
 ### Phase 8 — Deep Integration & Real Analysis Engines (14 commits)
 
 Phase 8 transforms VMDragonSlayer from a framework with data-starved scaffolding

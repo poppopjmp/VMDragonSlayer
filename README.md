@@ -23,8 +23,8 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | VM Discovery | `analysis.vm_discovery` | Dispatcher & handler table identification, signature database matching, nested VM heuristics |
 | Dispatcher Analysis | `analysis.vm_discovery.dispatcher` | Jump-table scanning, push/ret trampoline detection, handler table reconstruction, opcode→address mapping |
 | Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection), regex entry-point matching, optional YARA backend |
-| Taint Tracking | `analysis.taint_tracking` | Register + memory taint propagation, virtual register mapping (VMProtect/Themida presets), handler boundary detection |
-| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), z3 branch constraints, opaque predicate detection, handler-local symbolic execution with MBA simplification |
+| Taint Tracking | `analysis.taint_tracking` | Register + memory taint propagation with SIB addressing (`[base+index*scale+disp]`), virtual register mapping (VMProtect/Themida presets), handler boundary detection |
+| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), explicit EFLAGS modelling (ZF/CF/SF/OF), z3 branch constraints, opaque predicate detection, dispatcher back-edge scoring, concrete SP for push/pop, handler-local symbolic execution with MBA simplification |
 | Anti-Evasion | `analysis.anti_evasion` | Section-aware instruction scanning (PE/ELF), anti-debug/VM/sandbox detection, binary patching |
 | Binary Parsing | `analysis.binary_format` | Shared LIEF-based PE/ELF parser used across all analysis modules |
 | Trace Ingestion | `analysis.trace_ingestion` | Unified `ExecutionTrace` model; ingestion from text files, angr, Triton, Qiling, and shared plugin data |
@@ -33,11 +33,11 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | Bytecode Extraction | `analysis.bytecode_extract` | Correlates memory reads with handler boundaries to extract the VM bytecode stream |
 | Handler Semantics | `analysis.handler_semantics` | Mnemonic histogram analysis → VMOperation classification (add, xor, load, store, jcc, …), opcode table construction, taint-based semantic slicing, junk-code filtering |
 | Pseudocode Emission | `analysis.pseudocode` | Linear listing, structured (if/while/goto), and C-like function output with SSA def-use variable naming |
-| MBA Simplification | `analysis.mba_simplifier` | 11 z3-proven rewrite rules, `verify_equivalence`, recursive-descent expression parser, batch simplification |
+| MBA Simplification | `analysis.mba_simplifier` | 16 z3-proven rewrite rules (11 two-var + 5 three-var), `verify_equivalence`, N-variable permutation matching, recursive-descent expression parser, batch simplification |
 | Devirtualise Stage | `core.pipeline` (devirtualize) | End-to-end pipeline stage: trace → vIP → boundaries → semantics → pseudocode |
 | LLM-Assisted | `llm.analyzer` | Few-shot handler classification, deobfuscation hints, code recovery, pattern explanation (via litellm) |
 | ML Pipeline | `ml.handler_classifier`, `ml.pipeline`, `ml.model`, `ml.trainer` | 15-D feature extraction, handler classifier (heuristic + sklearn RF), training pipeline, label derivation, `VMClassifier`, `EnsembleClassifier` |
-| Plugin Pipeline | `core.pipeline` | Multi-stage pipeline with ThreadPoolExecutor, per-plugin timeout, thread-safe shared data |
+| Plugin Pipeline | `core.pipeline` | Multi-stage pipeline with ThreadPoolExecutor, per-stage timeout with non-blocking cancellation, thread-safe shared data |
 | Plugin Ecosystem | `plugins/` | 16 plugins across 4 stages (static/dynamic/enrichment/reporting) with angr, Triton, Qiling; enriched per-instruction trace output |
 | CLI | `dragonslayer.cli` | `vmdragonslayer analyze`, `serve`, `info` — Click-based command-line interface |
 | Reporting | `plugins.reporting.reporter` | VM deobfuscation analysis sections (handler table, taint flow, symbolic results, virtual register map) |
@@ -191,7 +191,7 @@ VMDragonSlayer/
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # 362 tests (362 pass, 7 skip)
+├── tests/                         # 430 tests (430 pass, 7 skip)
 ├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
@@ -250,7 +250,7 @@ VMDragonSlayer integrates with major reverse engineering tools:
 ## Current Status
 
 ### Test Suite
-- **362 tests** across 22+ test files
+- **430 tests** across 24+ test files
 - **362 passed**, 7 skipped (7 yara-python optional; z3 skip eliminated)
 - All Phase 8 commits verified green before merge
 - Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules, CLI, trace ingestion, handler boundaries, CFG, bytecode extraction, handler semantics, pseudocode, handler classifier, pipeline devirt, MBA simplifier, integration tests
