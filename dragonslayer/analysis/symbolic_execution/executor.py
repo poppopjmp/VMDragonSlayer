@@ -451,7 +451,109 @@ class SymbolicExecutor:
             "block_count": len(nodes),
             "edge_count": len(edges),
             "back_edge_count": len(back_edges),
+            "switch_tables": SymbolicExecutor._detect_switch_tables(blocks, block_addr_set),
+            "exception_edges": SymbolicExecutor._detect_exception_edges(blocks, block_addr_set),
         }
+
+    # -- B69: Switch / jump-table detection ----------------------------------
+
+    @staticmethod
+    def _detect_switch_tables(
+        blocks: List[List["LiftedInstruction"]],
+        block_addrs: set[int],
+    ) -> List[Dict[str, Any]]:
+        """Detect switch/jump table patterns in basic blocks.
+
+        Recognises the common x86 pattern::
+
+            cmp  reg, N          ; bound check
+            ja   default_label   ; unsigned > N → default
+            ...
+            jmp  [reg*scale+base] ; indirect table jump
+
+        Returns a list of ``{address, bound, targets_estimate}`` dicts.
+        """
+        tables: List[Dict[str, Any]] = []
+        for blk in blocks:
+            if len(blk) < 2:
+                continue
+            last = blk[-1]
+            # Indirect unconditional jump (jmp [reg*...]) with no known target
+            if last.category != InstructionCategory.BRANCH_UNCOND or last.branch_target is not None:
+                continue
+            # Walk backwards looking for a preceding CMP + JA/JB pattern
+            bound = None
+            for insn in reversed(blk[:-1]):
+                mn = insn.mnemonic.lower() if insn.mnemonic else ""
+                if mn in ("cmp", "test"):
+                    # Try to extract the immediate bound from operands
+                    ops = insn.operands or ""
+                    parts = ops.split(",")
+                    if len(parts) == 2:
+                        raw = parts[1].strip()
+                        # Strip hex prefix
+                        try:
+                            bound = int(raw, 0)
+                        except (ValueError, TypeError):
+                            pass
+                    break
+            if bound is not None:
+                tables.append({
+                    "address": last.address,
+                    "bound": bound,
+                    "targets_estimate": bound + 1,
+                })
+        return tables
+
+    # -- B69: Exception / SEH edge detection ---------------------------------
+
+    @staticmethod
+    def _detect_exception_edges(
+        blocks: List[List["LiftedInstruction"]],
+        block_addrs: set[int],
+    ) -> List[Dict[str, Any]]:
+        """Detect potential exception handler registrations (SEH / VEH).
+
+        Looks for Windows SEH push patterns::
+
+            push handler_addr
+            push dword ptr fs:[0]  / mov eax, fs:[0]
+
+        Returns ``[{source, handler, type}]`` for each detected registration.
+        """
+        import re as _re
+        _SEH_PUSH_RE = _re.compile(r"fs:\[0", _re.IGNORECASE)
+
+        exc_edges: List[Dict[str, Any]] = []
+        for blk in blocks:
+            for i, insn in enumerate(blk):
+                mn = (insn.mnemonic or "").lower()
+                ops = insn.operands or ""
+                # Look for fs:[0] access (SEH chain head)
+                if _SEH_PUSH_RE.search(ops):
+                    # Previous instruction should be 'push handler_addr'
+                    if i > 0:
+                        prev = blk[i - 1]
+                        prev_mn = (prev.mnemonic or "").lower()
+                        if prev_mn == "push" and prev.branch_target is not None:
+                            exc_edges.append({
+                                "source": insn.address,
+                                "handler": prev.branch_target,
+                                "type": "seh",
+                            })
+                        elif prev_mn == "push":
+                            # Try extracting address from operand
+                            prev_ops = (prev.operands or "").strip()
+                            try:
+                                handler_addr = int(prev_ops, 0)
+                                exc_edges.append({
+                                    "source": insn.address,
+                                    "handler": handler_addr,
+                                    "type": "seh",
+                                })
+                            except (ValueError, TypeError):
+                                pass
+        return exc_edges
 
     # -- Dispatcher identification -------------------------------------------
 

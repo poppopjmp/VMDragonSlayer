@@ -469,3 +469,61 @@ class Z3Solver:
             return SolverResult(satisfiable=True, model=result_model)
 
         return SolverResult(satisfiable=False, error="chained decryption unsatisfiable")
+
+    # -- B69: Adaptive key-schedule length detection -------------------------
+
+    def detect_key_schedule_length(
+        self,
+        ciphertext: List[int],
+        known_plaintext: List[int],
+        max_period: int = 32,
+        bits: int = 8,
+    ) -> SolverResult:
+        """Detect the period (key length) of a repeating XOR key schedule.
+
+        Tries increasing key lengths from 1 to *max_period*, checking
+        whether a single repeating key of length *k* can explain all
+        known-plaintext / ciphertext pairs.
+
+        Parameters
+        ----------
+        ciphertext, known_plaintext:
+            Equal-length sequences of encrypted and expected plain values.
+        max_period:
+            Maximum key period to try (default 32).
+        bits:
+            Bit-width per element.
+
+        Returns
+        -------
+        SolverResult
+            ``model["key_length"]`` and ``model["key_0"] … model["key_k-1"]``
+            for the shortest satisfying period; or ``satisfiable=False`` if
+            no period ≤ *max_period* works.
+        """
+        if not ciphertext or len(ciphertext) != len(known_plaintext):
+            return SolverResult(satisfiable=False, error="input length mismatch")
+
+        n = len(ciphertext)
+        for k in range(1, min(max_period, n) + 1):
+            key_vars = [z3.BitVec(f"key_{j}", bits) for j in range(k)]
+            s = z3.Solver()
+            s.set("timeout", self.timeout_ms)
+
+            for i in range(n):
+                ct = z3.BitVecVal(ciphertext[i], bits)
+                pt = z3.BitVecVal(known_plaintext[i], bits)
+                s.add(ct ^ key_vars[i % k] == pt)
+
+            if s.check() == z3.sat:
+                model = s.model()
+                result_model: Dict[str, Any] = {"key_length": k}
+                for j in range(k):
+                    val = model.eval(key_vars[j], model_completion=True)
+                    try:
+                        result_model[f"key_{j}"] = val.as_long()
+                    except (AttributeError, z3.Z3Exception):
+                        result_model[f"key_{j}"] = str(val)
+                return SolverResult(satisfiable=True, model=result_model)
+
+        return SolverResult(satisfiable=False, error=f"no period ≤{max_period} found")

@@ -70,7 +70,8 @@ class TestSubregCanonical:
         assert subreg_canonical("dh") == "rdx"
 
     def test_unknown_returns_self(self):
-        assert subreg_canonical("xmm0") == "xmm0"
+        # B69: xmm0 is now in zmm0 family
+        assert subreg_canonical("xmm0") == "zmm0"
         assert subreg_canonical("rflags") == "rflags"
 
     def test_case_insensitive(self):
@@ -115,8 +116,9 @@ class TestSubregAliases:
         assert len(fam) == 4
 
     def test_unknown_returns_singleton(self):
+        # B69: xmm0 is now in zmm0 family (xmm/ymm/zmm)
         fam = subreg_aliases("xmm0")
-        assert fam == {"xmm0"}
+        assert fam == {"xmm0", "ymm0", "zmm0"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -151,7 +153,11 @@ class TestSubregInfo:
         assert info[2] == 8  # width
 
     def test_unknown_returns_none(self):
-        assert subreg_info("xmm0") is None
+        # B69: xmm0 is now known (SIMD family)
+        info = subreg_info("xmm0")
+        assert info is not None
+        assert info[0] == "zmm0"
+        assert info[2] == 128  # xmm = 128 bits
 
     def test_r15d_zero_extends(self):
         info = subreg_info("r15d")

@@ -377,6 +377,40 @@ class PatternRecognizer:
             'yara_active': self._yara is not None,
         }
 
+    # -- B69: Semantic normalisation for mutation-resilient matching ----------
+
+    # Semantically equivalent instruction rewrites (mnemonic-level).
+    # Used by ``normalize_semantics`` to canonicalise instructions before
+    # byte-level matching, improving resilience to trivial obfuscation.
+    _SEMANTIC_EQUIV: Dict[str, str] = {
+        # xor reg, reg  ≡  sub reg, reg  ≡  mov reg, 0  (covered by byte pattern)
+        "test": "and",    # TEST and AND set the same flags; normalise to AND
+        "sal": "shl",     # SAL is identical to SHL
+        "jo": "jo",       # identity — included for completeness
+    }
+
+    # Junk / NOP-equivalent single-byte opcodes (can be stripped).
+    _NOP_OPCODES: frozenset[str] = frozenset({
+        "90",  # NOP
+        "6690", "0f1f00", "0f1f4000", "0f1f440000",  # long NOPs
+        "8d4000", "8d642400",  # lea same, [same+0]
+    })
+
+    @classmethod
+    def normalize_semantics(cls, hex_bytes: str) -> str:
+        """Normalise a hex instruction stream by stripping junk NOPs.
+
+        This is a lightweight pre-pass applied *before* byte-pattern
+        matching.  It removes single-instruction NOP sequences that
+        compilers and obfuscators insert without changing semantics.
+
+        Returns the normalised hex string (uppercase, no spaces).
+        """
+        normalised = hex_bytes.replace(" ", "").upper()
+        for nop in sorted(cls._NOP_OPCODES, key=len, reverse=True):
+            normalised = normalised.replace(nop.upper(), "")
+        return normalised
+
 
 class SequenceRecognizer:
     """

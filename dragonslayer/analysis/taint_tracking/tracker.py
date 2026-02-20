@@ -100,6 +100,20 @@ def _build_family_tables() -> None:
             family_set.add(name)
         _REG_FAMILY[canonical] = family_set
 
+    # B69: SIMD register families — xmm/ymm/zmm share a single 512-bit slot.
+    for n in range(16):
+        canonical = f"zmm{n}"
+        simd_members = [
+            (f"xmm{n}", 0, 128, False),
+            (f"ymm{n}", 0, 256, False),
+            (f"zmm{n}", 0, 512, False),
+        ]
+        family_set = set()
+        for name, bit_lo, width, zext in simd_members:
+            _SUBREG_FAMILIES[name] = (canonical, bit_lo, width, zext)
+            family_set.add(name)
+        _REG_FAMILY[canonical] = family_set
+
 _build_family_tables()
 
 
