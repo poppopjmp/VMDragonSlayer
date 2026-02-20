@@ -133,10 +133,29 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
     has_mem_read = 1.0 if any("[" in str(r) or "(" in str(r) for r in reads) else 0.0
     has_mem_write = 1.0 if any("[" in str(w) or "(" in str(w) for w in writes) else 0.0
 
-    has_indirect = 1.0 if any(
-        m == "jmp" and i + 1 < len(mnemonics)
-        for i, m in enumerate(mnemonics)
-    ) else 0.0
+    has_indirect = 0.0
+    instructions = handler.get("instructions", [])
+    for insn in instructions:
+        m = insn.get("mnemonic", "").lower()
+        if m in ("jmp", "call"):
+            ops = insn.get("operands", "")
+            # Indirect if the operand is a register name or memory dereference,
+            # NOT an immediate hex/decimal address.
+            if ops and not ops.lstrip().startswith("0") and not ops.lstrip().startswith("-"):
+                import re
+                # Matches register names like rax, eax, r12, etc.
+                if re.match(r"^[a-z][a-z0-9]*$", ops.strip().lower()):
+                    has_indirect = 1.0
+                    break
+                # Matches memory dereference [rax], [rax+8], etc.
+                if "[" in ops or "(" in ops:
+                    has_indirect = 1.0
+                    break
+    # Fallback: if no instruction dicts, check mnemonic list for jmp existence
+    if has_indirect == 0.0 and not instructions:
+        if any(m in ("jmp", "call") for m in mnemonics):
+            # Can't distinguish direct vs indirect without operand info
+            has_indirect = 0.5  # uncertain
 
     operand_width = float(handler.get("operand_width", 8))
     block_count = float(handler.get("block_count", 1))

@@ -391,3 +391,51 @@ class TestCrossModuleValidation:
         )
         assert b.vip_delta == 4
         assert b.instruction_count == 3
+
+
+class TestHasIndirectBranchFeature:
+    """Verify has_indirect_branch uses operand info, not positional heuristic."""
+
+    def test_indirect_jmp_register(self):
+        handler = {
+            "instructions": [
+                {"mnemonic": "jmp", "operands": "rax"},
+            ],
+            "mnemonics": ["jmp"],
+        }
+        fv = extract_handler_features(handler)
+        idx = fv.feature_names.index("has_indirect_branch")
+        assert fv.values[idx] == 1.0
+
+    def test_direct_jmp_immediate(self):
+        handler = {
+            "instructions": [
+                {"mnemonic": "jmp", "operands": "0x401000"},
+            ],
+            "mnemonics": ["jmp"],
+        }
+        fv = extract_handler_features(handler)
+        idx = fv.feature_names.index("has_indirect_branch")
+        assert fv.values[idx] == 0.0
+
+    def test_indirect_call_memory(self):
+        handler = {
+            "instructions": [
+                {"mnemonic": "call", "operands": "[rax+8]"},
+            ],
+            "mnemonics": ["call"],
+        }
+        fv = extract_handler_features(handler)
+        idx = fv.feature_names.index("has_indirect_branch")
+        assert fv.values[idx] == 1.0
+
+    def test_no_branch_instructions(self):
+        handler = {
+            "instructions": [
+                {"mnemonic": "add", "operands": "rax, rbx"},
+            ],
+            "mnemonics": ["add"],
+        }
+        fv = extract_handler_features(handler)
+        idx = fv.feature_names.index("has_indirect_branch")
+        assert fv.values[idx] == 0.0
