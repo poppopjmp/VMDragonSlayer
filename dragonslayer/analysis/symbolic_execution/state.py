@@ -154,6 +154,7 @@ class SymbolicState:
 
     def update_flags_arith(
         self, result: Any, left: Any, right: Any, *, is_sub: bool = False,
+        operand_size: int = 0,
     ) -> None:
         """Update ZF/CF/SF/OF after an ADD or SUB-like operation.
 
@@ -165,9 +166,21 @@ class SymbolicState:
             Original operands (before the operation).
         is_sub : bool
             True for SUB/CMP semantics, False for ADD.
+        operand_size : int
+            Effective operand width in bits (8, 16, 32, 64).  When 0
+            (the default) falls back to ``self.bit_width`` for backward
+            compatibility.
         """
-        bw = self.bit_width
+        bw = operand_size if operand_size else self.bit_width
         if _Z3_AVAILABLE and hasattr(result, "sort"):
+            rbw = result.sort().size()
+            # Truncate/extend result to the operand width for flag
+            # computation so that SF/ZF reflect the real operand size.
+            if rbw != bw:
+                if rbw > bw:
+                    result = z3.Extract(bw - 1, 0, result)
+                else:
+                    result = z3.ZeroExt(bw - rbw, result)
             zero = z3.BitVecVal(0, bw)
             self.flags["ZF"] = result == zero
             self.flags["SF"] = z3.Extract(bw - 1, bw - 1, result) == z3.BitVecVal(1, 1)
@@ -183,12 +196,8 @@ class SymbolicState:
             sign_r = z3.Extract(bw - 1, bw - 1, right_bv)
             sign_res = z3.Extract(bw - 1, bw - 1, result)
             if is_sub:
-                # Overflow if operands have different signs and result sign
-                # differs from left operand sign.
                 self.flags["OF"] = z3.And(sign_l != sign_r, sign_res != sign_l)
             else:
-                # Overflow if operands have the same sign but the result has
-                # a different sign.
                 self.flags["OF"] = z3.And(sign_l == sign_r, sign_res != sign_l)
         else:
             # Concrete path
@@ -200,7 +209,6 @@ class SymbolicState:
             ri = right if isinstance(right, int) else 0
             if is_sub:
                 self.flags["CF"] = (li & mask) < (ri & mask)
-                # Signed overflow check
                 sl = (li >> (bw - 1)) & 1
                 sr = (ri >> (bw - 1)) & 1
                 sres = (r >> (bw - 1)) & 1
@@ -212,13 +220,25 @@ class SymbolicState:
                 sres = (r >> (bw - 1)) & 1
                 self.flags["OF"] = (sl == sr) and (sres != sl)
 
-    def update_flags_logic(self, result: Any) -> None:
+    def update_flags_logic(self, result: Any, *, operand_size: int = 0) -> None:
         """Update ZF/SF after a logical operation (AND/OR/XOR/TEST).
 
         CF and OF are cleared per the x86 ISA.
+
+        Parameters
+        ----------
+        operand_size : int
+            Effective operand width in bits.  ``0`` falls back to
+            ``self.bit_width``.
         """
-        bw = self.bit_width
+        bw = operand_size if operand_size else self.bit_width
         if _Z3_AVAILABLE and hasattr(result, "sort"):
+            rbw = result.sort().size()
+            if rbw != bw:
+                if rbw > bw:
+                    result = z3.Extract(bw - 1, 0, result)
+                else:
+                    result = z3.ZeroExt(bw - rbw, result)
             zero = z3.BitVecVal(0, bw)
             self.flags["ZF"] = result == zero
             self.flags["SF"] = z3.Extract(bw - 1, bw - 1, result) == z3.BitVecVal(1, 1)
@@ -230,18 +250,21 @@ class SymbolicState:
         self.flags["CF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
         self.flags["OF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
 
-    def update_flags_inc_dec(self, result: Any, original: Any, *, is_dec: bool) -> None:
+    def update_flags_inc_dec(
+        self, result: Any, original: Any, *, is_dec: bool,
+        operand_size: int = 0,
+    ) -> None:
         """Update ZF/SF/OF for INC/DEC (CF is unaffected)."""
-        bw = self.bit_width
+        bw = operand_size if operand_size else self.bit_width
         one: Any = 1
         if _Z3_AVAILABLE and hasattr(result, "sort"):
             one = z3.BitVecVal(1, bw)
         # Save CF — INC/DEC must not modify carry flag
         saved_cf = self.flags.get("CF", False)
         if is_dec:
-            self.update_flags_arith(result, original, one, is_sub=True)
+            self.update_flags_arith(result, original, one, is_sub=True, operand_size=bw)
         else:
-            self.update_flags_arith(result, original, one, is_sub=False)
+            self.update_flags_arith(result, original, one, is_sub=False, operand_size=bw)
         # Restore CF
         self.flags["CF"] = saved_cf
 
