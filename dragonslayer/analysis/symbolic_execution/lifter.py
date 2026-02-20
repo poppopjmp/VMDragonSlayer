@@ -130,7 +130,15 @@ _MNEMONIC_CATEGORIES: Dict[str, str] = {
 
 @dataclass
 class LiftedInstruction:
-    """Single lifted instruction in simplified IR form."""
+    """Single lifted instruction in simplified IR form.
+
+    When produced from a dynamic execution trace (via
+    :meth:`ExecutionTrace.to_lifted_instructions`), the ``registers``
+    dict carries concrete register snapshots from the trace engine
+    (Qiling / angr / Triton), enabling precise memory-address
+    resolution in the taint tracker.  ``is_tainted`` reflects the
+    Triton taint engine's per-instruction flag when available.
+    """
     address: int
     size: int
     mnemonic: str
@@ -141,9 +149,11 @@ class LiftedInstruction:
     writes: List[str] = field(default_factory=list)   # registers/memory written
     is_branch: bool = False
     branch_target: Optional[int] = None
+    registers: Dict[str, int] = field(default_factory=dict)
+    is_tainted: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "address": self.address,
             "size": self.size,
             "mnemonic": self.mnemonic,
@@ -155,6 +165,11 @@ class LiftedInstruction:
             "is_branch": self.is_branch,
             "branch_target": self.branch_target,
         }
+        if self.registers:
+            d["registers"] = self.registers
+        if self.is_tainted:
+            d["is_tainted"] = True
+        return d
 
     def __str__(self) -> str:
         return f"0x{self.address:08x}: {self.mnemonic} {self.operands}"

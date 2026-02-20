@@ -149,19 +149,45 @@ class ExecutionTrace:
         return self._as_simple_instructions()
 
     def _lift_with_capstone(self) -> list:
-        """Re-lift raw bytes through the InstructionLifter."""
+        """Re-lift raw bytes through the InstructionLifter, preserving
+        register snapshots and taint flags from the trace.
+        """
         from dragonslayer.analysis.symbolic_execution.lifter import InstructionLifter
 
         arch = self.metadata.get("arch", "x86_64")
         lifter = InstructionLifter(arch=arch)
 
+        # Build a lookup from address → TraceInstruction for metadata overlay.
+        trace_lookup: Dict[int, TraceInstruction] = {
+            ti.address: ti for ti in self.instructions
+        }
+
+        # Per-instruction taint from Triton taint_flow (address → bool).
+        taint_by_addr: Dict[int, bool] = {}
+        for tf in self.metadata.get("taint_flow_raw", []):
+            addr = tf.get("address", 0)
+            taint_by_addr[addr] = tf.get("is_tainted", False)
+
         results = []
         for ti in self.instructions:
             if ti.raw_bytes:
-                lifted = lifter.lift(ti.raw_bytes, base_address=ti.address, max_instructions=1)
+                lifted = lifter.lift(
+                    ti.raw_bytes,
+                    base_address=ti.address,
+                    max_instructions=1,
+                )
+                for li in lifted:
+                    # Overlay concrete register snapshot from trace engine.
+                    if ti.registers:
+                        li.registers = dict(ti.registers)
+                    # Overlay taint flag from Triton.
+                    li.is_tainted = taint_by_addr.get(li.address, False)
                 results.extend(lifted)
             else:
-                results.append(self._simple_from_trace(ti))
+                si = self._simple_from_trace(ti)
+                si.registers = dict(ti.registers) if ti.registers else {}
+                si.is_tainted = taint_by_addr.get(ti.address, False)
+                results.append(si)
         return results
 
     @staticmethod
@@ -185,7 +211,17 @@ class ExecutionTrace:
         )
 
     def _as_simple_instructions(self) -> list:
-        return [self._simple_from_trace(ti) for ti in self.instructions]
+        taint_by_addr: Dict[int, bool] = {}
+        for tf in self.metadata.get("taint_flow_raw", []):
+            addr = tf.get("address", 0)
+            taint_by_addr[addr] = tf.get("is_tainted", False)
+        result = []
+        for ti in self.instructions:
+            si = self._simple_from_trace(ti)
+            si.registers = dict(ti.registers) if ti.registers else {}
+            si.is_tainted = taint_by_addr.get(ti.address, False)
+            result.append(si)
+        return result
 
     def extract_code_regions(self) -> Dict[int, bytes]:
         """Group consecutive trace instructions by address into code blobs.
@@ -361,6 +397,8 @@ class _SimpleInstruction:
     writes: List[str] = field(default_factory=list)
     is_branch: bool = False
     branch_target: Optional[int] = None
+    registers: Dict[str, int] = field(default_factory=dict)
+    is_tainted: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +647,8 @@ def _ingest_triton(data: Dict[str, Any], trace: ExecutionTrace) -> None:
     # Path constraints → metadata
     trace.metadata["path_constraints"] = data.get("path_constraints", [])
     trace.metadata["tainted_registers_initial"] = data.get("tainted_registers_initial", [])
+    # Preserve raw taint_flow for per-instruction taint overlay during lifting.
+    trace.metadata["taint_flow_raw"] = data.get("taint_flow", [])
 
     if trace.source == "shared_data":
         trace.source = "shared_data+triton"

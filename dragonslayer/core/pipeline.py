@@ -635,6 +635,13 @@ class AnalysisPipeline:
     ) -> StageResult:
         """Run taint tracking over the binary using VM discovery results.
 
+        When dynamic plugin output is available (Qiling / angr / Triton),
+        the trace is ingested via :func:`trace_ingestion.from_shared_data`
+        and its :meth:`to_lifted_instructions` is used — this preserves
+        concrete register snapshots and Triton taint flags.
+
+        Falls back to raw-binary lifting when no dynamic data is present.
+
         When a VM protector is detected, uses :class:`VMTaintTracker` which
         provides virtual register mapping and handler boundary detection.
         Otherwise falls back to the generic :class:`TaintAnalyzer`.
@@ -644,15 +651,47 @@ class AnalysisPipeline:
             from ..analysis.taint_tracking.analyzer import TaintAnalyzer
             from ..analysis.taint_tracking.vm_taint_tracker import VMTaintTracker
             from ..analysis.symbolic_execution.lifter import InstructionLifter
+            from ..analysis.trace_ingestion import from_shared_data
 
             # Determine entry point from vm_discovery
             vm_info = ctx.shared_data.get("vm_discovery", {})
             dispatcher_addrs = vm_info.get("dispatcher_addresses", [])
             entry = dispatcher_addrs[0] if dispatcher_addrs else 0
 
-            # Lift instructions from binary data
-            lifter = InstructionLifter()
-            instructions = lifter.lift(binary_data, base_address=entry)
+            # ----------------------------------------------------------
+            # Prefer dynamic plugin traces (Qiling → taint, Triton → taint)
+            # over raw-binary lifting.  This carries register snapshots
+            # and per-instruction taint from the plugin engines.
+            # ----------------------------------------------------------
+            instructions = None
+            trace_source = "binary"
+
+            has_dynamic = any(
+                ctx.shared_data.get(k)
+                for k in ("qiling", "triton", "angr")
+            )
+            if has_dynamic:
+                try:
+                    trace = from_shared_data(ctx.shared_data)
+                    if trace and trace.instructions:
+                        instructions = trace.to_lifted_instructions()
+                        trace_source = trace.source
+                        logger.info(
+                            "Taint stage: using %d instructions from %s",
+                            len(instructions), trace_source,
+                        )
+                except Exception:
+                    logger.debug(
+                        "Taint stage: plugin trace ingestion failed, "
+                        "falling back to binary lift",
+                        exc_info=True,
+                    )
+
+            # Fallback: lift directly from binary
+            if not instructions:
+                lifter = InstructionLifter()
+                instructions = lifter.lift(binary_data, base_address=entry)
+                trace_source = "binary"
 
             if not instructions:
                 return StageResult(
@@ -692,6 +731,12 @@ class AnalysisPipeline:
                 )
                 ctx.shared_data["taint_results"] = result
 
+            # Annotate result with trace provenance.
+            if isinstance(result, dict):
+                result["trace_source"] = trace_source
+            elif hasattr(result, "to_dict"):
+                pass  # provenance added by caller if needed
+
             return StageResult(
                 stage="taint_analysis",
                 success=True,
@@ -712,10 +757,19 @@ class AnalysisPipeline:
         binary_data: bytes,
         ctx: Any,
     ) -> StageResult:
-        """Run symbolic execution to analyse VM handlers."""
+        """Run symbolic execution to analyse VM handlers.
+
+        When dynamic plugin output is available (angr / Triton), the
+        trace is ingested and its code regions are extracted so the
+        symbolic executor operates on *executing* code rather than the
+        whole binary blob.  If the Triton plugin provided path
+        constraints they are forwarded to the Z3 solver as seed
+        constraints, giving the explorer a head start.
+        """
         t0 = time.monotonic()
         try:
             from ..analysis.symbolic_execution.executor import SymbolicExecutor
+            from ..analysis.trace_ingestion import from_shared_data
 
             # Use dispatcher address from vm_discovery if available
             vm_info = ctx.shared_data.get("vm_discovery", {})
@@ -723,7 +777,63 @@ class AnalysisPipeline:
             entry = dispatcher_addrs[0] if dispatcher_addrs else 0
 
             executor = SymbolicExecutor()
-            result = executor.analyze(binary_data, entry_point=entry)
+
+            # ----------------------------------------------------------
+            # Try to extract code regions from dynamic plugin traces so
+            # the symbolic executor works on real handler code rather
+            # than the entire binary.
+            # ----------------------------------------------------------
+            code_to_analyze = binary_data
+            trace_regions = None
+            has_dynamic = any(
+                ctx.shared_data.get(k)
+                for k in ("angr", "triton")
+            )
+            if has_dynamic:
+                try:
+                    trace = from_shared_data(ctx.shared_data)
+                    if trace and trace.instructions:
+                        regions = trace.extract_code_regions()
+                        if regions:
+                            trace_regions = regions
+                            # Build a single code blob aligned to the
+                            # lowest address, suitable for the lifter.
+                            base_addr = min(regions.keys())
+                            end_addr = max(
+                                addr + len(data)
+                                for addr, data in regions.items()
+                            )
+                            buf = bytearray(end_addr - base_addr)
+                            for addr, data in regions.items():
+                                offset = addr - base_addr
+                                buf[offset:offset + len(data)] = data
+                            code_to_analyze = bytes(buf)
+                            if entry == 0:
+                                entry = base_addr
+                            logger.info(
+                                "Symbolic stage: using %d code regions "
+                                "(%d bytes) from plugin traces",
+                                len(regions), len(code_to_analyze),
+                            )
+
+                        # Forward Triton path constraints as seed
+                        # constraints for the Z3 solver.
+                        path_constraints = trace.metadata.get(
+                            "path_constraints", [],
+                        )
+                        if path_constraints:
+                            ctx.shared_data.setdefault(
+                                "_triton_path_constraints",
+                                path_constraints,
+                            )
+                except Exception:
+                    logger.debug(
+                        "Symbolic stage: plugin trace ingestion failed, "
+                        "falling back to raw binary",
+                        exc_info=True,
+                    )
+
+            result = executor.analyze(code_to_analyze, entry_point=entry)
 
             result_data = result.to_dict() if hasattr(result, "to_dict") else {
                 "handlers": [
@@ -739,6 +849,11 @@ class AnalysisPipeline:
                 "dispatcher_address": getattr(result, "dispatcher_address", 0),
                 "opaque_predicates": getattr(result, "opaque_predicates", []),
             }
+
+            # Annotate with trace provenance when plugin data was used.
+            if trace_regions is not None:
+                result_data["trace_source"] = "plugin"
+                result_data["trace_region_count"] = len(trace_regions)
 
             ctx.shared_data["symbolic_execution"] = result_data
 
