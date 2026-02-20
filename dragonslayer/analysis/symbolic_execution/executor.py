@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from .state import SymbolicState
 from .lifter import InstructionLifter, LiftedInstruction, InstructionCategory
@@ -62,6 +62,7 @@ class ExecutionResult:
     opaque_predicates: List[Dict[str, Any]] = field(default_factory=list)
     state_snapshots: List[Dict[str, Any]] = field(default_factory=list)
     vmprotect_dispatcher: Optional[Dict[str, Any]] = None
+    loops_detected: List[Dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -75,6 +76,7 @@ class ExecutionResult:
             "opaque_predicates": self.opaque_predicates,
             "state_snapshot_count": len(self.state_snapshots),
             "vmprotect_dispatcher": self.vmprotect_dispatcher,
+            "loops_detected": self.loops_detected,
             "error": self.error,
         }
 
@@ -107,6 +109,31 @@ class HandlerSymbolicSummary:
         }
 
 
+# ---------------------------------------------------------------------------
+# Loop analysis data structures  (Batch 35)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LoopInfo:
+    """Information about a detected loop during symbolic execution."""
+    header_address: int
+    back_edge_sources: List[int] = field(default_factory=list)
+    iteration_count: int = 0
+    body_addresses: Set[int] = field(default_factory=set)
+    widened: bool = False
+    widened_registers: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "header_address": hex(self.header_address),
+            "back_edge_sources": [hex(a) for a in self.back_edge_sources],
+            "iteration_count": self.iteration_count,
+            "body_size": len(self.body_addresses),
+            "widened": self.widened,
+            "widened_registers": self.widened_registers,
+        }
+
+
 class SymbolicExecutor:
     """
     Lightweight symbolic executor for VM handler analysis.
@@ -122,15 +149,19 @@ class SymbolicExecutor:
         arch: str = "x86_64",
         max_depth: int = 1000,
         max_paths: int = 64,
+        max_loop_iters: int = 3,
     ) -> None:
         self.arch = arch
         self.bit_width = 64 if "64" in arch else 32
         self.max_depth = max_depth
         self.max_paths = max_paths
+        self.max_loop_iters = max_loop_iters
         self._lifter = InstructionLifter(arch=arch)
         self._solver = Z3Solver()
         # Path constraints gathered during _explore_paths for opaque detection.
         self._collected_path_constraints: List[Any] = []
+        # Loop analysis results gathered during exploration.
+        self._detected_loops: Dict[int, LoopInfo] = {}
 
     def analyze(
         self,
@@ -195,6 +226,9 @@ class SymbolicExecutor:
                     self._vmprotect_dispatcher.to_dict()
                     if self._vmprotect_dispatcher else None
                 ),
+                loops_detected=[
+                    li.to_dict() for li in self._detected_loops.values()
+                ],
             )
 
         except Exception as exc:
@@ -656,13 +690,20 @@ class SymbolicExecutor:
         on the :class:`SymbolicState` so downstream consumers (taint,
         handler classification) see meaningful values.
 
+        Includes **loop-aware execution** (Batch 35): when a program
+        counter has been visited more than ``max_loop_iters`` times on a
+        single path, the executor performs *widening* (replaces loop-
+        modified registers with fresh symbols) and terminates the loop
+        iteration with a ``"loop_bound"`` halt.
+
         Returns (paths_explored, total_instructions_executed, state_snapshots).
         """
         if not insn_map:
             return 0, 0, []
 
-        # Reset path constraints for this analysis run.
+        # Reset path constraints and loop info for this analysis run.
         self._collected_path_constraints = []
+        self._detected_loops = {}
 
         initial_state = SymbolicState(
             arch=self.arch,
@@ -685,9 +726,22 @@ class SymbolicExecutor:
                     state.halt("address not in map")
                     break
 
-                state.visit(state.pc)
+                pc = state.pc
+                state.visit(pc)
                 total_insns += 1
                 path_len += 1
+
+                # --- Loop detection & bounded execution (B35) ----
+                vc = state.visit_count(pc)
+                if vc > 1:
+                    # We've been here before → this is a back-edge target
+                    self._record_loop_header(pc, state)
+
+                if vc > self.max_loop_iters:
+                    # Exceed iteration bound → widen and halt this path
+                    self._widen_state(state, pc)
+                    state.halt("loop_bound")
+                    break
 
                 # === Apply instruction semantics to state ===
                 self._apply_instruction(state, insn)
@@ -743,6 +797,66 @@ class SymbolicExecutor:
             snapshots.append(state.to_dict())
 
         return paths, total_insns, snapshots[:32]
+
+    # -- Loop analysis helpers (Batch 35) ------------------------------------
+
+    def _record_loop_header(self, pc: int, state: SymbolicState) -> None:
+        """Record *pc* as a loop header detected during exploration."""
+        if pc not in self._detected_loops:
+            self._detected_loops[pc] = LoopInfo(header_address=pc)
+        info = self._detected_loops[pc]
+        info.iteration_count = max(info.iteration_count, state.visit_count(pc))
+        # Collect body addresses: everything visited since last visit to this header
+        info.body_addresses.update(state.visited_addresses)
+
+    def _widen_state(self, state: SymbolicState, loop_header: int) -> None:
+        """Widen symbolic state at a loop header.
+
+        Replaces registers that were written inside the loop body with
+        fresh unconstrained symbols.  This is conservative — it loses
+        precision but guarantees termination.
+        """
+        info = self._detected_loops.get(loop_header)
+        if info is None:
+            return
+
+        widened_regs: List[str] = []
+        bw = self.bit_width
+        try:
+            if Z3Solver.available():
+                import z3 as _z3
+                # Widen general-purpose registers (they may have been loop-modified)
+                gp_regs = (
+                    SymbolicState.X86_64_REGISTERS[:16]
+                    if bw == 64
+                    else SymbolicState.X86_32_REGISTERS[:8]
+                )
+                for reg in gp_regs:
+                    old_val = state.registers.get(reg)
+                    if old_val is not None and hasattr(old_val, "sexpr"):
+                        # Only widen if the register holds a complex expression
+                        expr_str = str(old_val)
+                        if "+" in expr_str or "-" in expr_str or "*" in expr_str:
+                            fresh = _z3.BitVec(
+                                f"wide_{reg}_{loop_header:#x}",
+                                bw,
+                            )
+                            state.registers[reg] = fresh
+                            widened_regs.append(reg)
+        except Exception:
+            pass
+
+        info.widened = True
+        info.widened_registers = widened_regs
+        logger.debug(
+            "Widened %d registers at loop header %#x after %d iterations",
+            len(widened_regs), loop_header, info.iteration_count,
+        )
+
+    @property
+    def detected_loops(self) -> Dict[int, LoopInfo]:
+        """Return loop headers detected during the most recent analysis."""
+        return dict(self._detected_loops)
 
     # -- Instruction semantics engine ----------------------------------------
 

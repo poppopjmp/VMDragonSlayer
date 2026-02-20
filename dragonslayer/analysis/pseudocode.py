@@ -678,6 +678,156 @@ def _compute_immediate_postdominator(
         return min(common) if common else None
 
 
+# ---------------------------------------------------------------------------
+# Irreducible CFG detection & node-splitting  (Batch 35)
+# ---------------------------------------------------------------------------
+
+def is_reducible(cfg_graph: Any, entry: Optional[int] = None) -> bool:
+    """Test whether *cfg_graph* is reducible using the T1/T2 algorithm.
+
+    A CFG is reducible iff repeated application of T1 (self-loop removal)
+    and T2 (single-predecessor node collapse) reduces it to a single node.
+
+    Returns ``True`` for reducible graphs and ``False`` for irreducible ones.
+    If networkx is unavailable returns ``True`` (optimistic fallback).
+    """
+    if not NX_AVAILABLE or cfg_graph is None:
+        return True
+
+    g = cfg_graph.copy()
+
+    changed = True
+    while changed and len(g) > 1:
+        changed = False
+
+        # T1: remove self-loops
+        self_loops = list(nx.selfloop_edges(g))
+        if self_loops:
+            g.remove_edges_from(self_loops)
+            changed = True
+
+        # T2: collapse nodes with exactly one predecessor (in-degree 1)
+        to_remove: List[Any] = []
+        for node in list(g.nodes()):
+            if g.in_degree(node) == 1:
+                pred = next(iter(g.predecessors(node)))
+                if pred == node:
+                    continue  # self-loop, handled by T1
+                # Redirect all successors of node → pred
+                for succ in list(g.successors(node)):
+                    if succ != node and not g.has_edge(pred, succ):
+                        g.add_edge(pred, succ)
+                to_remove.append(node)
+
+        if to_remove:
+            g.remove_nodes_from(to_remove)
+            changed = True
+
+    return len(g) <= 1
+
+
+def find_irreducible_sccs(
+    cfg_graph: Any,
+    entry: Optional[int] = None,
+) -> List[set]:
+    """Return the strongly-connected components that make the CFG irreducible.
+
+    An SCC is irreducible if it has multiple entry nodes (nodes reachable
+    from outside the SCC by different paths).  Returns a list of sets of
+    node IDs.  Empty list means the CFG is reducible.
+    """
+    if not NX_AVAILABLE or cfg_graph is None:
+        return []
+
+    irreducible: List[set] = []
+    for scc_nodes in nx.strongly_connected_components(cfg_graph):
+        if len(scc_nodes) <= 1:
+            continue
+        # Count entries: nodes that have a predecessor outside the SCC
+        entries = set()
+        for node in scc_nodes:
+            for pred in cfg_graph.predecessors(node):
+                if pred not in scc_nodes:
+                    entries.add(node)
+                    break
+        if len(entries) > 1:
+            irreducible.append(scc_nodes)
+
+    return irreducible
+
+
+def split_irreducible_scc(
+    cfg_graph: Any,
+    scc_nodes: set,
+) -> Any:
+    """Apply node-splitting to make an irreducible SCC reducible.
+
+    Picks the SCC entry with the fewest in-edges from outside the SCC,
+    duplicates it, and reconnects external predecessors to the clone.
+    Returns a new graph.
+
+    This is the classic technique from Janssen & Corporaal (1997):
+    *"Making graphs reducible with controlled node splitting"*.
+    """
+    if not NX_AVAILABLE:
+        return cfg_graph
+
+    g = cfg_graph.copy()
+
+    # Find entries: nodes with predecessors outside the SCC
+    entries: List[Any] = []
+    for node in scc_nodes:
+        for pred in g.predecessors(node):
+            if pred not in scc_nodes:
+                entries.append(node)
+                break
+
+    if len(entries) <= 1:
+        return g  # Already reducible
+
+    # Pick the entry with the fewest external predecessors to split
+    def _ext_pred_count(n: Any) -> int:
+        return sum(1 for p in g.predecessors(n) if p not in scc_nodes)
+
+    # Split the entry with the minimum external predecessors (but not the main entry)
+    target = min(entries[1:], key=_ext_pred_count)
+
+    # Create a clone node ID
+    clone_id = max((n for n in g.nodes() if isinstance(n, int)), default=0) + 1
+
+    # Add the clone with the same successor edges
+    g.add_node(clone_id)
+    for succ in list(g.successors(target)):
+        g.add_edge(clone_id, succ)
+
+    # Redirect external predecessors to the clone
+    for pred in list(g.predecessors(target)):
+        if pred not in scc_nodes:
+            g.add_edge(pred, clone_id)
+            g.remove_edge(pred, target)
+
+    return g
+
+
+def make_reducible(cfg_graph: Any, entry: Optional[int] = None) -> Any:
+    """Iteratively split nodes until the CFG becomes reducible.
+
+    Returns a (possibly modified) copy of *cfg_graph*.  Limits to 10
+    splitting rounds to avoid infinite loops on pathological graphs.
+    """
+    if not NX_AVAILABLE or cfg_graph is None:
+        return cfg_graph
+
+    g = cfg_graph.copy()
+    for _ in range(10):
+        sccs = find_irreducible_sccs(g, entry)
+        if not sccs:
+            break
+        for scc in sccs:
+            g = split_irreducible_scc(g, scc)
+    return g
+
+
 def structure_cfg(
     cfg: Any,
     opcode_table: SemanticOpcodeTable,
@@ -737,6 +887,13 @@ def structure_cfg(
                 exit_ids.add(bid)
 
     cfg_graph = getattr(cfg, "graph", None)
+
+    # --- Irreducible CFG handling (B35) ---
+    # If the CFG graph is irreducible, apply node-splitting to make it
+    # amenable to Cifuentes structural analysis.
+    if cfg_graph is not None and not is_reducible(cfg_graph):
+        logger.info("Irreducible CFG detected — applying node splitting")
+        cfg_graph = make_reducible(cfg_graph)
 
     # Track which blocks have been emitted
     emitted: set[int] = set()

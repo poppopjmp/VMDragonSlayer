@@ -188,6 +188,7 @@ class SymbolicState:
         self._read_log: List[MemoryAccessRecord] = []   # symbolic reads
         self._write_log: List[MemoryAccessRecord] = []  # symbolic writes
         self._visited_pcs: Set[int] = set()
+        self._visit_counts: Dict[int, int] = {}  # per-address visit count
         self._last_cmp: Any = None  # legacy compat — kept for callers
 
         # Named memory regions (e.g. "stack", "vm_context")
@@ -814,6 +815,7 @@ class SymbolicState:
         new._read_log = list(self._read_log)
         new._write_log = list(self._write_log)
         new._visited_pcs = set(self._visited_pcs)
+        new._visit_counts = dict(self._visit_counts)
         new._last_cmp = self._last_cmp
         new.flags = dict(self.flags)
         new._regions = dict(self._regions)
@@ -821,10 +823,20 @@ class SymbolicState:
         return new
 
     def visit(self, pc: int) -> None:
-        """Record a visited program counter."""
+        """Record a visited program counter and increment visit count."""
         self._visited_pcs.add(pc)
+        self._visit_counts[pc] = self._visit_counts.get(pc, 0) + 1
         self.pc = pc
         self.depth += 1
+
+    def visit_count(self, pc: int) -> int:
+        """Return how many times *pc* has been visited on this path."""
+        return self._visit_counts.get(pc, 0)
+
+    @property
+    def max_visit_count(self) -> int:
+        """Return the highest visit count for any single address."""
+        return max(self._visit_counts.values()) if self._visit_counts else 0
 
     @property
     def visited_addresses(self) -> Set[int]:
@@ -855,4 +867,5 @@ class SymbolicState:
             "constraints_count": len(self.constraints),
             "memory_writes_count": len(self._memory_log),
             "visited_count": len(self._visited_pcs),
+            "max_visit_count": self.max_visit_count,
         }
