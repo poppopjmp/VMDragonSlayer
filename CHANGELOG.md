@@ -4,6 +4,84 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Phase 11 — Devirtualisation Pipeline Completion (10 commits)
+
+Phase 11 implements the full VMProtect devirtualisation pipeline end-to-end,
+addressing all 10 gaps identified in the deep audit (rated 4.5/10 → target 9.0/10).
+Test count: **541 → 831** (290 new tests, 7 skipped).
+
+#### Batch 1 — x86 Instruction Handlers + Operand-Size EFLAGS (`6ccf453`)
+- 45+ instruction handlers (ADC, SBB, IMUL, DIV, BSF, BT, SETcc, CMOVcc, MOVZX/SX, etc.)
+- Operand-size–aware EFLAGS updates (SF uses correct sign bit for 8/16/32/64-bit)
+- `_HANDLER_TABLE` dispatch dict for O(1) instruction lookup
+- 70 new tests
+
+#### Batch 2 — Symbolic Handler Classification (`8a56541`)
+- Expression pattern-matching in `handler_semantics.py` for z3 symbolic expressions
+- Classifies handlers by inspecting symbolic output expressions (XOR → vXor, ADD → vAdd, etc.)
+- `_classify_by_expression()` with z3 structural matching
+- 22 new tests
+
+#### Batch 3 — Bytecode Extraction Fix (`09d542f`)
+- `bytecode_extract.py` reads real bytes via `ParsedBinary.read_va()` instead of placeholders
+- 13 new tests
+
+#### Batch 4 — Pipeline + Dispatcher Wiring (`7243f14`)
+- `devirtualize` stage in `pipeline.py` chains: discover → semantics → pseudocode
+- `DispatcherAnalyzer` integrated with trace-based handler identification
+- 10 new tests
+
+#### Batch 5 — Opaque Predicate Detection (`a325ac1`)
+- Path-context–aware opaque predicate analysis in `solver.py`
+- Arithmetic patterns (`x*(x-1) & 1 == 0`, `x^x == 0`, etc.)
+- 20 new tests
+
+#### Batch 6 — Pseudocode Operand Widths (`0b00ce1`)
+- Width-qualified casts: `*(DWORD*)(addr)` for LOAD/STORE operations
+- Per-variable type declarations in C-like output (`uint32_t`, `uint8_t`, etc.)
+- `_WIDTH_CAST`, `_WIDTH_TYPE` dictionaries; `PseudocodeResult.var_widths`
+- 28 new tests
+
+#### Batch 7 — Symbolic Memory Aliasing (`d377795`)
+- `AliasResult` (MUST/MAY/NO) for symbolic address aliasing queries
+- z3-powered `query_alias()` with `_try_concretise()` uniqueness check
+- Symbolic store forwarding: `_forward_from_symbolic_store()` searches most-recent stores
+- `read_memory()` / `write_memory()` rewritten for symbolic address support
+- 31 new tests
+
+#### Batch 8 — Cross-Handler Data-Flow (`f9d2b20`)
+- New module `analysis/dataflow.py`: `VarDef`, `VarUse`, `LiveRange`, `PhiNode`, `DataFlowResult`
+- `_StackTracker` models abstract VM stack across handlers
+- `compute_data_flow()`: reaching definitions, dead variables, live ranges
+- `_compute_phi_nodes()` at CFG merge points (networkx)
+- `eliminate_dead_vars()`: textual pass removing dead assignments
+- 27 new tests
+
+#### Batch 9 — Multi-Handler Integration Tests (`ac5dc36`)
+- Synthetic 4-handler VMProtect trace (vPush + vPush + vAdd + vLoad)
+- End-to-end tests: trace ingestion → semantics → pseudocode → data-flow → pipeline
+- 17 new tests
+
+#### Batch 10 — MBA Deep Canonicalization (`dd1a612`)
+- **Linear MBA decomposition**: corner-point evaluation extracts minterm coefficients (1–4 variables)
+- Coefficient signature lookup tables for 20 common 2-variable operations + 5 single-variable
+- `_build_minterm_sum()` fallback for 3+ variable reconstruction
+- `_simplify_children()`: bottom-up z3 sub-expression simplification
+- `simplify_expr_deep()`: iterative fixed-point combining 4 techniques (sub-expr → rules → linear MBA → z3)
+- `_ast_size()` cost model for preferring smaller expressions
+- Non-linear expression rejection via SHA-512–derived probe values
+- `MBAResult.iterations` field tracks convergence rounds
+- 52 new tests
+
+#### Batch 11 — Documentation Refresh
+- Rewrote `01-architecture.md` from 3-line placeholder to full architecture doc
+- Rewrote `02-getting-started.md` with install, quick-start, and configuration
+- Rewrote `00-overview.md` to describe actual capabilities (removed phantom modules)
+- Updated `03-modules.md` with all Phase 10–11 modules (removed phantom `enterprise/`)
+- Fixed `05-workflows.md` (removed 8 phantom file references, added real module paths)
+- Fixed `Home.md` (removed links to non-existent `07-plugins.md`, `09-testing-and-quality.md`)
+- Updated CHANGELOG with Phase 11 entries
+
 ### Phase 10 — Core Engine Hardening (7 commits)
 
 Phase 10 addresses the top-7 critical gaps identified by an expert

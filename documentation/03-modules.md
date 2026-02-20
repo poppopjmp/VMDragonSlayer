@@ -1,85 +1,95 @@
 # Modules
 
-Index of primary packages and key modules. Paths link to source and docs where available.
+Index of primary packages and key modules.
 
-> **Note**: This listing reflects modules that actually exist in the codebase as of Phase 9 (dev-0.9.1).
+> **Note**: This listing reflects modules that actually exist in the
+> codebase as of Phase 11 (dev-0.9.1, 831 tests).
 
-## Core System
+## Core System (`dragonslayer/core/`)
 
-- **core**
-	- `dragonslayer/core/api.py` — Unified facade for analysis and configuration
-	- `dragonslayer/core/orchestrator.py` — Coordinates analysis workflows; temp-dir cleanup via try/finally; `shutdown()` method
-	- `dragonslayer/core/config.py` — Typed configuration with recursive `_deep_merge`, thread-safe `get_config()` singleton
-	- `dragonslayer/core/exceptions.py` — Error hierarchy and validators (`from __future__ import annotations` for 3.14 compat)
-	- `dragonslayer/core/pipeline.py` — Multi-stage analysis pipeline; per-stage timeout (`ThreadPoolExecutor` + `cancel_futures`); wires `avg_confidence` into result_data
+- `api.py` — Unified facade for analysis and configuration
+- `orchestrator.py` — Coordinates analysis workflows; temp-dir cleanup; `shutdown()` method
+- `config.py` — Typed configuration with recursive `_deep_merge`, thread-safe `get_config()`
+- `exceptions.py` — Error hierarchy with structured error codes
+- `pipeline.py` — Multi-stage pipeline; per-stage timeouts; `avg_confidence`; `devirtualize` stage
 
-- **api**
-	- `dragonslayer/api/server.py` — FastAPI server with lifespan context manager, async rate limiter (`asyncio.Lock`), CORS fix
-	- `dragonslayer/api/client.py` — HTTP client for interacting with the server
-	- `dragonslayer/api/endpoints.py` — API endpoint definitions
+## Analysis Engine (`dragonslayer/analysis/`)
 
-## Analysis Engine
+### Top-level analysis modules
 
-- **analysis**
-	- `vm_discovery/` — VMDetector and structural detection
-		- `detector.py` — Section entropy with correct slice, PE/ELF section parsing
-		- `analyzer.py` — VM topology analysis
-		- `database.py` — Signature database (`import re` at module level)
-		- `dispatcher.py` — `DispatcherAnalyzer` with jump-table scanning, 64-bit `entry_size` support
-	- `pattern_analysis/` — PatternRecognizer and pattern detection
-		- `recognizer.py` — Core pattern recognition; offset fix, UnboundLocalError fix, `re.escape()` safety
-		- `classifier.py` — ML-enhanced pattern classification
-		- `database.py` — Pattern database management
-	- `taint_tracking/` — Dynamic taint analysis engine
-		- `tracker.py` — Register + memory taint propagation with SIB addressing (`[base+index*scale+disp]`); `reset()`, public `process_instruction()`, `reg_taint`/`mem_taint` properties
-		- `analyzer.py` — TaintAnalyzer orchestration (calls `reset()` before each run)
-		- `dtt_executor.py` — DTT execution driver
-		- `vm_taint_tracker.py` — VM-aware tracker with virtual register presets (vmprotect_x64/x86, themida_x64)
-	- `symbolic_execution/` — Symbolic execution and path exploration
-	- `executor.py` — Core symbolic executor; explicit EFLAGS (ZF/CF/SF/OF) branch constraints, dispatcher back-edge scoring, concrete SP for push/pop, LEA `_resolve_effective_address()`, deque worklist
-		- `lifter.py` — Binary lifting; int3→SYSTEM, mov MEMORY_WRITE
-		- `solver.py` — z3 constraint solving; `_constraint_stack` push/pop sync
-		- `state.py` — Symbolic state; `flags` dict (ZF/CF/SF/OF), `update_flags_arith/logic/inc_dec`, fork deep-copies flags, concrete stack base
-	- `anti_evasion/` — Anti-analysis countermeasures
-		- `environment_normalizer.py` — Section-aware scanning; per-pattern confidence (`_ANTI_DISASM_CONFIDENCE`), int3 non-patchable
+- `binary_format.py` — Unified PE / ELF / Mach-O binary parser (LIEF + struct fallback)
+- `trace_engine.py` — Built-in Unicorn-based trace engine
+- `trace_ingestion.py` — Bridges plugin dicts / text traces into unified `ExecutionTrace`
+- `cfg.py` — Instruction-level and handler-level CFG reconstruction (networkx)
+- `handler_semantics.py` — Classifies native instructions per handler → 13 VM operations
+- `bytecode_extract.py` — Extracts raw VM bytecode by correlating vIP values and memory reads
+- `mba_simplifier.py` — MBA expression simplifier: 31 z3-proven rules + linear MBA decomposition + iterative deep simplify
+- `pseudocode.py` — Width-qualified SSA and structured C-like pseudocode emission
+- `dataflow.py` — Cross-handler data-flow: reaching definitions, dead variables, live ranges, phi nodes
 
-## Machine Learning
+### `vm_discovery/`
 
-- **ml**
-	- `classifier.py` — `VMClassifier` high-level entry point
-	- `model.py` — Abstract `BaseModel` / `VMHandlerModel` with `train()`/`predict()`/`save()`/`load()` contract
-	- `trainer.py` — `ModelTrainer` with metric collection, `TrainingResult`, `prepare_training_data()`
-	- `pipeline.py` — `FeatureExtractor` (configurable feature_spec), `FeatureVector` dataclass
-	- `ensemble.py` — `EnsembleClassifier` (majority vote), `WeightedEnsemble` (weighted strategy)
+- `detector.py` — Heuristic VM presence detection (entropy, section names, watermarks)
+- `handler_boundaries.py` — vIP-based handler boundary segmentation
+- `dispatcher.py` — Dispatcher loop identification and handler dispatch table recovery
+- `analyzer.py` — Higher-level VM topology analysis
+- `database.py` — Known VM protector signature database
 
-## GPU Acceleration
+### `pattern_analysis/`
 
-- **gpu**
-	- `__init__.py` — `gpu_available()` with guarded torch/CUDA imports
-	- `engine.py` — `GPUEngine` device management and data transfer interface
-	- `memory.py` — `GPUMemoryManager` allocation tracking
-	- `optimizer.py` — `GPUOptimizer` block-size recommendation
-	- `profiler.py` — `GPUProfiler` wall-clock timing (works without GPU hardware)
+- `recognizer.py` — Byte-pattern matching against instruction sequences (YARA or regex)
+- `classifier.py` — Classifies matched patterns into VM handler categories
+- `database.py` — Pattern database storage and querying
+- `yara_engine.py` — YARA-based high-performance byte-level matching
 
-## LLM Integration
+### `taint_tracking/`
 
-- **llm**
-	- `analyzer.py` — LLM-assisted analysis via litellm; regex JSON fence stripping, `reset_llm_analyzer()` singleton reset
+- `tracker.py` — Register + memory taint propagation with SIB addressing
+- `analyzer.py` — TaintAnalyzer orchestration
+- `dtt_executor.py` — Dynamic taint tracking combined with symbolic execution
+- `vm_taint_tracker.py` — VM-specialised taint tracker with virtual register presets
 
-## Plugin Ecosystem
+### `symbolic_execution/`
 
-- **plugins**
-	- `__init__.py` — `PluginRegistry` with duplicate warnings, auto-discovery, thread-safe `PluginContext`
-	- `_storage.py` — `MemoryBackend` (with `threading.Lock`), `LocalFileBackend` (batch flush in `store_bulk`)
-	- `dynamic/` — angr (`simgr.move()` pattern), triton (tainted_write filter), binexport, qiling
-	- `enrichment/` — similarity (ssdeep pre-computed hashes, pefile close), llm, vt, yara
-	- `static/` — capstone, pefile, strings, yara
-	- `reporting/` — json, markdown, html, sarif
+- `executor.py` — Symbolic executor: drives z3 state through instructions, forks on branches
+- `state.py` — Symbolic state: registers (sub-register aliasing), memory (symbolic aliasing), path constraints
+- `lifter.py` — Capstone-based lifting of x86/x64 to simplified IR
+- `solver.py` — z3 constraint solving for opaque predicates and expression simplification
 
-- **enterprise**
-	- `enterprise_architecture.py` — Enterprise deployment support
-	- `compliance_framework.py` — Compliance and governance
-	- `api_integration.py` — Enterprise API integrations
+### `anti_evasion/`
+
+- `environment_normalizer.py` — Anti-debug / anti-analysis detection and neutralisation
+
+## Machine Learning (`dragonslayer/ml/`)
+
+- `pipeline.py` — Feature extraction from analysis artefacts
+- `model.py` — `VMHandlerModel` weighted-rule classifier (+ optional scikit-learn)
+- `handler_classifier.py` — Bridge connecting ML pipeline to devirtualisation
+- `classifier.py` — `VMClassifier` high-level entry point
+- `trainer.py` — Training infrastructure with metric collection
+- `ensemble.py` — Multi-model combination (majority/weighted vote)
+
+## GPU (`dragonslayer/gpu/`) — stubs
+
+- `engine.py`, `memory.py`, `optimizer.py`, `profiler.py` — Interface stubs for future GPU acceleration
+
+## LLM (`dragonslayer/llm/`)
+
+- `analyzer.py` — LLM-assisted analysis via litellm (OpenAI, Anthropic, Ollama, Azure)
+
+## Plugin Framework (`dragonslayer/plugins/`)
+
+- `__init__.py` — `Plugin` ABC, `PluginRegistry`, `PluginContext`
+- `_storage.py` — Storage backends (Memory, LocalFile, Elasticsearch)
+- `static/` — PE, ELF, Mach-O, certificate, string extraction plugins
+- `dynamic/` — angr, Triton, Qiling, Blackfyre, BinExport, Strelka plugins
+- `enrichment/` — Binary similarity, function similarity, VectorShare
+- `reporting/` — Markdown report generator, network graph extraction
+
+## API (`dragonslayer/api/`)
+
+- `server.py` — FastAPI REST server (`/analyze`, `/health`, `/status`, WebSocket `/ws`)
+- `client.py` — Python HTTP clients (API server + Metroplex gateway)
 
 - **utils** — Supporting utilities for memory management, performance monitoring, and platform abstraction
 

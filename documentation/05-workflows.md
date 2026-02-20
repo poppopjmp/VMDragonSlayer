@@ -25,43 +25,15 @@ See: `documentation/modules/dragonslayer/core/orchestrator.md` for API and types
 
 ## Files involved
 
-- **`dragonslayer/unified_analysis.py`** — Main orchestration layer with feature management
-- **`dragonslayer/core/orchestrator.py`** — Core orchestrator with workflow strategies  
-- **`dragonslayer/analysis/pattern_analysis/extended_recognizer.py`** — Extended pattern engine
-- **`dragonslayer/ml/ml_detection.py`** — ML detection with ensemble methods
-- **`dragonslayer/analysis/symbolic_execution/symbolic_engine.py`** — Symbolic execution engine
-- **`dragonslayer/analysis/multi_arch/cross_platform_detector.py`** — Multi-architecture support
-- **`dragonslayer/analysis/anti_evasion/security_extensions.py`** — Security extensions
-- **`dragonslayer/realtime/analysis_engine.py`** — Real-time analysis engine
-- **`dragonslayer/workflows/`** — Higher-level workflow coordination
-
-## Enhanced Result Contract
-
-Results now include extended metadata and confidence scoring conforming to `data/schemas/analysis_result_schema.json`. Use `tools/schema_validate.py` during development to catch mismatches.
-
-```json
-{
-  "analysis_engines": ["extended_patterns", "ml_detection", "symbolic"],
-  "confidence_scores": {
-    "pattern_analysis": 0.92,
-    "ml_detection": 0.87,
-    "symbolic_validation": 0.95,
-    "overall_confidence": 0.91
-  },
-  "multi_arch_results": {
-    "detected_architectures": ["x86", "x64"],
-    "cross_platform_correlation": true
-  },
-  "security_assessment": {
-    "anti_debugging": true,
-    "evasion_techniques": ["timing_checks", "environment_detection"],
-    "stealth_required": false
-  }
-}
-```
+- `dragonslayer/core/orchestrator.py` — Top-level analysis dispatch
+- `dragonslayer/core/pipeline.py` — Multi-stage pipeline with per-stage timeouts
+- `dragonslayer/analysis/handler_semantics.py` — Handler classification (13 VM operations)
+- `dragonslayer/analysis/pseudocode.py` — Pseudocode emission
+- `dragonslayer/analysis/mba_simplifier.py` — MBA expression simplification
+- `dragonslayer/analysis/dataflow.py` — Cross-handler data-flow analysis
+- `dragonslayer/plugins/__init__.py` — Plugin ABC and `PluginContext`
 
 ## Extending Workflows
 
-- Add a new engine: implement a focused module under `dragonslayer/analysis/<engine>/`, export a clear async/sync API, and wire it in the orchestrator’s strategy selection.
-- Compose pipelines: add a coordinator in `dragonslayer/workflows/` that sequences engines and normalizes their partial outputs.
-- Record provenance: persist intermediate artifacts, and register new models in the model registry when introducing learned components.
+Add a new engine: implement a module under dragonslayer/analysis/<engine>/,
+export a clear sync API, and wire it into the pipeline's stage registry.
