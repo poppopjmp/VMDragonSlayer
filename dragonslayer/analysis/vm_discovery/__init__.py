@@ -34,6 +34,11 @@ try:
         HandlerGroup,
         ExtractionResult,
     )
+    from .context_registers import (
+        identify_vm_context,
+        VMContextLayout,
+        VMContextRegister,
+    )
 except ImportError:
     pass
 
@@ -56,4 +61,7 @@ __all__ = [
     "HandlerBody",
     "HandlerGroup",
     "ExtractionResult",
+    "identify_vm_context",
+    "VMContextLayout",
+    "VMContextRegister",
 ]
