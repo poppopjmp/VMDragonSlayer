@@ -508,6 +508,7 @@ class SymbolicExecutor:
                 else:
                     result = (left + right) if mnemonic in ("add", "adc") else (left - right)
                 self._write_operand(state, ops[0], result)
+                state.update_flags_arith(result, left, right, is_sub=mnemonic in ("sub", "sbb"))
 
             elif mnemonic in ("and", "or", "xor") and len(ops) == 2:
                 left = self._resolve_operand(state, ops[0])
@@ -530,6 +531,7 @@ class SymbolicExecutor:
                     else:
                         result = left ^ right
                 self._write_operand(state, ops[0], result)
+                state.update_flags_logic(result)
 
             elif mnemonic in ("shl", "shr", "sar", "rol", "ror") and len(ops) == 2:
                 val = self._resolve_operand(state, ops[0])
@@ -564,6 +566,12 @@ class SymbolicExecutor:
                 else:
                     result = (val + 1) if mnemonic == "inc" else (val - 1)
                 self._write_operand(state, ops[0], result)
+                # INC/DEC update all flags except CF
+                saved_cf = state.flags["CF"]
+                state.update_flags_arith(result, val,
+                                        1 if not (Z3Solver.available() and hasattr(val, "sort")) else __import__('z3').BitVecVal(1, state.bit_width),
+                                        is_sub=(mnemonic == "dec"))
+                state.flags["CF"] = saved_cf  # restore CF
 
             elif mnemonic == "neg" and len(ops) == 1:
                 val = self._resolve_operand(state, ops[0])
@@ -572,6 +580,11 @@ class SymbolicExecutor:
                 else:
                     result = -val
                 self._write_operand(state, ops[0], result)
+                # NEG sets CF = (val != 0), updates ZF/SF/OF for 0 - val
+                zero: Any = 0
+                if Z3Solver.available() and hasattr(val, "sort"):
+                    zero = __import__('z3').BitVecVal(0, state.bit_width)
+                state.update_flags_arith(result, zero, val, is_sub=True)
 
             elif mnemonic == "not" and len(ops) == 1:
                 val = self._resolve_operand(state, ops[0])
@@ -626,9 +639,18 @@ class SymbolicExecutor:
 
             elif mnemonic in ("cmp", "test") and len(ops) == 2:
                 # These only set flags, not destination.
-                # Store comparison info for branch constraint building.
                 left = self._resolve_operand(state, ops[0])
                 right = self._resolve_operand(state, ops[1])
+                if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
+                    left = self._ensure_bv(left, state.bit_width)
+                    right = self._ensure_bv(right, state.bit_width)
+                if mnemonic == "cmp":
+                    diff = left - right if hasattr(left, '__sub__') else 0
+                    state.update_flags_arith(diff, left, right, is_sub=True)
+                else:  # test
+                    anded = left & right if hasattr(left, '__and__') else 0
+                    state.update_flags_logic(anded)
+                # Legacy compat: keep _last_cmp for callers
                 state._last_cmp = (mnemonic, left, right)
 
             elif mnemonic == "xchg" and len(ops) == 2:
@@ -895,55 +917,63 @@ class SymbolicExecutor:
         return self.execute_handler(code, base)
 
     def _build_branch_constraint(self, state: SymbolicState, insn: LiftedInstruction) -> Any:
-        """Build a z3 constraint for a conditional branch based on the last cmp/test."""
-        if not Z3Solver.available():
-            return None
+        """Build a z3 constraint for a conditional branch using state.flags.
 
-        cmp_info = getattr(state, "_last_cmp", None)
-        if cmp_info is None:
+        Uses the explicit ZF/CF/SF/OF flag model rather than stashed
+        ``_last_cmp`` operands, so intervening instructions between the
+        flag-setting instruction and the branch are handled correctly.
+        """
+        if not Z3Solver.available():
             return None
 
         import z3 as _z3
 
-        cmp_mnemonic, left, right = cmp_info
-        left = self._ensure_bv(left, state.bit_width)
-        right = self._ensure_bv(right, state.bit_width)
+        zf = state.flags.get("ZF")
+        cf = state.flags.get("CF")
+        sf = state.flags.get("SF")
+        of = state.flags.get("OF")
+
+        # If flags are plain bools (no symbolic state), lift to z3
+        def _to_bool(v: Any) -> Any:
+            if isinstance(v, bool):
+                return _z3.BoolVal(v)
+            return v
+
+        zf = _to_bool(zf)
+        cf = _to_bool(cf)
+        sf = _to_bool(sf)
+        of = _to_bool(of)
 
         mn = insn.mnemonic
 
-        # TEST performs bitwise AND; CMP performs SUB.
-        # Branch conditions after TEST use (left & right) as the "diff";
-        # after CMP they use (left - right).
-        if cmp_mnemonic == "test":
-            diff = left & right
-            if mn in ("je", "jz"):
-                return diff == 0
-            elif mn in ("jne", "jnz"):
-                return diff != 0
-            # Other branches after TEST are uncommon; fall through to None
-            return None
-
-        # --- CMP semantics: branch on (left - right) comparison ---------
-        # Map branch mnemonics to z3 predicates
+        # Map x86 branch mnemonics to flag conditions
         if mn in ("je", "jz"):
-            return left == right
+            return zf
         elif mn in ("jne", "jnz"):
-            return left != right
-        elif mn in ("jg",):
-            return left > right  # signed
-        elif mn in ("jge",):
-            return left >= right
-        elif mn in ("jl",):
-            return left < right
-        elif mn in ("jle",):
-            return left <= right
-        elif mn in ("ja",):
-            return _z3.UGT(left, right)  # unsigned above
-        elif mn in ("jae",):
-            return _z3.UGE(left, right)
-        elif mn in ("jb",):
-            return _z3.ULT(left, right)  # unsigned below
-        elif mn in ("jbe",):
-            return _z3.ULE(left, right)
+            return _z3.Not(zf)
+        elif mn in ("jg", "jnle"):
+            return _z3.And(_z3.Not(zf), sf == of)
+        elif mn in ("jge", "jnl"):
+            return sf == of
+        elif mn in ("jl", "jnge"):
+            return sf != of
+        elif mn in ("jle", "jng"):
+            return _z3.Or(zf, sf != of)
+        elif mn in ("ja", "jnbe"):
+            return _z3.And(_z3.Not(cf), _z3.Not(zf))
+        elif mn in ("jae", "jnb", "jnc"):
+            return _z3.Not(cf)
+        elif mn in ("jb", "jnae", "jc"):
+            return cf
+        elif mn in ("jbe", "jna"):
+            return _z3.Or(cf, zf)
+        elif mn in ("js",):
+            return sf
+        elif mn in ("jns",):
+            return _z3.Not(sf)
+        elif mn in ("jo",):
+            return of
+        elif mn in ("jno",):
+            return _z3.Not(of)
 
         return None

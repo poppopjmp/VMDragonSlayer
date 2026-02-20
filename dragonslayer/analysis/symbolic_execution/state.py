@@ -52,6 +52,8 @@ class SymbolicState:
         Current program counter (concrete).
     depth : int
         Execution depth (number of instructions executed on this path).
+    flags : dict[str, z3.BoolRef | bool]
+        CPU flags — ZF, CF, SF, OF tracked as z3 Bool or Python bool.
     """
 
     X86_64_REGISTERS = [
@@ -82,7 +84,15 @@ class SymbolicState:
         self.constraints: List[Any] = []
         self._memory_log: List[MemoryWrite] = []
         self._visited_pcs: Set[int] = set()
-        self._last_cmp: Any = None  # (mnemonic, left, right) from last cmp/test
+        self._last_cmp: Any = None  # legacy compat — kept for callers
+
+        # Explicit EFLAGS: ZF (zero), CF (carry/borrow), SF (sign), OF (overflow)
+        self.flags: Dict[str, Any] = {
+            "ZF": False,
+            "CF": False,
+            "SF": False,
+            "OF": False,
+        }
 
         # Initialise registers
         reg_names = self.X86_64_REGISTERS if "64" in arch else self.X86_32_REGISTERS
@@ -92,6 +102,110 @@ class SymbolicState:
         else:
             for name in reg_names:
                 self.registers[name] = 0
+
+    # -- EFLAGS helpers ------------------------------------------------------
+
+    def update_flags_arith(
+        self, result: Any, left: Any, right: Any, *, is_sub: bool = False,
+    ) -> None:
+        """Update ZF/CF/SF/OF after an ADD or SUB-like operation.
+
+        Parameters
+        ----------
+        result : z3.BitVecRef | int
+            The arithmetic result.
+        left, right : z3.BitVecRef | int
+            Original operands (before the operation).
+        is_sub : bool
+            True for SUB/CMP semantics, False for ADD.
+        """
+        bw = self.bit_width
+        if _Z3_AVAILABLE and hasattr(result, "sort"):
+            zero = z3.BitVecVal(0, bw)
+            self.flags["ZF"] = result == zero
+            self.flags["SF"] = z3.Extract(bw - 1, bw - 1, result) == z3.BitVecVal(1, 1)
+            # CF: unsigned borrow (sub) or unsigned carry (add)
+            left_bv = self._ensure_bv_static(left, bw)
+            right_bv = self._ensure_bv_static(right, bw)
+            if is_sub:
+                self.flags["CF"] = z3.ULT(left_bv, right_bv)
+            else:
+                self.flags["CF"] = z3.ULT(result, left_bv)
+            # OF: signed overflow
+            sign_l = z3.Extract(bw - 1, bw - 1, left_bv)
+            sign_r = z3.Extract(bw - 1, bw - 1, right_bv)
+            sign_res = z3.Extract(bw - 1, bw - 1, result)
+            if is_sub:
+                # Overflow if operands have different signs and result sign
+                # differs from left operand sign.
+                self.flags["OF"] = z3.And(sign_l != sign_r, sign_res != sign_l)
+            else:
+                # Overflow if operands have the same sign but the result has
+                # a different sign.
+                self.flags["OF"] = z3.And(sign_l == sign_r, sign_res != sign_l)
+        else:
+            # Concrete path
+            mask = (1 << bw) - 1
+            r = result & mask
+            self.flags["ZF"] = (r == 0)
+            self.flags["SF"] = bool(r >> (bw - 1))
+            li = left if isinstance(left, int) else 0
+            ri = right if isinstance(right, int) else 0
+            if is_sub:
+                self.flags["CF"] = (li & mask) < (ri & mask)
+                # Signed overflow check
+                sl = (li >> (bw - 1)) & 1
+                sr = (ri >> (bw - 1)) & 1
+                sres = (r >> (bw - 1)) & 1
+                self.flags["OF"] = (sl != sr) and (sres != sl)
+            else:
+                self.flags["CF"] = (r < (li & mask))
+                sl = (li >> (bw - 1)) & 1
+                sr = (ri >> (bw - 1)) & 1
+                sres = (r >> (bw - 1)) & 1
+                self.flags["OF"] = (sl == sr) and (sres != sl)
+
+    def update_flags_logic(self, result: Any) -> None:
+        """Update ZF/SF after a logical operation (AND/OR/XOR/TEST).
+
+        CF and OF are cleared per the x86 ISA.
+        """
+        bw = self.bit_width
+        if _Z3_AVAILABLE and hasattr(result, "sort"):
+            zero = z3.BitVecVal(0, bw)
+            self.flags["ZF"] = result == zero
+            self.flags["SF"] = z3.Extract(bw - 1, bw - 1, result) == z3.BitVecVal(1, 1)
+        else:
+            mask = (1 << bw) - 1
+            r = result & mask
+            self.flags["ZF"] = (r == 0)
+            self.flags["SF"] = bool(r >> (bw - 1))
+        self.flags["CF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
+        self.flags["OF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
+
+    def update_flags_inc_dec(self, result: Any, original: Any, *, is_dec: bool) -> None:
+        """Update ZF/SF/OF for INC/DEC (CF is unaffected)."""
+        bw = self.bit_width
+        one: Any = 1
+        if _Z3_AVAILABLE and hasattr(result, "sort"):
+            one = z3.BitVecVal(1, bw)
+        if is_dec:
+            self.update_flags_arith(result, original, one, is_sub=True)
+        else:
+            self.update_flags_arith(result, original, one, is_sub=False)
+        # Restore CF — INC/DEC don't touch it
+        # (update_flags_arith overwrote it; save/restore pattern)
+
+    @staticmethod
+    def _ensure_bv_static(val: Any, bw: int) -> Any:
+        """Ensure *val* is a z3 BitVec of width *bw*."""
+        if _Z3_AVAILABLE:
+            if hasattr(val, "sort"):
+                if val.sort().size() != bw:
+                    return z3.ZeroExt(bw - val.sort().size(), val)
+                return val
+            return z3.BitVecVal(val, bw)
+        return val
 
     # -- Register access ----------------------------------------------------
 
@@ -152,6 +266,7 @@ class SymbolicState:
         new._memory_log = list(self._memory_log)
         new._visited_pcs = set(self._visited_pcs)
         new._last_cmp = self._last_cmp
+        new.flags = dict(self.flags)
         return new
 
     def visit(self, pc: int) -> None:

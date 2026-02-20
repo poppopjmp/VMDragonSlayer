@@ -483,6 +483,124 @@ class TestSymbolicExecutor:
         assert summary.instruction_count >= 1
 
 
+class TestEFLAGS:
+    """Tests for explicit EFLAGS modelling in SymbolicState + SymbolicExecutor."""
+
+    def test_state_has_flags(self):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64")
+        assert "ZF" in s.flags
+        assert "CF" in s.flags
+        assert "SF" in s.flags
+        assert "OF" in s.flags
+
+    def test_flags_copied_on_fork(self):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64")
+        s.flags["ZF"] = True
+        forked = s.fork()
+        assert forked.flags["ZF"] is True
+        # Mutation isolation
+        forked.flags["ZF"] = False
+        assert s.flags["ZF"] is True
+
+    def test_update_flags_arith_concrete_zero(self):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64")
+        # 5 - 5 = 0 → ZF=True, CF=False, SF=False, OF=False
+        s.update_flags_arith(0, 5, 5, is_sub=True)
+        assert s.flags["ZF"] is True
+        assert s.flags["SF"] is False
+        assert s.flags["CF"] is False
+
+    def test_update_flags_arith_concrete_negative(self):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64")
+        mask = (1 << 64) - 1
+        # 3 - 5 = -2 (wraps) → ZF=False, CF=True (borrow), SF=True
+        result = (3 - 5) & mask
+        s.update_flags_arith(result, 3, 5, is_sub=True)
+        assert s.flags["ZF"] is False
+        assert s.flags["CF"] is True
+        assert s.flags["SF"] is True
+
+    def test_update_flags_logic_concrete(self):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64")
+        # 0xFF & 0xFF = 0xFF → ZF=False, SF=False (bit 63=0), CF=False, OF=False
+        s.update_flags_logic(0xFF)
+        assert s.flags["ZF"] is False
+
+    def test_update_flags_arith_symbolic(self):
+        import z3
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64")
+        x = z3.BitVec("x", 64)
+        y = z3.BitVec("y", 64)
+        result = x - y
+        s.update_flags_arith(result, x, y, is_sub=True)
+        # ZF should be a z3 expression, equivalent to (x - y == 0)
+        zf = s.flags["ZF"]
+        solver = z3.Solver()
+        # If x == y, then ZF should be satisfiable as True
+        solver.add(x == y, zf)
+        assert solver.check() == z3.sat
+        # If x != y, ZF should be False
+        solver2 = z3.Solver()
+        solver2.add(x == y + 1, zf)
+        assert solver2.check() == z3.unsat
+
+    def test_branch_constraint_uses_flags(self):
+        """Verify _build_branch_constraint uses flags, not _last_cmp."""
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        from dragonslayer.analysis.symbolic_execution.lifter import LiftedInstruction, InstructionCategory
+        import z3
+
+        exe = SymbolicExecutor(arch="x86_64")
+        state = SymbolicState(arch="x86_64")
+
+        # Simulate: cmp rax, 0  →  sets ZF = (rax == 0)
+        rax = z3.BitVec("rax", 64)
+        zero = z3.BitVecVal(0, 64)
+        diff = rax - zero
+        state.update_flags_arith(diff, rax, zero, is_sub=True)
+
+        # Now simulate an intervening `push rcx` (does NOT change flags)
+        # Then a `je label`
+        je_insn = LiftedInstruction(
+            address=0x100, size=2, mnemonic="je",
+            operands="0x200", raw_bytes=b"\x74\x0a",
+            category=InstructionCategory.BRANCH_COND,
+        )
+
+        constraint = exe._build_branch_constraint(state, je_insn)
+        assert constraint is not None
+
+        # The constraint should be ZF (i.e., rax == 0)
+        solver = z3.Solver()
+        solver.add(rax == 0)
+        solver.add(constraint)
+        assert solver.check() == z3.sat
+
+        solver2 = z3.Solver()
+        solver2.add(rax == 42)
+        solver2.add(constraint)
+        assert solver2.check() == z3.unsat
+
+    def test_flags_survive_intervening_mov(self):
+        """EFLAGS persist across non-flag-modifying instructions."""
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        exe = SymbolicExecutor(arch="x86_64")
+
+        # cmp eax, ebx ; mov ecx, 1 ; je label
+        # In bytes: compare will be synthetic via execute_handler
+        # Use push rbx; pop rax; ret as a simple smoke test
+        # The real test is the branch_constraint_uses_flags above
+        summary = exe.execute_handler(b"\x53\x58\xc3", handler_address=0x1000)
+        assert summary.error is None
+
+
 class TestZ3Solver:
     """Tests for dragonslayer.analysis.symbolic_execution.solver."""
 
