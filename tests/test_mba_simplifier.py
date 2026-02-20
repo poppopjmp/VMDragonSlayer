@@ -14,6 +14,7 @@ from dragonslayer.analysis.mba_simplifier import (
     simplify_handler_operands,
     verify_equivalence,
     _known_rules,
+    _known_rules_3,
 )
 
 
@@ -155,3 +156,54 @@ class TestSimplifyHandlerOperands:
         lines = ["nop", "ret"]
         out = simplify_handler_operands(lines)
         assert out == lines
+
+
+# ---------------------------------------------------------------------------
+# 3-variable MBA rules
+# ---------------------------------------------------------------------------
+
+class TestKnownRules3:
+    """Verify every 3-variable rewrite rule is semantically correct."""
+
+    def test_all_3var_rules_proven(self):
+        x = z3.BitVec("x", 64)
+        y = z3.BitVec("y", 64)
+        w = z3.BitVec("w", 64)
+        rules = _known_rules_3(x, y, w)
+        assert len(rules) >= 4, "Should have at least 4 three-variable rules"
+        for name, pattern, replacement in rules:
+            ok = verify_equivalence(pattern, replacement, timeout_ms=10000)
+            assert ok, f"3-var rule {name!r} failed equivalence proof"
+
+
+class TestSimplifyExpr3Var:
+    """simplify_expr should handle 3-variable MBA expressions."""
+
+    def test_and_or_sub_third(self):
+        a = z3.BitVec("a", 64)
+        b = z3.BitVec("b", 64)
+        c = z3.BitVec("c", 64)
+        expr = (a & b) + (a | b) - c  # should simplify to a + b - c
+        simplified, rule = simplify_expr(expr, 64)
+        assert rule is not None
+        assert verify_equivalence(simplified, a + b - c)
+
+    def test_xor_and_add_third(self):
+        a = z3.BitVec("a", 64)
+        b = z3.BitVec("b", 64)
+        c = z3.BitVec("c", 64)
+        expr = (a ^ b) + 2 * (a & b) + c
+        simplified, rule = simplify_expr(expr, 64)
+        assert rule is not None
+        assert verify_equivalence(simplified, a + b + c)
+
+
+class TestSimplifyMBA3Var:
+    """simplify_mba text interface with 3+ variables."""
+
+    def test_three_var_text(self):
+        r = simplify_mba("(x & y) + (x | y) - z", bit_width=64)
+        assert isinstance(r, MBAResult)
+        # Should detect variables x, y, z and simplify
+        assert r.rule_name is not None
+        assert r.proven is True

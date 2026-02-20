@@ -105,6 +105,29 @@ def _known_rules(
     ]
 
 
+def _known_rules_3(
+    x: z3.BitVecRef, y: z3.BitVecRef, w: z3.BitVecRef,
+) -> List[Tuple[str, z3.BitVecRef, z3.BitVecRef]]:
+    """MBA rules involving three variables.
+
+    VMProtect commonly generates 3-variable obfuscations such as::
+
+        (x ^ y) + 2*(x & y) - z  →  x + y - z
+
+    We include both standalone 3-var identities and compositions of
+    simpler 2-var rules that involve a third additive/subtractive term.
+    """
+    return [
+        # --- Composed: 2-var MBA ± third variable ---
+        ("and_or_add_sub3", (x & y) + (x | y) - w, x + y - w),
+        ("and_or_add_add3", (x & y) + (x | y) + w, x + y + w),
+        ("xor_and_add_sub3", (x ^ y) + 2 * (x & y) - w, x + y - w),
+        ("xor_and_add_add3", (x ^ y) + 2 * (x & y) + w, x + y + w),
+        # --- x + y + z obfuscation via masks ---
+        ("triple_xor_and_carries", (x ^ y ^ w) + 2 * ((x & y) | ((x ^ y) & w)), x + y + w),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Core simplification
 # ---------------------------------------------------------------------------
@@ -128,25 +151,40 @@ def simplify_expr(
 ) -> Tuple[z3.BitVecRef, Optional[str]]:
     """Try known rewrite rules, then fall back to z3 ``simplify()``.
 
+    Supports expressions with 2 *or* 3 free variables.  For 3-variable
+    expressions the function tries all ordered permutations of the
+    expression's free variables against the 3-variable rule templates.
+
     Returns ``(simplified_expr, rule_name_or_None)``.
     """
+    from itertools import permutations as _perms
+
     x = z3.BitVec("__x", bit_width)
     y = z3.BitVec("__y", bit_width)
+    w = z3.BitVec("__w", bit_width)
 
     # Collect free variables in the expression.
     free_vars = _free_bitvec_vars(expr)
 
-    if len(free_vars) == 2:
-        var_a, var_b = sorted(free_vars, key=lambda v: str(v))
-        for rule_name, pattern, replacement in _known_rules(x, y):
-            # Substitute rule variables with the expression's variables
-            candidate = z3.substitute(replacement, (x, var_a), (y, var_b))
-            pattern_inst = z3.substitute(pattern, (x, var_a), (y, var_b))
-            # Check structural match first (cheaper)
-            if _z3_eq(z3.simplify(pattern_inst), z3.simplify(expr)):
-                # Verify semantically
-                if verify_equivalence(expr, candidate, timeout_ms):
-                    return candidate, rule_name
+    # --- 2-variable expressions: try every ordered pair ---
+    if len(free_vars) >= 2:
+        for va, vb in _perms(free_vars, 2):
+            for rule_name, pattern, replacement in _known_rules(x, y):
+                candidate = z3.substitute(replacement, (x, va), (y, vb))
+                pattern_inst = z3.substitute(pattern, (x, va), (y, vb))
+                if _z3_eq(z3.simplify(pattern_inst), z3.simplify(expr)):
+                    if verify_equivalence(expr, candidate, timeout_ms):
+                        return candidate, rule_name
+
+    # --- 3-variable expressions: try every ordered triple ---
+    if len(free_vars) >= 3:
+        for va, vb, vc in _perms(free_vars, 3):
+            for rule_name, pattern, replacement in _known_rules_3(x, y, w):
+                candidate = z3.substitute(replacement, (x, va), (y, vb), (w, vc))
+                pattern_inst = z3.substitute(pattern, (x, va), (y, vb), (w, vc))
+                if _z3_eq(z3.simplify(pattern_inst), z3.simplify(expr)):
+                    if verify_equivalence(expr, candidate, timeout_ms):
+                        return candidate, rule_name
 
     # Fallback: z3 built-in simplifier with aggressive tactics.
     simplified = z3.simplify(
@@ -168,14 +206,21 @@ def simplify_mba(
 ) -> MBAResult:
     """Simplify a textual MBA expression.
 
-    Accepts a C-style expression string with variables ``x`` and ``y``
-    (or single-letter names) and returns a :class:`MBAResult`.
+    Accepts a C-style expression string with variables ``x``, ``y``, ``z``,
+    ``w`` (or any single-letter names found in the text) and returns an
+    :class:`MBAResult`.
     """
-    x = z3.BitVec("x", bit_width)
-    y = z3.BitVec("y", bit_width)
+    # Auto-detect variable names (single-letter identifiers) in the text.
+    _VAR_RE = re.compile(r"\b([a-zA-Z])\b")
+    var_names = sorted(set(_VAR_RE.findall(text)))
+    # Fall back to the standard set if nothing detected.
+    if not var_names:
+        var_names = ["x", "y"]
+
+    variables = {name: z3.BitVec(name, bit_width) for name in var_names}
 
     try:
-        expr = _parse_expr(text, {"x": x, "y": y}, bit_width)
+        expr = _parse_expr(text, variables, bit_width)
     except Exception as exc:
         logger.debug("Failed to parse MBA expression %r: %s", text, exc)
         return MBAResult(original=text, simplified=text, proven=False, bit_width=bit_width)
