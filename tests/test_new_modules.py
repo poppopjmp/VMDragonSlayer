@@ -443,8 +443,10 @@ class TestSymbolicExecutor:
         from dragonslayer.analysis.symbolic_execution.executor import (
             SymbolicExecutor,
             ExecutionResult,
+            HandlerSymbolicSummary,
         )
         assert SymbolicExecutor is not None
+        assert HandlerSymbolicSummary is not None
 
     def test_analyze_small_binary(self):
         from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
@@ -452,6 +454,33 @@ class TestSymbolicExecutor:
         # ret instruction
         result = exe.analyze(b"\xc3", entry_point=0)
         assert hasattr(result, "handlers") or hasattr(result, "paths_explored")
+
+    def test_execute_handler_ret(self):
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        exe = SymbolicExecutor(arch="x86_64")
+        # Simple handler: push rbx; pop rax; ret
+        # 0x53 = push rbx, 0x58 = pop rax, 0xc3 = ret
+        summary = exe.execute_handler(b"\x53\x58\xc3", handler_address=0x1000)
+        assert summary.address == 0x1000
+        assert summary.instruction_count > 0
+        assert summary.error is None
+        d = summary.to_dict()
+        assert d["address"] == 0x1000
+
+    def test_execute_handler_empty(self):
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        exe = SymbolicExecutor()
+        summary = exe.execute_handler(b"", handler_address=0)
+        assert summary.error is not None
+
+    def test_execute_handler_from_trace(self):
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        exe = SymbolicExecutor(arch="x86_64")
+        trace_insns = [
+            {"address": 0x2000, "raw_bytes": "c3"},  # ret
+        ]
+        summary = exe.execute_handler_from_trace(trace_insns, handler_address=0x2000)
+        assert summary.instruction_count >= 1
 
 
 class TestZ3Solver:

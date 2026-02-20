@@ -23,10 +23,11 @@ except (ImportError, AttributeError):
     LiftedInstruction = None  # type: ignore[assignment,misc]
 
 try:
-    from .executor import SymbolicExecutor, ExecutionResult
+    from .executor import SymbolicExecutor, ExecutionResult, HandlerSymbolicSummary
 except (ImportError, AttributeError):
     SymbolicExecutor = None  # type: ignore[assignment,misc]
     ExecutionResult = None  # type: ignore[assignment,misc]
+    HandlerSymbolicSummary = None  # type: ignore[assignment,misc]
 
 __all__ = [
     'SymbolicState',
@@ -36,4 +37,5 @@ __all__ = [
     'LiftedInstruction',
     'SymbolicExecutor',
     'ExecutionResult',
+    'HandlerSymbolicSummary',
 ]

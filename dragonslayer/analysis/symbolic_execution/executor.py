@@ -77,6 +77,32 @@ class ExecutionResult:
         }
 
 
+@dataclass
+class HandlerSymbolicSummary:
+    """Symbolic summary of a single handler after local execution."""
+    address: int = 0
+    instruction_count: int = 0
+    final_registers: Dict[str, str] = field(default_factory=dict)
+    simplified_registers: Dict[str, str] = field(default_factory=dict)
+    memory_writes: List[Dict[str, Any]] = field(default_factory=list)
+    constraints: List[str] = field(default_factory=list)
+    input_symbols: Dict[str, str] = field(default_factory=dict)
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "address": self.address,
+            "instruction_count": self.instruction_count,
+            "final_registers": self.final_registers,
+            "simplified_registers": self.simplified_registers,
+            "memory_write_count": len(self.memory_writes),
+            "memory_writes": self.memory_writes,
+            "constraint_count": len(self.constraints),
+            "constraints": self.constraints,
+            "error": self.error,
+        }
+
+
 class SymbolicExecutor:
     """
     Lightweight symbolic executor for VM handler analysis.
@@ -755,6 +781,118 @@ class SymbolicExecutor:
             return val
         import z3 as _z3
         return _z3.BitVecVal(int(val), bit_width)
+
+    # -- Handler-local symbolic execution ------------------------------------
+
+    def execute_handler(
+        self,
+        handler_bytes: bytes,
+        handler_address: int = 0,
+    ) -> HandlerSymbolicSummary:
+        """Run symbolic execution over a single handler's instruction slice.
+
+        Creates a fresh symbolic state, lifts the handler bytes, steps
+        through each instruction collecting symbolic register effects,
+        memory accesses, and constraints, then simplifies via
+        :func:`~dragonslayer.analysis.mba_simplifier.simplify_expr`.
+
+        Returns a :class:`HandlerSymbolicSummary` with the register map
+        (symbolic expressions), memory writes, path constraints, and
+        any MBA-simplified sub-expressions.
+        """
+        instructions = self._lifter.lift(handler_bytes, base_address=handler_address)
+        if not instructions:
+            return HandlerSymbolicSummary(address=handler_address, error="no instructions lifted")
+
+        state = SymbolicState(
+            arch=self.arch,
+            bit_width=self.bit_width,
+            initial_pc=handler_address,
+        )
+
+        # Make input registers symbolic so we can track data-flow.
+        import z3 as _z3
+        sym_regs: Dict[str, _z3.BitVecRef] = {}
+        for rname in state.registers:
+            sym = _z3.BitVec(f"in_{rname}", self.bit_width)
+            state.set_register(rname, sym)
+            sym_regs[rname] = sym
+
+        insn_map = {i.address: i for i in instructions}
+        mem_writes: List[Dict[str, Any]] = []
+        stepped = 0
+
+        for insn in instructions:
+            if state.halted:
+                break
+            state.visit(state.pc)
+            self._apply_instruction(state, insn)
+            stepped += 1
+
+            # Record memory writes produced by this instruction.
+            if insn.mnemonic in ("mov", "push") and insn.operands:
+                ops = [o.strip() for o in insn.operands.split(",")]
+                if len(ops) >= 1 and "[" in ops[0]:
+                    mem_writes.append({
+                        "insn_address": insn.address,
+                        "mnemonic": insn.mnemonic,
+                        "destination": ops[0],
+                    })
+
+            if insn.category == InstructionCategory.RETURN:
+                state.halt("return")
+                break
+
+        # Collect final symbolic values per register.
+        final_regs: Dict[str, str] = {}
+        simplified_regs: Dict[str, str] = {}
+        for rname in state.registers:
+            val = state.get_register(rname)
+            final_regs[rname] = str(val)
+            if hasattr(val, "sort"):
+                try:
+                    from ..mba_simplifier import simplify_expr as _mba_simplify
+                    s_expr, rule = _mba_simplify(val, self.bit_width)
+                    if rule is not None:
+                        simplified_regs[rname] = str(s_expr)
+                except Exception:
+                    pass
+
+        # Collect path constraints.
+        constraints = [str(c) for c in state.constraints]
+
+        return HandlerSymbolicSummary(
+            address=handler_address,
+            instruction_count=stepped,
+            final_registers=final_regs,
+            simplified_registers=simplified_regs,
+            memory_writes=mem_writes,
+            constraints=constraints,
+            input_symbols={rname: str(sym) for rname, sym in sym_regs.items()},
+        )
+
+    def execute_handler_from_trace(
+        self,
+        trace_instructions: List[Dict[str, Any]],
+        handler_address: int = 0,
+    ) -> HandlerSymbolicSummary:
+        """Run handler-local symbolic execution from trace instruction dicts.
+
+        Each dict in *trace_instructions* should contain at least
+        ``raw_bytes`` (hex string) and ``address``.  The raw bytes are
+        concatenated and fed to :meth:`execute_handler`.
+        """
+        code = b""
+        base = handler_address
+        for i, rec in enumerate(trace_instructions):
+            raw = rec.get("raw_bytes", "")
+            if raw:
+                code += bytes.fromhex(raw)
+            if i == 0 and rec.get("address"):
+                base = rec["address"]
+        if not code:
+            return HandlerSymbolicSummary(address=handler_address, error="no code bytes")
+        return self.execute_handler(code, base)
 
     def _build_branch_constraint(self, state: SymbolicState, insn: LiftedInstruction) -> Any:
         """Build a z3 constraint for a conditional branch based on the last cmp/test."""
