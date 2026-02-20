@@ -46,11 +46,12 @@ except (ImportError, AttributeError):
     train_full_pipeline = None  # type: ignore[assignment,misc]
 
 try:
-    from .model import BaseModel, VMHandlerModel, PredictionResult
+    from .model import BaseModel, VMHandlerModel, PredictionResult, SymbolicClassifierModel
 except (ImportError, AttributeError):
     BaseModel = None  # type: ignore[assignment,misc]
     VMHandlerModel = None  # type: ignore[assignment,misc]
     PredictionResult = None  # type: ignore[assignment,misc]
+    SymbolicClassifierModel = None  # type: ignore[assignment,misc]
 
 try:
     from .ensemble import EnsembleClassifier, WeightedEnsemble
@@ -95,6 +96,7 @@ __all__ = [
     'BaseModel',
     'VMHandlerModel',
     'PredictionResult',
+    'SymbolicClassifierModel',
     'EnsembleClassifier',
     'WeightedEnsemble',
     'VMClassifier',

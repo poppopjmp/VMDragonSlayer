@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,112 @@ def _score_rules(
     # Ensure 'unknown' has a small baseline
     scores.setdefault("unknown", 0.01)
     return scores
+
+
+# ---------------------------------------------------------------------------
+# SymbolicClassifierModel — symbolic-summary-based classification
+# ---------------------------------------------------------------------------
+
+class SymbolicClassifierModel(BaseModel):
+    """Classify VM handlers from their symbolic execution summaries.
+
+    When a handler has been symbolically executed (by
+    :class:`~dragonslayer.analysis.symbolic_execution.executor.SymbolicExecutor`),
+    the summary contains ``simplified_registers``, ``memory_writes``, and
+    ``input_symbols`` — enough to infer the semantic VM operation with high
+    confidence by pattern-matching the symbolic expressions.
+
+    This model participates in :class:`WeightedEnsemble` alongside the
+    heuristic :class:`VMHandlerModel` so that both signal sources contribute.
+
+    *features* dict keys:
+
+    * ``symbolic_summary`` — dict (from ``ExecutionResult.to_dict()``).
+    * ``handler_address`` — int (optional, for logging).
+    """
+
+    name: str = "symbolic_classifier"
+
+    # Symbolic expression → (vm_op_label, confidence)
+    _EXPR_RULES: List[tuple] = [
+        # Arithmetic
+        (r"init_\w+\s*\+\s*init_\w+", "arithmetic", 0.93),
+        (r"init_\w+\s*-\s*init_\w+", "arithmetic", 0.93),
+        (r"init_\w+\s*\*\s*init_\w+", "arithmetic", 0.91),
+        (r"UDiv|SDiv|udiv|sdiv", "arithmetic", 0.91),
+        # Bitwise
+        (r"init_\w+\s*&\s*init_\w+", "bitwise", 0.93),
+        (r"init_\w+\s*\|\s*init_\w+", "bitwise", 0.93),
+        (r"init_\w+\s*\^\s*init_\w+|Xor\(", "bitwise", 0.92),
+        (r"~init_\w+", "bitwise", 0.90),
+        (r"-init_\w+", "arithmetic", 0.90),  # neg
+        # Shifts
+        (r"init_\w+\s*<<|LShR\(|init_\w+\s*>>", "bitwise", 0.90),
+        (r"RotateLeft\(|RotateRight\(", "crypto", 0.88),
+        # Memory
+        (r"mem_", "memory", 0.82),
+        # Stack (rsp/esp write)
+        (r"init_rsp|init_esp", "stack", 0.85),
+    ]
+
+    def predict(self, features: Dict[str, Any]) -> PredictionResult:
+        summary = features.get("symbolic_summary")
+        if not summary:
+            return PredictionResult(label="unknown", confidence=0.0,
+                                    metadata={"method": "symbolic", "reason": "no_summary"})
+
+        s = summary if isinstance(summary, dict) else (
+            summary.to_dict() if hasattr(summary, "to_dict") else {}
+        )
+        if s.get("error"):
+            return PredictionResult(label="unknown", confidence=0.0,
+                                    metadata={"method": "symbolic", "reason": "summary_error"})
+
+        regs = s.get("simplified_registers") or s.get("final_registers") or {}
+        mem_writes = s.get("memory_writes") or []
+        input_syms = s.get("input_symbols") or {}
+
+        # Collect interesting expression strings
+        interesting: List[str] = []
+        for rname, expr_str in regs.items():
+            init_sym = input_syms.get(rname, "")
+            if expr_str != init_sym and expr_str not in ("0", str(0)):
+                interesting.append(str(expr_str))
+
+        combined = " ".join(interesting)
+
+        # Check for memory writes
+        _rsp_re = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
+        has_stack_write = any(
+            _rsp_re.search(str(w.get("address", ""))) for w in mem_writes
+        )
+        has_mem_write = len(mem_writes) > 0
+
+        # Stack/memory special cases
+        if has_stack_write and not interesting:
+            return PredictionResult(label="stack", confidence=0.86,
+                                    metadata={"method": "symbolic", "reason": "stack_write"})
+        if has_mem_write and not has_stack_write:
+            return PredictionResult(label="memory", confidence=0.88,
+                                    metadata={"method": "symbolic", "reason": "mem_write"})
+
+        # Pattern match expressions
+        label_scores: Dict[str, float] = {}
+        for pattern, label, conf in self._EXPR_RULES:
+            if re.search(pattern, combined):
+                label_scores[label] = max(label_scores.get(label, 0.0), conf)
+
+        if not label_scores:
+            return PredictionResult(label="unknown", confidence=0.1,
+                                    metadata={"method": "symbolic", "reason": "no_pattern_match"})
+
+        best = max(label_scores, key=lambda k: label_scores[k])
+        return PredictionResult(
+            label=best,
+            confidence=round(label_scores[best], 4),
+            probabilities=label_scores,
+            metadata={"method": "symbolic", "expressions": combined[:200]},
+        )
 
 
 # ---------------------------------------------------------------------------
