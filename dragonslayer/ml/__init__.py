@@ -89,9 +89,10 @@ except (ImportError, AttributeError):
     StackedEnsemble = None  # type: ignore[assignment,misc]
 
 try:
-    from .classifier import VMClassifier
+    from .classifier import VMClassifier, FeatureExplainer
 except (ImportError, AttributeError):
     VMClassifier = None  # type: ignore[assignment,misc]
+    FeatureExplainer = None  # type: ignore[assignment,misc]
 
 try:
     from .handler_classifier import (
@@ -139,6 +140,7 @@ __all__ = [
     'WeightedEnsemble',
     'StackedEnsemble',
     'VMClassifier',
+    'FeatureExplainer',
     'TrainedHandlerModel',
     'classify_handlers',
     'build_handler_classifier',

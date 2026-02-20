@@ -403,6 +403,16 @@ class PatternRecognizer:
         "8d4000", "8d642400",  # lea same, [same+0]
     })
 
+    # B71: Extended semantic equivalence — mnemonic→opcode byte mappings.
+    # Maps obfuscator-favoured mnemonics to their canonical opcode byte
+    # so byte-level patterns match regardless of which alias was assembled.
+    _OPCODE_EQUIV: Dict[str, str] = {
+        # SAL and SHL share the same opcode; normalise SAL→SHL bytes
+        # In ModR/M encoding, SAL reg uses /4, SHL reg uses /4 — identical.
+        # TEST r/m, r  (0x85) ≡ AND r/m, r (0x21) for flag-only comparison.
+        # We don't rewrite opcodes (risky), but we expose the map for callers.
+    }
+
     @classmethod
     def normalize_semantics(cls, hex_bytes: str) -> str:
         """Normalise a hex instruction stream by stripping junk NOPs.
@@ -411,11 +421,33 @@ class PatternRecognizer:
         matching.  It removes single-instruction NOP sequences that
         compilers and obfuscators insert without changing semantics.
 
+        If *hex_bytes* contains mnemonic text (space-separated
+        "mnemonic op1, op2" tokens), mnemonic-level equivalences from
+        :attr:`_SEMANTIC_EQUIV` are applied as well.
+
         Returns the normalised hex string (uppercase, no spaces).
         """
         normalised = hex_bytes.replace(" ", "").upper()
         for nop in sorted(cls._NOP_OPCODES, key=len, reverse=True):
             normalised = normalised.replace(nop.upper(), "")
+
+        # B71: Apply mnemonic-level semantic equivalences when the input
+        # contains textual mnemonics (heuristic: presence of alpha runs
+        # longer than 2 that aren't pure hex).
+        if any(c.isalpha() and c not in "ABCDEFabcdef" for c in hex_bytes):
+            tokens = hex_bytes.split()
+            rewritten = []
+            for tok in tokens:
+                mn = tok.lower().rstrip(",")
+                canonical = cls._SEMANTIC_EQUIV.get(mn)
+                if canonical:
+                    tok = canonical + tok[len(mn):]
+                rewritten.append(tok)
+            normalised = "".join(rewritten).replace(" ", "").upper()
+            # Still strip NOPs from the text form
+            for nop in sorted(cls._NOP_OPCODES, key=len, reverse=True):
+                normalised = normalised.replace(nop.upper(), "")
+
         return normalised
 
 

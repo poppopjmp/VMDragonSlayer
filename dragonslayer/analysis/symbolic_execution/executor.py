@@ -395,6 +395,14 @@ class SymbolicExecutor:
                         "target": last.branch_target,
                         "type": "unconditional",
                     })
+                elif last.branch_target is not None and last.branch_target not in block_addr_set:
+                    # B71: Tail-call heuristic — unconditional jump to an
+                    # address outside the current function's block set.
+                    edges.append({
+                        "source": src_addr,
+                        "target": last.branch_target,
+                        "type": "tail_call",
+                    })
                 elif last.branch_target is None:
                     edges.append({
                         "source": src_addr,
@@ -453,6 +461,8 @@ class SymbolicExecutor:
                 if tgt != 0 and tgt in dom_set.get(src, set()):
                     back_edges.append(e)
 
+        tail_call_count = sum(1 for e in edges if e["type"] == "tail_call")
+
         return {
             "nodes": nodes,
             "edges": edges,
@@ -462,8 +472,10 @@ class SymbolicExecutor:
             "block_count": len(nodes),
             "edge_count": len(edges),
             "back_edge_count": len(back_edges),
+            "tail_call_count": tail_call_count,
             "switch_tables": SymbolicExecutor._detect_switch_tables(blocks, block_addr_set),
             "exception_edges": SymbolicExecutor._detect_exception_edges(blocks, block_addr_set),
+            "cxx_exception_edges": SymbolicExecutor._detect_cxx_exception_edges(blocks, block_addr_set),
         }
 
     # -- B69: Switch / jump-table detection ----------------------------------
@@ -565,6 +577,63 @@ class SymbolicExecutor:
                             except (ValueError, TypeError):
                                 pass
         return exc_edges
+
+    # -- B71: C++ exception / invoke edge detection --------------------------
+
+    @staticmethod
+    def _detect_cxx_exception_edges(
+        blocks: List[List["LiftedInstruction"]],
+        block_addrs: set[int],
+    ) -> List[Dict[str, Any]]:
+        """Detect C++ exception handling patterns (invoke / landing-pad style).
+
+        Looks for:
+        * ``call`` followed by a conditional jump to a "landing pad" address
+          that is not a normal fall-through (suggestive of ``__cxa_throw``
+          or ``_Unwind_Resume``).
+        * GCC-style ``cmp`` + ``je`` after a call that checks a return value
+          for exception indication.
+
+        Returns ``[{source, handler, type: "cxx_eh"}]``.
+        """
+        cxx_edges: List[Dict[str, Any]] = []
+        _EH_CALLEES = frozenset({
+            "__cxa_throw", "__cxa_begin_catch", "__cxa_end_catch",
+            "_unwind_resume", "__gxx_personality_v0",
+            "__cxx_global_var_init",
+        })
+
+        for blk in blocks:
+            for i, insn in enumerate(blk):
+                mn = (insn.mnemonic or "").lower()
+                ops = (insn.operands or "").lower()
+                # Detect call to known C++ EH runtime functions
+                if mn == "call":
+                    callee = ops.strip().split()[-1] if ops.strip() else ""
+                    if callee in _EH_CALLEES:
+                        # The next instruction, if a branch, is the landing pad
+                        if i + 1 < len(blk):
+                            nxt = blk[i + 1]
+                            nxt_mn = (nxt.mnemonic or "").lower()
+                            if nxt_mn.startswith("j") and nxt.branch_target is not None:
+                                cxx_edges.append({
+                                    "source": insn.address,
+                                    "handler": nxt.branch_target,
+                                    "type": "cxx_eh",
+                                })
+                    # Also detect invoke-style: call + unconditional jmp (normal)
+                    # + fall-through to landing pad
+                    if i + 2 < len(blk):
+                        nxt1 = blk[i + 1]
+                        nxt2 = blk[i + 2]
+                        if (nxt1.category == InstructionCategory.BRANCH_UNCOND
+                                and nxt2.branch_target is not None):
+                            cxx_edges.append({
+                                "source": insn.address,
+                                "handler": nxt2.branch_target,
+                                "type": "cxx_eh",
+                            })
+        return cxx_edges
 
     # -- Dispatcher identification -------------------------------------------
 
