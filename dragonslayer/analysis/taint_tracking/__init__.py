@@ -15,6 +15,7 @@ try:
         TaintState,
         TaintEvent,
         TaintResult,
+        ByteTaintMap,
         subreg_canonical,
         subreg_aliases,
         subreg_info,
@@ -27,6 +28,7 @@ except (ImportError, AttributeError):
     TaintState = None  # type: ignore[assignment,misc]
     TaintEvent = None  # type: ignore[assignment,misc]
     TaintResult = None  # type: ignore[assignment,misc]
+    ByteTaintMap = None  # type: ignore[assignment,misc]
     subreg_canonical = None  # type: ignore[assignment,misc]
     subreg_aliases = None  # type: ignore[assignment,misc]
     subreg_info = None  # type: ignore[assignment,misc]
@@ -74,6 +76,7 @@ __all__ = [
     "TaintState",
     "TaintEvent",
     "TaintResult",
+    "ByteTaintMap",
     "TaintAnalyzer",
     "VMTaintTracker",
     "VM_REG_PRESETS",

@@ -181,8 +181,9 @@ class TestUpwardPropagation:
     def test_taint_ah_sees_family(self):
         t = TaintTracker()
         t.taint_register("ah", TaintTag.CRYPTO)
-        assert t.is_tainted("rax")
-        assert t.is_tainted("al")  # all aliases get tainted
+        assert t.is_tainted("rax")  # rax ORs all bytes → sees ah
+        # B58 byte-level precision: al (byte 0) is NOT tainted by ah (byte 1)
+        assert not t.is_tainted("al")
 
     def test_taint_r8b_sees_r8(self):
         t = TaintTracker()
@@ -278,8 +279,8 @@ class TestCleanWriteScoping:
         """Writing clean to al should NOT clear rax/ah — parent stays tainted.
 
         In x86, 8-bit writes don't zero-extend, so the parent register's
-        upper bits still carry taint.  ``is_tainted("al")`` still returns
-        True because the overlapping parent ``rax`` is tainted.
+        upper bits still carry taint.  B58 byte-level precision: al (byte 0)
+        is cleared, but ah (byte 1) and rax (OR of all bytes) remain tainted.
         """
         t = TaintTracker()
         t.taint_register("rax", TaintTag.INPUT)
@@ -288,8 +289,8 @@ class TestCleanWriteScoping:
         # ah and parent rax are still tainted
         assert t.is_tainted("ah")
         assert t.is_tainted("rax")
-        # al overlaps tainted rax → still reports tainted via alias
-        assert t.is_tainted("al")
+        # B58 byte-level precision: al (byte 0) was cleaned
+        assert not t.is_tainted("al")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

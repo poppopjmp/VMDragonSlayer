@@ -179,6 +179,122 @@ class TaintTag(IntFlag):
     CRYPTO = 64         # Involved in cryptographic operation
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Byte-level taint map  (B58)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ByteTaintMap:
+    """Per-byte taint storage for a set of 64-bit canonical registers.
+
+    Each canonical register (rax, rbx, …, r15) is tracked as an 8-element
+    list of :class:`TaintTag` values, one per byte.  Sub-register writes/
+    reads map to the appropriate byte range via :func:`subreg_info`.
+    """
+
+    def __init__(self) -> None:
+        self._map: Dict[str, List[TaintTag]] = {}
+
+    def _ensure(self, canonical: str) -> List[TaintTag]:
+        """Lazily create an 8-byte array for *canonical*."""
+        arr = self._map.get(canonical)
+        if arr is None:
+            arr = [TaintTag.CLEAN] * 8
+            self._map[canonical] = arr
+        return arr
+
+    def set_bytes(self, reg: str, tag: TaintTag) -> None:
+        """Set taint on the byte range covered by *reg*.
+
+        For 32-bit writes the upper 32 bits are zeroed (zero-extend).
+        """
+        info = subreg_info(reg.lower())
+        if info is None:
+            # Unknown register — treat as full 8-byte register by name.
+            arr = self._ensure(reg.lower())
+            for i in range(8):
+                arr[i] = tag
+            return
+        canonical, bit_lo, width, zext = info
+        arr = self._ensure(canonical)
+        byte_lo = bit_lo // 8
+        byte_hi = byte_lo + width // 8
+        for i in range(byte_lo, min(byte_hi, 8)):
+            arr[i] = tag
+        if zext:
+            # 32-bit write zero-extends upper 32 bits → clear bytes 4–7
+            for i in range(4, 8):
+                arr[i] = TaintTag.CLEAN
+
+    def get_bytes(self, reg: str) -> TaintTag:
+        """Return the OR of all taint tags in the byte range of *reg*."""
+        info = subreg_info(reg.lower())
+        if info is None:
+            arr = self._map.get(reg.lower())
+            if arr is None:
+                return TaintTag.CLEAN
+            combined = TaintTag.CLEAN
+            for t in arr:
+                combined |= t
+            return combined
+        canonical, bit_lo, width, _zext = info
+        arr = self._map.get(canonical)
+        if arr is None:
+            return TaintTag.CLEAN
+        byte_lo = bit_lo // 8
+        byte_hi = byte_lo + width // 8
+        combined = TaintTag.CLEAN
+        for i in range(byte_lo, min(byte_hi, 8)):
+            combined |= arr[i]
+        return combined
+
+    def clear_bytes(self, reg: str) -> None:
+        """Clear taint for the byte range of *reg*.
+
+        32-bit writes clear the entire register (zero-extend semantics).
+        64-bit writes clear all 8 bytes.
+        """
+        info = subreg_info(reg.lower())
+        if info is None:
+            arr = self._map.get(reg.lower())
+            if arr is not None:
+                for i in range(8):
+                    arr[i] = TaintTag.CLEAN
+            return
+        canonical, bit_lo, width, zext = info
+        arr = self._map.get(canonical)
+        if arr is None:
+            return
+        byte_lo = bit_lo // 8
+        byte_hi = byte_lo + width // 8
+        for i in range(byte_lo, min(byte_hi, 8)):
+            arr[i] = TaintTag.CLEAN
+        if zext or width == 64:
+            for i in range(8):
+                arr[i] = TaintTag.CLEAN
+
+    def get_full(self, canonical: str) -> TaintTag:
+        """Return the OR of all 8 bytes for a canonical register."""
+        arr = self._map.get(canonical)
+        if arr is None:
+            return TaintTag.CLEAN
+        combined = TaintTag.CLEAN
+        for t in arr:
+            combined |= t
+        return combined
+
+    def clear(self) -> None:
+        """Remove all taint data."""
+        self._map.clear()
+
+    def to_dict(self) -> Dict[str, List[str]]:
+        """Serialise for debugging / tests."""
+        return {
+            k: [str(t) for t in v]
+            for k, v in self._map.items()
+            if any(t != TaintTag.CLEAN for t in v)
+        }
+
+
 @dataclass
 class TaintState:
     """Snapshot of taint status for registers and memory."""
@@ -248,6 +364,7 @@ class TaintTracker:
         *,
         sub_register_aware: bool = True,
         alias_oracle: Any = None,
+        implicit_flow_depth: int = 16,
     ) -> None:
         self._reg_taint: Dict[str, TaintTag] = {}
         self._mem_taint: Dict[int, TaintTag] = {}
@@ -256,6 +373,16 @@ class TaintTracker:
         self._flow_graph: Dict[str, Set[str]] = {}
         self._subreg_aware = sub_register_aware
         self._alias_oracle = alias_oracle
+
+        # B58: Per-byte taint map for precise sub-register tracking
+        self._byte_taint = ByteTaintMap()
+
+        # B58: Implicit-flow scope — when a tainted conditional branch is
+        # encountered, the next *implicit_flow_depth* instructions inherit
+        # TaintTag.CONTROL on all their writes.
+        self._implicit_flow_depth = implicit_flow_depth
+        self._implicit_scope_remaining: int = 0
+        self._implicit_scope_tag: TaintTag = TaintTag.CLEAN
 
     # ── Sub-register helpers (Batch 31) ─────────────────────────────────────
 
@@ -267,18 +394,30 @@ class TaintTracker:
         return r
 
     def _propagate_subreg_taint(self, reg: str, tag: TaintTag) -> None:
-        """Set taint on *reg* and, if sub-register aware, all aliases."""
+        """Set taint on *reg* and, if sub-register aware, all aliases.
+
+        B58: Also updates the byte-level taint map for precise
+        sub-register tracking.
+        """
         r = reg.lower()
         self._reg_taint[r] = tag
         if self._subreg_aware:
+            # B58: byte-level granularity
+            self._byte_taint.set_bytes(r, tag)
             for alias in subreg_aliases(r):
-                self._reg_taint[alias] = tag
+                # Keep legacy per-name map in sync: OR of byte range
+                self._reg_taint[alias] = self._byte_taint.get_bytes(alias)
 
     def _clear_subreg_taint(self, reg: str) -> None:
-        """Clear taint on *reg* and all aliases."""
+        """Clear taint on *reg* and all aliases.
+
+        B58: Also clears the byte-level taint map.
+        """
         r = reg.lower()
         self._reg_taint[r] = TaintTag.CLEAN
         if self._subreg_aware:
+            # B58: byte-level granularity
+            self._byte_taint.clear_bytes(r)
             info = subreg_info(r)
             if info is not None:
                 _canon, bit_lo, width, zext = info
@@ -288,20 +427,21 @@ class TaintTracker:
                         self._reg_taint[alias] = TaintTag.CLEAN
                 # For 8/16-bit writes we do NOT auto-clear the parent,
                 # only the exact sub-register is cleared.
+            # Sync legacy map from byte-level truth
+            for alias in subreg_aliases(r):
+                self._reg_taint[alias] = self._byte_taint.get_bytes(alias)
 
     def _collect_taint(self, reg: str) -> TaintTag:
-        """Read the taint for *reg*, checking aliases when sub-register aware."""
+        """Read the taint for *reg*, using byte-level map (B58)."""
         r = reg.lower()
-        tag = self._reg_taint.get(r, TaintTag.CLEAN)
-        if tag != TaintTag.CLEAN:
-            return tag
         if self._subreg_aware:
-            # Check canonical parent and all wider aliases
-            for alias in subreg_aliases(r):
-                at = self._reg_taint.get(alias, TaintTag.CLEAN)
-                if at != TaintTag.CLEAN:
-                    return at
-        return TaintTag.CLEAN
+            # B58: primary source of truth is the byte-level map
+            tag = self._byte_taint.get_bytes(r)
+            if tag != TaintTag.CLEAN:
+                return tag
+        # Fallback: check legacy per-name map for non-GP registers
+        # (eflags, segment regs, etc.) or when sub_register_aware=False
+        return self._reg_taint.get(r, TaintTag.CLEAN)
 
     # ── Alias-oracle memory taint (B51) ─────────────────────────────────
 
@@ -371,13 +511,6 @@ class TaintTracker:
     def get_taint(self, reg: str) -> TaintTag:
         """Get the taint tag for a register (checking aliases)."""
         return self._collect_taint(reg)
-
-    def reset(self) -> None:
-        """Clear all taint state for reuse across analyses."""
-        self._reg_taint.clear()
-        self._mem_taint.clear()
-        self._events.clear()
-        self._flow_graph.clear()
 
     def process_instruction(self, insn: Any) -> None:
         """Public API: propagate taint for a single instruction."""
@@ -454,6 +587,14 @@ class TaintTracker:
         reg_values: Dict[str, int] = getattr(insn, "registers", {}) or {}
 
         mnem_lower = mnemonic.lower()
+
+        # B58: Decrement implicit-flow scope counter.
+        if self._implicit_scope_remaining > 0:
+            self._implicit_scope_remaining -= 1
+            # An unconditional jump ends the scope early (merge point).
+            if category == "branch_unconditional":
+                self._implicit_scope_remaining = 0
+                self._implicit_scope_tag = TaintTag.CLEAN
 
         # ── EFLAGS-aware reads ─────────────────────────────────────────────
         # If this instruction consumes EFLAGS, add "eflags" to the read set
@@ -592,20 +733,43 @@ class TaintTracker:
                         destination="control_flow",
                         tag=TaintTag.CONTROL,
                     ))
+                # B58: Enter implicit-flow scope — subsequent writes in the
+                # dominated region inherit CONTROL taint.
+                if self._implicit_flow_depth > 0:
+                    self._implicit_scope_remaining = self._implicit_flow_depth
+                    self._implicit_scope_tag = combined_taint | TaintTag.CONTROL
         else:
-            # Clean writes clear taint on destination
-            for reg in writes:
-                reg_lower = reg.lower()
-                if self._collect_taint(reg_lower) != TaintTag.CLEAN:
+            # B58: Even when the instruction itself has no tainted reads,
+            # if we're inside an implicit-flow scope, all writes inherit
+            # CONTROL taint to model control-dependent data flow.
+            if self._implicit_scope_remaining > 0 and writes:
+                implicit_tag = self._implicit_scope_tag
+                for reg in writes:
+                    reg_lower = reg.lower()
+                    self._propagate_subreg_taint(reg_lower, implicit_tag)
                     self._events.append(TaintEvent(
                         address=address,
                         instruction=f"{mnemonic} {operands}",
-                        event_type="untaint",
-                        source="clean_value",
+                        event_type="implicit",
+                        source="control_scope",
                         destination=reg_lower,
-                        tag=TaintTag.CLEAN,
+                        tag=implicit_tag,
                     ))
-                    self._clear_subreg_taint(reg_lower)
+                    self._flow_graph.setdefault("control_scope", set()).add(reg_lower)
+            else:
+                # Clean writes clear taint on destination
+                for reg in writes:
+                    reg_lower = reg.lower()
+                    if self._collect_taint(reg_lower) != TaintTag.CLEAN:
+                        self._events.append(TaintEvent(
+                            address=address,
+                            instruction=f"{mnemonic} {operands}",
+                            event_type="untaint",
+                            source="clean_value",
+                            destination=reg_lower,
+                            tag=TaintTag.CLEAN,
+                        ))
+                        self._clear_subreg_taint(reg_lower)
 
             # ── EFLAGS: clean flag-producer → clear eflags taint ────────
             if is_eflags_producer(mnem_lower):
@@ -750,3 +914,6 @@ class TaintTracker:
         self._symbolic_mem_taint.clear()
         self._events.clear()
         self._flow_graph.clear()
+        self._byte_taint.clear()
+        self._implicit_scope_remaining = 0
+        self._implicit_scope_tag = TaintTag.CLEAN
