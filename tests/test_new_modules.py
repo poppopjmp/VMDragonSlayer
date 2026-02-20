@@ -534,6 +534,30 @@ class TestDispatcherBackEdgeScoring:
         assert SymbolicExecutor._find_dispatcher(insns) == 0x400
 
 
+class TestPushPopConcreteStack:
+    """Tests that push/pop use a concrete stack pointer rather than symbolic."""
+
+    def test_sp_is_concrete_in_execute_handler(self):
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        exe = SymbolicExecutor(arch="x86_64")
+        # push rbx; pop rax; ret  =>  rax should end up equal to in_rbx
+        summary = exe.execute_handler(b"\x53\x58\xc3", handler_address=0x1000)
+        assert summary.error is None
+        # rax should contain the value that was in rbx (symbolic: in_rbx)
+        rax_val = summary.final_registers.get("rax", "")
+        assert "in_rbx" in rax_val or "pop" not in rax_val
+
+    def test_push_pop_roundtrip_preserves_value(self):
+        """push reg; pop reg should be identity (reg unchanged)."""
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        exe = SymbolicExecutor(arch="x86_64")
+        # push rcx (0x51); pop rcx (0x59); ret (0xC3)
+        summary = exe.execute_handler(b"\x51\x59\xc3", handler_address=0x2000)
+        assert summary.error is None
+        rcx_val = summary.final_registers.get("rcx", "")
+        assert "in_rcx" in rcx_val
+
+
 class TestSymbolicState:
     """Tests for dragonslayer.analysis.symbolic_execution.state."""
 

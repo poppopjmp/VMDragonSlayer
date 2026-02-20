@@ -636,10 +636,19 @@ class SymbolicExecutor:
                 elif Z3Solver.available() and hasattr(sp, "sort"):
                     import z3 as _z3
                     dec = _z3.BitVecVal(word_size, state.bit_width)
-                    sp = sp - dec
-                    state.set_register(sp_reg, sp)
-                    # Write to symbolic address — store in memory log
-                    state.write_memory(0, val, word_size)  # best-effort
+                    new_sp = sp - dec
+                    state.set_register(sp_reg, new_sp)
+                    # Try to concretise the address for the memory write
+                    try:
+                        solver = _z3.Solver()
+                        solver.add(*state.constraints)
+                        if solver.check() == _z3.sat:
+                            addr_val = solver.model().eval(new_sp, model_completion=True)
+                            state.write_memory(addr_val.as_long(), val, word_size)
+                        else:
+                            state.write_memory(0, val, word_size)
+                    except Exception:
+                        state.write_memory(0, val, word_size)
 
             elif mnemonic == "pop" and len(ops) == 1:
                 sp_reg = "rsp" if state.bit_width == 64 else "esp"
@@ -865,7 +874,19 @@ class SymbolicExecutor:
         # Make input registers symbolic so we can track data-flow.
         import z3 as _z3
         sym_regs: Dict[str, _z3.BitVecRef] = {}
+
+        # Initialise the stack pointer to a concrete address so that
+        # push / pop can actually read / write concrete memory locations
+        # instead of producing a symbolic address (which falls back to
+        # writing at address 0, losing all stack content).
+        _STACK_BASE = 0x7FFF_0000 if self.bit_width == 64 else 0x00FF_0000
+        sp_reg = "rsp" if self.bit_width == 64 else "esp"
+        state.set_register(sp_reg, _STACK_BASE)
+
         for rname in state.registers:
+            if rname == sp_reg:
+                # Leave SP concrete (set above)
+                continue
             sym = _z3.BitVec(f"in_{rname}", self.bit_width)
             state.set_register(rname, sym)
             sym_regs[rname] = sym
