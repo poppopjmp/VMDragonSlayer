@@ -253,6 +253,7 @@ def analyse_handler_semantics(
     boundaries: List[HandlerBoundary],
     *,
     opcode_assignments: Optional[Dict[int, int]] = None,
+    symbolic_summaries: Optional[Dict[int, Any]] = None,
 ) -> SemanticOpcodeTable:
     """Analyse handler semantics from trace instruction slices.
 
@@ -260,12 +261,21 @@ def analyse_handler_semantics(
     in that slice, builds a mnemonic histogram, and applies heuristic
     rules to classify the handler's VM-level operation.
 
+    If *symbolic_summaries* are provided (a mapping from handler address
+    to ``HandlerSymbolicSummary``), the classifier will first try to
+    infer the VM operation from the symbolic expressions.  This gives
+    high-confidence results even on obfuscated handlers.
+
     Args:
         trace: The execution trace.
         boundaries: Handler boundaries from segmentation.
         opcode_assignments: Optional mapping
             ``{handler_address: opcode_value}`` from bytecode extraction.
             If not provided, opcodes are assigned sequentially.
+        symbolic_summaries: Optional mapping from handler address to a
+            :class:`HandlerSymbolicSummary` (or its ``to_dict()`` output).
+            When present, symbolic classification is attempted first and
+            the heuristic histogram is used as a fallback.
 
     Returns:
         A :class:`SemanticOpcodeTable` with one entry per unique handler.
@@ -284,7 +294,10 @@ def analyse_handler_semantics(
         end = boundary.trace_end
         handler_insns = trace.instructions[start:end] if trace.instructions else []
 
-        semantic = _classify_handler(addr, handler_insns)
+        semantic = _classify_handler(
+            addr, handler_insns,
+            symbolic_summary=symbolic_summaries.get(addr) if symbolic_summaries else None,
+        )
         seen_handlers[addr] = semantic
         boundary_by_handler[addr] = boundary
 
@@ -315,11 +328,153 @@ def analyse_handler_semantics(
     )
 
 
+# ---------------------------------------------------------------------------
+# Symbolic-summary classification
+# ---------------------------------------------------------------------------
+
+# Regex patterns for recognising canonical z3 expression forms in the
+# stringified ``simplified_registers`` / ``final_registers`` produced by
+# SymbolicExecutor.execute_handler().
+#
+# The patterns intentionally ignore register-name specifics so that
+# "init_rax + init_rbx" and "init_r12 + init_rsi" both match ADD.
+_SYM_PATTERNS: List[Tuple[str, str, float]] = [
+    # (regex, VMOperation, confidence)
+    # Arithmetic
+    (r"init_\w+\s*\+\s*init_\w+", VMOperation.ADD, 0.92),
+    (r"init_\w+\s*-\s*init_\w+", VMOperation.SUB, 0.92),
+    (r"init_\w+\s*\*\s*init_\w+", VMOperation.MUL, 0.90),
+    (r"UDiv|udiv", VMOperation.DIV, 0.90),
+    (r"SDiv|sdiv", VMOperation.DIV, 0.90),
+    # Bitwise
+    (r"init_\w+\s*&\s*init_\w+", VMOperation.AND, 0.92),
+    (r"init_\w+\s*\|\s*init_\w+", VMOperation.OR, 0.92),
+    (r"init_\w+\s*\^\s*init_\w+", VMOperation.XOR, 0.92),  # z3 uses Xor() but str may be ^
+    (r"Xor\(", VMOperation.XOR, 0.90),
+    (r"~init_\w+", VMOperation.NOT, 0.90),
+    (r"-init_\w+", VMOperation.NEG, 0.90),
+    # Shifts
+    (r"init_\w+\s*<<\s*", VMOperation.SHL, 0.90),
+    (r"LShR\(", VMOperation.SHR, 0.90),
+    (r"init_\w+\s*>>\s*", VMOperation.SHR, 0.88),
+    (r"RotateLeft\(", VMOperation.ROL, 0.90),
+    (r"RotateRight\(", VMOperation.ROR, 0.90),
+    # Memory access (via symbolic memory symbols)
+    (r"mem_", VMOperation.LOAD, 0.80),
+]
+
+# Patterns for detecting push/pop/store via memory_writes
+_SYM_MEM_PUSH = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
+_SYM_MEM_STORE = re.compile(r"init_\w+", re.IGNORECASE)
+
+
+def _classify_from_symbolic(
+    address: int,
+    summary: Any,
+) -> Optional[HandlerSemantic]:
+    """Try to classify handler from its symbolic summary.
+
+    Returns a ``HandlerSemantic`` with high confidence when the
+    symbolic output matches a known pattern, or ``None`` to fall
+    through to the histogram heuristic.
+    """
+    # Accept both dataclass and dict forms
+    if hasattr(summary, "to_dict"):
+        s = summary.to_dict()
+    elif isinstance(summary, dict):
+        s = summary
+    else:
+        return None
+
+    if s.get("error"):
+        return None
+
+    # Prefer simplified_registers (MBA-simplified), fall back to final_registers.
+    regs = s.get("simplified_registers") or s.get("final_registers") or {}
+    mem_writes = s.get("memory_writes") or []
+
+    if not regs and not mem_writes:
+        return None
+
+    # Collect the expression strings for non-identity register outputs.
+    input_syms = s.get("input_symbols") or {}
+    # An output register is "interesting" if its final value differs from
+    # its initial symbolic input.
+    interesting_exprs: List[str] = []
+    for rname, expr_str in regs.items():
+        init_sym = input_syms.get(rname, "")
+        if expr_str != init_sym and expr_str != "0" and expr_str != str(0):
+            interesting_exprs.append(expr_str)
+
+    combined = " ".join(interesting_exprs)
+
+    # Memory-write analysis
+    has_stack_write = any(
+        _SYM_MEM_PUSH.search(str(w.get("address", ""))) for w in mem_writes
+    )
+    has_mem_write = len(mem_writes) > 0
+
+    # Check for STORE: handler writes to memory at a non-stack address
+    if has_mem_write and not has_stack_write:
+        return HandlerSemantic(
+            handler_address=address,
+            operation=VMOperation.STORE,
+            confidence=0.88,
+            writes_memory=True,
+            detail="symbolic: memory write to non-stack address",
+        )
+
+    # Check for VM_PUSH: writes to stack address
+    if has_stack_write and not interesting_exprs:
+        return HandlerSemantic(
+            handler_address=address,
+            operation=VMOperation.PUSH,
+            confidence=0.85,
+            writes_memory=True,
+            detail="symbolic: stack push",
+        )
+
+    # Pattern-match the expression strings
+    scores: Dict[str, float] = {}
+    for pattern, vm_op, conf in _SYM_PATTERNS:
+        if re.search(pattern, combined):
+            scores[vm_op] = max(scores.get(vm_op, 0.0), conf)
+
+    if not scores:
+        # No match → let the histogram heuristic handle it
+        return None
+
+    best_op = max(scores, key=lambda k: scores[k])
+    confidence = scores[best_op]
+
+    return HandlerSemantic(
+        handler_address=address,
+        operation=best_op,
+        confidence=round(confidence, 3),
+        reads_memory="mem_" in combined,
+        writes_memory=has_mem_write,
+        detail=f"symbolic: {combined[:120]}",
+    )
+
+
 def _classify_handler(
     address: int,
     instructions: List[TraceInstruction],
+    *,
+    symbolic_summary: Optional[Any] = None,
 ) -> HandlerSemantic:
-    """Classify a single handler from its native instruction trace."""
+    """Classify a single handler from its native instruction trace.
+
+    When *symbolic_summary* is provided, the symbolic expression tree
+    is pattern-matched first.  The traditional histogram-based heuristic
+    is used as a fallback.
+    """
+
+    # ---- Symbolic classification (high-confidence) ----
+    if symbolic_summary is not None:
+        sym_result = _classify_from_symbolic(address, symbolic_summary)
+        if sym_result is not None:
+            return sym_result
 
     if not instructions:
         return HandlerSemantic(
