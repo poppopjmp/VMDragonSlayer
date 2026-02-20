@@ -347,6 +347,99 @@ class ModelTrainer:
                 correct += 1
         return {"accuracy": correct / total if total else 0.0, "total": total}
 
+    # B75: Hyperparameter search -------------------------------------------
+
+    def train_with_search(
+        self,
+        features: Sequence[FeatureVector],
+        labels: Sequence[str],
+        *,
+        param_grid: Dict[str, list] | None = None,
+        cv: int = 3,
+        n_iter: int = 10,
+    ) -> TrainingResult:
+        """Train with randomised hyperparameter search.
+
+        Falls back to :meth:`train` if scikit-learn is unavailable or
+        the dataset is too small for cross-validation.
+
+        *param_grid* defaults to a sensible search space over
+        ``n_estimators``, ``max_depth``, ``min_samples_leaf``.
+        """
+        if not _HAS_SKLEARN or len(features) < 10:
+            return self.train(features, labels)
+
+        from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
+
+        X = np.array([fv.values for fv in features])
+        y = np.array(list(labels))
+
+        if param_grid is None:
+            param_grid = {
+                "n_estimators": [50, 100, 200, 300],
+                "max_depth": [3, 5, 7, 10, None],
+                "min_samples_leaf": [1, 2, 4],
+            }
+
+        base_clf = RandomForestClassifier(random_state=42, n_jobs=-1)
+        from collections import Counter as _Counter3
+        min_class_count = min(_Counter3(y).values(), default=0)
+        real_cv = min(cv, min_class_count) if min_class_count >= 2 else 2
+        if real_cv < 2:
+            return self.train(features, labels)
+
+        skf = StratifiedKFold(n_splits=real_cv, shuffle=True, random_state=42)
+        search = RandomizedSearchCV(
+            base_clf, param_grid,
+            n_iter=min(n_iter, _count_grid(param_grid)),
+            cv=skf,
+            scoring="accuracy",
+            random_state=42,
+            n_jobs=-1,
+        )
+        search.fit(X, y)
+
+        clf = search.best_estimator_
+        accuracy = float(search.best_score_)
+
+        # Attach to the model
+        if isinstance(self._model, VMHandlerModel):
+            self._model._sklearn_model = clf
+
+        best_params = search.best_params_
+        logger.info(
+            "Hyperparameter search: best_score=%.3f, best_params=%s",
+            accuracy, best_params,
+        )
+        return TrainingResult(
+            epochs=1,
+            accuracy=round(accuracy, 4),
+            metrics={
+                "method": "randomized_search",
+                "best_params": best_params,
+                "n_iter": n_iter,
+                "cv": real_cv,
+                "n_samples": len(y),
+            },
+        )
+
+    @property
+    def feature_importances(self) -> List[tuple[str, float]]:
+        """Return sorted feature importances from the trained model.
+
+        Returns list of ``(feature_name, importance)`` descending.
+        Empty list if no sklearn model is attached.
+        """
+        return feature_importance(self._model)
+
+
+def _count_grid(grid: Dict[str, list]) -> int:
+    """Count total combinations in a parameter grid."""
+    n = 1
+    for v in grid.values():
+        n *= len(v)
+    return n
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Synthetic training data generator
@@ -660,15 +753,14 @@ def generate_synthetic_handlers(
                 instructions.append({"mnemonic": mnem, "operands": ops})
                 mnemonics.append(mnem.lower())
 
-            # Map category to an operation name
+            # Map category to an operation name (B75: matches _HANDLER_TEMPLATES keys)
             _cat_to_op = {
                 "arithmetic": "vm_add",
-                "logic": "vm_xor",
+                "bitwise": "vm_xor",
                 "stack": "vm_push",
-                "load_store": "vm_load",
-                "branch": "vm_jmp",
-                "vm_entry_exit": "vm_enter",
-                "context": "vm_fetch_opcode",
+                "memory": "vm_load",
+                "control_flow": "vm_jmp",
+                "vm_control": "vm_enter",
                 "crypto": "vm_decrypt",
                 "nop": "vm_nop",
             }

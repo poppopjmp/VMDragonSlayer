@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _RE_INTEL_MEM = re.compile(r"\[([^\]]+)\]")
 _RE_ATT_MEM = re.compile(r"(-?(?:0x[0-9a-fA-F]+|\d+))?\(([^)]+)\)")
 _RE_ADDR_SPLIT = re.compile(r"(?=[+\-])")
-_RE_MUL = re.compile(r"(\w+)\s*\*\s*(\d+)")
+_RE_MUL = re.compile(r"(\w+)\s*\*\s*(\w+)")  # B75: handles both reg*scale and scale*reg
 _RE_NUM = re.compile(r"(?:0x)?([0-9a-fA-F]+)")
 
 
@@ -495,9 +495,11 @@ class TaintTracker:
         for canonical, callee_arr in return_byte_taint.items():
             caller_arr = self._byte_taint._map.get(canonical)
             if caller_arr is None:
-                caller_arr = [TaintTag.CLEAN] * 8
+                nbytes = ByteTaintMap._CANONICAL_SIZES.get(canonical, 8)
+                caller_arr = [TaintTag.CLEAN] * nbytes
                 self._byte_taint._map[canonical] = caller_arr
-            for i in range(8):
+            merge_len = min(len(callee_arr), len(caller_arr))
+            for i in range(merge_len):
                 if callee_arr[i] != TaintTag.CLEAN:
                     caller_arr[i] = caller_arr[i] | callee_arr[i]
 
@@ -1002,11 +1004,18 @@ class TaintTracker:
                 sign = -1
                 tok = tok[1:].strip()
 
-            # Check for index*scale form
+            # Check for index*scale or scale*index form (B75: reversed support)
             m_mul = _RE_MUL.fullmatch(tok)
             if m_mul:
-                reg_name = m_mul.group(1)
-                scale = int(m_mul.group(2))
+                g1, g2 = m_mul.group(1), m_mul.group(2)
+                # Determine which is the register and which is the scale
+                if g1.isdigit():
+                    scale, reg_name = int(g1), g2
+                elif g2.isdigit():
+                    reg_name, scale = g1, int(g2)
+                else:
+                    resolved = False
+                    continue
                 if reg_name in rv:
                     total += sign * rv[reg_name] * scale
                 else:
