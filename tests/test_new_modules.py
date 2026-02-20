@@ -360,6 +360,91 @@ class TestTaintTracker:
         assert "rsi" in state.registers
 
 
+class TestMemoryAwareTaint:
+    """Tests for register-indirect memory address resolution in TaintTracker."""
+
+    def test_extract_direct_address(self):
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker
+        addr = TaintTracker._extract_memory_address("[0x401000]", [], {})
+        assert addr == 0x401000
+
+    def test_extract_register_indirect(self):
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker
+        addr = TaintTracker._extract_memory_address(
+            "[rax]", [], {"rax": 0x7FFF0010}
+        )
+        assert addr == 0x7FFF0010
+
+    def test_extract_register_plus_disp(self):
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker
+        addr = TaintTracker._extract_memory_address(
+            "[rbx+0x8]", [], {"rbx": 0x1000}
+        )
+        assert addr == 0x1008
+
+    def test_extract_sib_full(self):
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker
+        addr = TaintTracker._extract_memory_address(
+            "[rax+rcx*4+0x10]", [], {"rax": 0x1000, "rcx": 0x8}
+        )
+        assert addr == 0x1000 + 0x8 * 4 + 0x10
+
+    def test_extract_returns_none_missing_regs(self):
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker
+        addr = TaintTracker._extract_memory_address(
+            "[rax+rbx]", [], {}
+        )
+        assert addr is None
+
+    def test_extract_att_syntax(self):
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker
+        addr = TaintTracker._extract_memory_address(
+            "0x8(%rbx)", [], {"rbx": 0x2000}
+        )
+        assert addr == 0x2008
+
+    def test_taint_propagates_through_register_indirect_load(self):
+        """Memory tainted at address resolved from register values should taint the read register."""
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker, TaintTag
+
+        tt = TaintTracker()
+        tt.taint_memory(0x7FFF0020, TaintTag.VM_OPERAND)
+
+        class FakeInsn:
+            address = 0x100
+            mnemonic = "mov"
+            operands = "rax, [rbx]"
+            reads = ["rbx"]
+            writes = ["rax"]
+            category = "memory_read"
+            registers = {"rbx": 0x7FFF0020}
+
+        tt.analyze([FakeInsn()])
+        result = tt.get_state()
+        # rax should be tainted via the memory load
+        assert result.registers.get("rax", TaintTag.CLEAN) != TaintTag.CLEAN
+
+    def test_taint_propagates_through_register_indirect_store(self):
+        """A store via register-indirect should taint the target memory."""
+        from dragonslayer.analysis.taint_tracking.tracker import TaintTracker, TaintTag
+
+        tt = TaintTracker()
+        tt.taint_register("rax", TaintTag.INPUT)
+
+        class FakeInsn:
+            address = 0x200
+            mnemonic = "mov"
+            operands = "[rcx], rax"
+            reads = ["rax"]
+            writes = []
+            category = "memory_write"
+            registers = {"rcx": 0xDEAD0000}
+
+        tt.analyze([FakeInsn()])
+        state = tt.get_state()
+        assert state.memory.get(0xDEAD0000, TaintTag.CLEAN) != TaintTag.CLEAN
+
+
 class TestVMTaintTracker:
     """Tests for dragonslayer.analysis.taint_tracking.vm_taint_tracker."""
 

@@ -143,6 +143,10 @@ class TaintTracker:
         ----------
         instructions : list[LiftedInstruction]
             Lifted instruction sequence from :class:`InstructionLifter`.
+            If each instruction carries a ``registers`` dict mapping
+            register names to concrete values (from an execution trace),
+            those values enable resolution of register-indirect memory
+            addresses for precise memory-taint propagation.
 
         Returns
         -------
@@ -188,6 +192,8 @@ class TaintTracker:
         mnemonic = getattr(insn, "mnemonic", "")
         operands = getattr(insn, "operands", "")
         category = getattr(insn, "category", "unknown")
+        # Concrete register values from an execution trace (if available)
+        reg_values: Dict[str, int] = getattr(insn, "registers", {}) or {}
 
         # Collect taint from read operands (registers)
         combined_taint = TaintTag.CLEAN
@@ -204,7 +210,7 @@ class TaintTracker:
         # Check if this is a memory read (load) that reads tainted memory
         if category in ("memory_read", "stack_pop") and not tainted_sources:
             # Parse memory operand to check for tainted memory address
-            mem_addr = self._extract_memory_address(operands, reads)
+            mem_addr = self._extract_memory_address(operands, reads, reg_values)
             if mem_addr is not None:
                 mem_tag = self._mem_taint.get(mem_addr, TaintTag.CLEAN)
                 if mem_tag != TaintTag.CLEAN:
@@ -241,7 +247,7 @@ class TaintTracker:
 
             # Memory write with tainted data → taint the memory location
             if category in ("memory_write", "stack_push"):
-                mem_addr = self._extract_memory_address(operands, reads)
+                mem_addr = self._extract_memory_address(operands, reads, reg_values)
                 if mem_addr is not None:
                     self._mem_taint[mem_addr] = output_tag
                     for src in tainted_sources:
@@ -282,25 +288,106 @@ class TaintTracker:
                     self._reg_taint[reg_lower] = TaintTag.CLEAN
 
     @staticmethod
-    def _extract_memory_address(operands: str, reads: List[str]) -> Optional[int]:
+    def _extract_memory_address(
+        operands: str,
+        reads: List[str],
+        reg_values: Dict[str, int] | None = None,
+    ) -> Optional[int]:
         """
-        Try to extract a concrete memory address from operands.
+        Extract a concrete memory address from an x86 memory operand.
 
-        Only works for simple cases like ``[0x401000]`` or ``[rsp+0x8]``
-        (if the register value is not available, returns None).
+        Handles:
+        - ``[0x401000]`` — direct constant address
+        - ``[rax]``, ``[rax+8]``, ``[rax+rbx*4+0x10]`` — register-indirect,
+          resolved using concrete *reg_values* from the execution trace.
+        - AT&T syntax ``(%rax)`` / ``0x8(%rbx)`` as well.
+
+        Returns ``None`` if the address cannot be resolved.
         """
-        if "[" not in operands:
-            return None
-
         import re
-        # Match [hex_address]
-        m = re.search(r"\[(?:0x)?([0-9a-fA-F]+)\]", operands)
-        if m:
-            try:
-                return int(m.group(1), 16)
-            except ValueError:
-                pass
+
+        if reg_values is None:
+            reg_values = {}
+        # Normalise register-value keys to lowercase
+        rv = {k.lower(): v for k, v in reg_values.items()}
+
+        # --- Intel syntax: [...] ---
+        m_intel = re.search(r"\[([^\]]+)\]", operands)
+        if m_intel:
+            return TaintTracker._resolve_addr_expr(m_intel.group(1).strip(), rv)
+
+        # --- AT&T syntax: disp(%base, %index, scale) or (%reg) ---
+        m_att = re.search(r"(-?(?:0x[0-9a-fA-F]+|\d+))?\(([^)]+)\)", operands)
+        if m_att:
+            disp_str = m_att.group(1) or "0"
+            inner = m_att.group(2).replace("%", "").strip()
+            # Rewrite to Intel-like form: base + index*scale + disp
+            parts = [p.strip() for p in inner.split(",")]
+            expr = parts[0]  # base
+            if len(parts) >= 2 and parts[1]:
+                scale = parts[2] if len(parts) >= 3 else "1"
+                expr += f"+{parts[1]}*{scale}"
+            expr += f"+{disp_str}"
+            return TaintTracker._resolve_addr_expr(expr, rv)
+
         return None
+
+    @staticmethod
+    def _resolve_addr_expr(expr: str, rv: Dict[str, int]) -> Optional[int]:
+        """Evaluate a simple x86 address expression given concrete register values.
+
+        Supports: ``base``, ``base+disp``, ``base+index*scale``,
+        ``base+index*scale+disp``, and variations with subtraction.
+        """
+        import re
+
+        expr = expr.strip().lower()
+        total = 0
+        resolved = True
+
+        # Split on + / - while keeping the sign
+        tokens = re.split(r"(?=[+\-])", expr)
+        for tok in tokens:
+            tok = tok.strip()
+            if not tok:
+                continue
+
+            # Determine sign
+            sign = 1
+            if tok.startswith("+"):
+                tok = tok[1:].strip()
+            elif tok.startswith("-"):
+                sign = -1
+                tok = tok[1:].strip()
+
+            # Check for index*scale form
+            m_mul = re.fullmatch(r"(\w+)\s*\*\s*(\d+)", tok)
+            if m_mul:
+                reg_name = m_mul.group(1)
+                scale = int(m_mul.group(2))
+                if reg_name in rv:
+                    total += sign * rv[reg_name] * scale
+                else:
+                    resolved = False
+                continue
+
+            # Numeric literal (hex or decimal)
+            m_num = re.fullmatch(r"(?:0x)?([0-9a-fA-F]+)", tok)
+            if m_num:
+                try:
+                    val = int(m_num.group(0), 0) if tok.startswith("0x") else int(tok, 0)
+                except ValueError:
+                    val = int(m_num.group(1), 16)
+                total += sign * val
+                continue
+
+            # Register name
+            if tok in rv:
+                total += sign * rv[tok]
+            else:
+                resolved = False
+
+        return total if resolved else None
 
     @staticmethod
     def _event_to_dict(event: TaintEvent) -> Dict[str, Any]:
