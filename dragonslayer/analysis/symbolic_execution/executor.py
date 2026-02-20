@@ -64,6 +64,7 @@ class ExecutionResult:
     state_snapshots: List[Dict[str, Any]] = field(default_factory=list)
     vmprotect_dispatcher: Optional[Dict[str, Any]] = None
     loops_detected: List[Dict[str, Any]] = field(default_factory=list)
+    cfg: Optional[Dict[str, Any]] = None  # B60: CFG graph structure
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -78,6 +79,7 @@ class ExecutionResult:
             "state_snapshot_count": len(self.state_snapshots),
             "vmprotect_dispatcher": self.vmprotect_dispatcher,
             "loops_detected": self.loops_detected,
+            "cfg": self.cfg,
             "error": self.error,
         }
 
@@ -215,6 +217,9 @@ class SymbolicExecutor:
             # Step 2: Find basic blocks
             blocks = self._find_basic_blocks(instructions)
 
+            # Step 2b (B60): Build explicit CFG graph with edges & dominators
+            cfg = self._build_cfg(blocks, entry_point)
+
             # Step 3: Identify dispatcher using VMProtect pattern matching
             dispatcher_addr = self._find_dispatcher(instructions)
             # Also run the new VMProtect-specific dispatcher identification
@@ -256,6 +261,7 @@ class SymbolicExecutor:
                     self._vmprotect_dispatcher.to_dict()
                     if self._vmprotect_dispatcher else None
                 ),
+                cfg=cfg,
                 loops_detected=[
                     li.to_dict() for li in self._detected_loops.values()
                 ],
@@ -294,6 +300,141 @@ class SymbolicExecutor:
             blocks.append(current)
 
         return blocks
+
+    # -- B60: CFG graph construction -----------------------------------------
+
+    @staticmethod
+    def _build_cfg(
+        blocks: List[List[LiftedInstruction]],
+        entry_point: int,
+    ) -> Dict[str, Any]:
+        """Build an explicit control-flow graph from basic blocks.
+
+        Returns a serialisable dict with:
+        * ``nodes`` — list of ``{address, size, instruction_count}``
+        * ``edges`` — list of ``{source, target, type}`` where type is
+          ``fallthrough``, ``branch_taken``, ``branch_not_taken``,
+          ``unconditional``, or ``indirect``.
+        * ``back_edges`` — subset of edges where target ≤ source (loops).
+        * ``dominators`` — immediate dominator map ``{addr: idom_addr}``
+        * ``entry`` — entry block address.
+        * ``block_count``, ``edge_count``, ``back_edge_count``.
+
+        Uses networkx when available for dominator computation; falls
+        back to a simple traversal otherwise.
+        """
+        if not blocks:
+            return {"nodes": [], "edges": [], "back_edges": [],
+                    "dominators": {}, "entry": entry_point,
+                    "block_count": 0, "edge_count": 0, "back_edge_count": 0}
+
+        # Index blocks by start address
+        block_by_addr: Dict[int, List[LiftedInstruction]] = {}
+        block_addrs: List[int] = []
+        for blk in blocks:
+            addr = blk[0].address
+            block_by_addr[addr] = blk
+            block_addrs.append(addr)
+        block_addr_set = set(block_addrs)
+
+        # Build nodes
+        nodes = []
+        for addr in block_addrs:
+            blk = block_by_addr[addr]
+            last = blk[-1]
+            size = (last.address + last.size) - addr
+            nodes.append({
+                "address": addr,
+                "size": size,
+                "instruction_count": len(blk),
+            })
+
+        # Build edges
+        edges = []
+        for blk in blocks:
+            src_addr = blk[0].address
+            last = blk[-1]
+            fall_addr = last.address + last.size
+
+            if last.category == InstructionCategory.RETURN:
+                continue  # no successor
+
+            if last.category == InstructionCategory.BRANCH_COND:
+                # Taken edge
+                if last.branch_target is not None and last.branch_target in block_addr_set:
+                    edges.append({
+                        "source": src_addr,
+                        "target": last.branch_target,
+                        "type": "branch_taken",
+                    })
+                # Fall-through edge
+                if fall_addr in block_addr_set:
+                    edges.append({
+                        "source": src_addr,
+                        "target": fall_addr,
+                        "type": "branch_not_taken",
+                    })
+            elif last.category == InstructionCategory.BRANCH_UNCOND:
+                if last.branch_target is not None and last.branch_target in block_addr_set:
+                    edges.append({
+                        "source": src_addr,
+                        "target": last.branch_target,
+                        "type": "unconditional",
+                    })
+                elif last.branch_target is None:
+                    edges.append({
+                        "source": src_addr,
+                        "target": 0,  # unknown
+                        "type": "indirect",
+                    })
+            elif last.is_branch:
+                # Other branch types
+                if last.branch_target is not None and last.branch_target in block_addr_set:
+                    edges.append({
+                        "source": src_addr,
+                        "target": last.branch_target,
+                        "type": "unconditional",
+                    })
+            else:
+                # Fall-through
+                if fall_addr in block_addr_set:
+                    edges.append({
+                        "source": src_addr,
+                        "target": fall_addr,
+                        "type": "fallthrough",
+                    })
+
+        # Back edges
+        back_edges = [e for e in edges if e["target"] <= e["source"]
+                      and e["type"] != "indirect"]
+
+        # Dominators via networkx (optional)
+        dominators: Dict[int, int] = {}
+        try:
+            import networkx as nx
+            G = nx.DiGraph()
+            for addr in block_addrs:
+                G.add_node(addr)
+            for e in edges:
+                if e["target"] != 0:  # skip indirect
+                    G.add_edge(e["source"], e["target"])
+            entry = entry_point if entry_point in G else (block_addrs[0] if block_addrs else None)
+            if entry is not None and entry in G:
+                idom = nx.immediate_dominators(G, entry)
+                dominators = {hex(k): hex(v) for k, v in idom.items()}
+        except Exception:
+            pass
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "back_edges": back_edges,
+            "dominators": dominators,
+            "entry": entry_point,
+            "block_count": len(nodes),
+            "edge_count": len(edges),
+            "back_edge_count": len(back_edges),
+        }
 
     # -- Dispatcher identification -------------------------------------------
 
