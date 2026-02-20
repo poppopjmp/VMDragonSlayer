@@ -1138,7 +1138,10 @@ class AnalysisPipeline:
 
             # ── 8. Pseudocode emission ───────────────────────────────────
             pseudocode_result = emit_pseudocode(
-                opcode_table, boundaries, handler_cfg, style="c_like",
+                opcode_table, boundaries, handler_cfg,
+                style="c_like",
+                context_layout=ctx.shared_data.get("vm_context_layout"),
+                clustering=ctx.shared_data.get("handler_clustering"),
             )
 
             # ── Assemble result ──────────────────────────────────────────

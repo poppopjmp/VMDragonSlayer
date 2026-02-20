@@ -493,6 +493,74 @@ def emit_structured(
 
 
 # ---------------------------------------------------------------------------
+# Context / Clustering annotation helpers (Batch 20)
+# ---------------------------------------------------------------------------
+
+
+def _extract_context_registers(context_layout: Any) -> Dict[str, str]:
+    """Extract role → register mapping from a VMContextLayout or dict.
+
+    Returns an ordered dict like ``{"vSP": "rsp", "table_base": "rbx"}``.
+    """
+    if context_layout is None:
+        return {}
+
+    result: Dict[str, str] = {}
+
+    if isinstance(context_layout, dict):
+        # From to_dict() output: look for known keys.
+        for key in ("vsp", "table_base", "key_register", "context_base",
+                     "vip_register"):
+            val = context_layout.get(key)
+            if val and isinstance(val, str):
+                result[key] = val
+        # Also check "registers" sub-dict.
+        regs = context_layout.get("registers", {})
+        if isinstance(regs, dict):
+            for role, info in regs.items():
+                reg = info.get("register") if isinstance(info, dict) else str(info)
+                if reg:
+                    result[role] = reg
+    else:
+        # VMContextLayout object — duck-type access.
+        for attr in ("vsp", "table_base", "key_register", "context_base"):
+            obj = getattr(context_layout, attr, None)
+            if obj is not None:
+                reg = getattr(obj, "register", None) or str(obj)
+                if reg:
+                    result[attr] = reg
+
+    return result
+
+
+def _extract_cluster_summary(clustering: Any) -> Dict[str, int]:
+    """Extract cluster_name → handler_count from clustering result.
+
+    Returns an ordered dict like ``{"vm_add": 3, "vm_push": 2}``.
+    """
+    if clustering is None:
+        return {}
+
+    result: Dict[str, int] = {}
+
+    if isinstance(clustering, dict):
+        clusters = clustering.get("clusters", [])
+        for cl in clusters:
+            if isinstance(cl, dict):
+                name = cl.get("canonical_operation", cl.get("name", "unknown"))
+                count = cl.get("handler_count", len(cl.get("members", [])))
+                result[name] = count
+    else:
+        # ClusteringResult object.
+        for cl in getattr(clustering, "clusters", []):
+            name = getattr(cl, "canonical_operation", "unknown")
+            count = len(getattr(cl, "members", []))
+            result[name] = count
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # C-like wrapper
 # ---------------------------------------------------------------------------
 
@@ -502,11 +570,39 @@ def emit_c_like(
     handler_cfg: Any = None,
     *,
     function_name: str = "vm_func",
+    context_layout: Any = None,
+    clustering: Any = None,
 ) -> PseudocodeResult:
-    """Emit C-like pseudocode wrapped in a function declaration."""
+    """Emit C-like pseudocode wrapped in a function declaration.
+
+    When *context_layout* is provided (dict or VMContextLayout), a VM
+    context struct comment is emitted and virtual register names (vSP,
+    vIP, etc.) appear in the header.
+
+    When *clustering* is provided (dict or ClusteringResult), canonical
+    cluster operation names annotate the output.
+    """
     inner = emit_structured(opcode_table, boundaries, handler_cfg)
 
-    header_lines = [
+    header_lines: List[str] = []
+
+    # ── VM context layout annotation (Batch 20) ─────────────────────
+    ctx_regs = _extract_context_registers(context_layout)
+    if ctx_regs:
+        header_lines.append("// VM Context Layout:")
+        for role, reg in ctx_regs.items():
+            header_lines.append(f"//   {role:16s} = {reg}")
+        header_lines.append("")
+
+    # ── Cluster summary annotation (Batch 20) ───────────────────────
+    cluster_summary = _extract_cluster_summary(clustering)
+    if cluster_summary:
+        header_lines.append("// Semantic Clusters:")
+        for cluster_name, count in cluster_summary.items():
+            header_lines.append(f"//   {cluster_name}: {count} handler variant(s)")
+        header_lines.append("")
+
+    header_lines += [
         f"// Devirtualised from {len(boundaries)} VM instructions",
         f"// Unique handlers: {opcode_table.handler_count}",
         f"// Operations: {', '.join(opcode_table.operations_summary().keys())}",
@@ -562,6 +658,8 @@ def emit_pseudocode(
     *,
     style: str = "c_like",
     function_name: str = "vm_func",
+    context_layout: Any = None,
+    clustering: Any = None,
 ) -> PseudocodeResult:
     """Emit pseudocode in the requested style.
 
@@ -571,6 +669,12 @@ def emit_pseudocode(
         handler_cfg: Optional networkx DiGraph (handler-level CFG).
         style: One of ``"linear"``, ``"structured"``, ``"c_like"``.
         function_name: Function name for C-like output.
+        context_layout: Optional VM context layout (dict or VMContextLayout)
+            from :func:`~..vm_discovery.context_registers.identify_vm_context`.
+            If provided, virtual register names appear in pseudocode.
+        clustering: Optional clustering result (dict or ClusteringResult)
+            from :func:`~..handler_clustering.cluster_handlers_by_semantics`.
+            If provided, canonical cluster names appear in comments.
 
     Returns:
         A :class:`PseudocodeResult`.
@@ -581,6 +685,8 @@ def emit_pseudocode(
         return emit_structured(opcode_table, boundaries, handler_cfg)
     elif style == "c_like":
         return emit_c_like(opcode_table, boundaries, handler_cfg,
-                           function_name=function_name)
+                           function_name=function_name,
+                           context_layout=context_layout,
+                           clustering=clustering)
     else:
         return emit_linear(opcode_table, boundaries)
