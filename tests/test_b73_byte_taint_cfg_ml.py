@@ -85,13 +85,13 @@ class TestByteTaintContextSync:
         assert t._byte_taint.get_bytes("al") & TaintTag.INPUT
 
     def test_context_stack_stores_tuples(self):
-        """Verify context stack entries are (reg_dict, byte_dict) tuples."""
+        """Verify context stack entries are (reg_dict, byte_dict, pointer_dict) tuples."""
         t = TaintTracker()
         t.push_call_context()
         assert len(t._context_stack) == 1
         entry = t._context_stack[0]
         assert isinstance(entry, tuple)
-        assert len(entry) == 2
+        assert len(entry) == 3  # B78: now includes pointer snapshot
 
 
 # ---------------------------------------------------------------------------

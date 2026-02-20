@@ -124,11 +124,19 @@ class FeatureExplainer:
         self,
         dataset: List[Dict[str, Any]],
         labels: List[str] | None = None,
+        *,
+        random_state: int | None = None,
     ) -> List[tuple[str, float]]:
         """Compute permutation importance for each feature.
 
         For each feature column, shuffle its values across *dataset*
         and measure the accuracy / confidence drop.
+
+        Parameters
+        ----------
+        dataset : list of handler dicts
+        labels : optional ground-truth labels for accuracy-based scoring
+        random_state : optional seed for reproducibility
 
         Returns ``[(feature_name, importance_score)]`` sorted descending.
         """
@@ -150,13 +158,14 @@ class FeatureExplainer:
             base_score = sum(p.confidence for p in baseline) / n
 
         import random
+        rng = random.Random(random_state)
         importances: Dict[str, float] = {}
         for fi, fname in enumerate(names):
             drops: list[float] = []
             original_col = [v.values[fi] for v in vectors]
             for _ in range(self.n_repeats):
                 shuffled_col = list(original_col)
-                random.shuffle(shuffled_col)
+                rng.shuffle(shuffled_col)
                 perm_preds = []
                 for si, vec in enumerate(vectors):
                     perturbed_vals = list(vec.values)
@@ -183,11 +192,12 @@ class FeatureExplainer:
         sample: Dict[str, Any],
         *,
         n_perturbations: int = 20,
+        random_state: int | None = None,
     ) -> Dict[str, float]:
         """Explain a single prediction by perturbing each feature.
 
         For each feature, perform *n_perturbations* random perturbations
-        (scaling the feature towards zero) and measure the average
+        (scaling the feature both up and down) and measure the average
         confidence change.  A large drop means the feature is important
         for this particular prediction.
 
@@ -195,6 +205,7 @@ class FeatureExplainer:
         values mean the feature *supports* the prediction.
         """
         import random
+        rng = random.Random(random_state)
 
         features = extract_handler_features(sample)
         base_pred = self._predict_from_values(features.values, features.feature_names)
@@ -208,11 +219,15 @@ class FeatureExplainer:
             original_val = features.values[fi]
             for pi in range(n_perturbations):
                 perturbed_vals = list(features.values)
-                # Scale the feature: pi==0 → zero it; others → random scale
+                # B78: Bidirectional perturbation — scale both down and up
                 if pi == 0:
-                    perturbed_vals[fi] = 0.0
+                    perturbed_vals[fi] = 0.0          # zero it out
+                elif pi % 2 == 1:
+                    # Scale down: [0.0, 0.8) of original
+                    perturbed_vals[fi] = original_val * rng.uniform(0.0, 0.8)
                 else:
-                    perturbed_vals[fi] = original_val * random.uniform(0.0, 0.5)
+                    # Scale up: (1.2, 2.0] of original
+                    perturbed_vals[fi] = original_val * rng.uniform(1.2, 2.0)
                 try:
                     pert_pred = self._predict_from_values(
                         perturbed_vals, features.feature_names

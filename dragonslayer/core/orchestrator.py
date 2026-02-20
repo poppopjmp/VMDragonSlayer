@@ -845,7 +845,7 @@ class Orchestrator:
         return [t.value for t in AnalysisType]
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False)
+        self._executor.shutdown(wait=True)
         logger.info("Orchestrator shut down")
 
 

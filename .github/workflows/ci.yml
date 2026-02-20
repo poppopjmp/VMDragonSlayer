@@ -5,6 +5,8 @@ on:
     branches: [main, dev-*]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # weekly Monday 06:00 UTC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +29,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -48,11 +58,17 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: lint-pip-${{ hashFiles('requirements.txt') }}
+
       - name: Install linters
         run: pip install ruff
 
       - name: Ruff check
-        run: ruff check dragonslayer/ --select E,W,F --ignore E501
+        run: ruff check dragonslayer/ --select E,W,F,B,UP,SIM --ignore E501
 
   typecheck:
     runs-on: ubuntu-latest
@@ -64,11 +80,17 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: typecheck-pip-${{ hashFiles('requirements.txt') }}
+
       - name: Install deps
         run: |
           pip install -r requirements.txt
           pip install mypy
           pip install -e .
 
-      - name: Mypy (non-strict)
-        run: mypy dragonslayer/ --ignore-missing-imports --no-strict-optional
+      - name: Mypy
+        run: mypy dragonslayer/ --ignore-missing-imports --warn-return-any --warn-unused-configs

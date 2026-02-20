@@ -509,7 +509,8 @@ class TaintTracker:
         """Save current register + byte-level taint for interprocedural analysis.
 
         Call this when entering a callee to preserve the caller's
-        register-taint snapshot (both ``_reg_taint`` and ``_byte_taint``).
+        register-taint snapshot (both ``_reg_taint`` and ``_byte_taint``),
+        as well as pointer-alias bindings.
         On return, :meth:`pop_call_context` restores it while merging any
         new taint from the callee's return registers.
         """
@@ -518,7 +519,9 @@ class TaintTracker:
         byte_snapshot = {
             k: list(v) for k, v in self._byte_taint._map.items()
         }
-        self._context_stack.append((reg_snapshot, byte_snapshot))
+        # B78: Snapshot pointer-alias bindings
+        pointer_snapshot = dict(self._pointer_tracker._bindings)
+        self._context_stack.append((reg_snapshot, byte_snapshot, pointer_snapshot))
         self._call_depth += 1
         logger.debug("push_call_context: depth=%d", self._call_depth)
 
@@ -550,7 +553,13 @@ class TaintTracker:
             if arr is not None:
                 return_byte_taint[canonical] = list(arr)
 
-        caller_reg, caller_bytes = self._context_stack.pop()
+        ctx = self._context_stack.pop()
+        # B78: Unpack 3-tuple (reg, byte, pointer) or legacy 2-tuple
+        if len(ctx) == 3:
+            caller_reg, caller_bytes, caller_pointers = ctx
+        else:
+            caller_reg, caller_bytes = ctx
+            caller_pointers = None
         self._call_depth = max(0, self._call_depth - 1)
 
         # Restore caller register taint
@@ -558,6 +567,12 @@ class TaintTracker:
 
         # B73: Restore caller byte-level taint map
         self._byte_taint._map = caller_bytes
+
+        # B78: Restore caller pointer-alias bindings
+        if caller_pointers is not None:
+            self._pointer_tracker.clear()
+            for reg, addr in caller_pointers.items():
+                self._pointer_tracker.bind(reg, addr)
 
         # Merge callee return-register taint
         for r, tag in return_taint.items():
@@ -841,18 +856,27 @@ class TaintTracker:
 
         mnem_lower = mnemonic.lower()
 
-        # B76: Auto-bind pointer values from concrete register snapshots
+        # B76/B78: Auto-bind pointer values from concrete register snapshots
         # so that MemoryAliasTracker can detect must-alias relationships
         # during live instruction processing.
+        # Filter out volatile / non-pointer registers (rsp, rip, eflags, etc.)
+        _VOLATILE_REGS = frozenset({
+            "rsp", "esp", "sp", "spl",
+            "rip", "eip", "ip",
+            "eflags", "rflags", "flags",
+            "cs", "ds", "es", "fs", "gs", "ss",
+        })
         if reg_values:
             for rname, rval in reg_values.items():
-                if isinstance(rval, int):
+                if isinstance(rval, int) and rname.lower() not in _VOLATILE_REGS:
                     self._pointer_tracker.bind(rname, rval)
         # LEA and MOV-immediate: if the destination gets a concrete value,
         # update the pointer tracker.
         if mnem_lower in ("lea", "mov") and writes and reg_values:
             for w in writes:
                 wl = w.lower()
+                if wl in _VOLATILE_REGS:
+                    continue
                 val = reg_values.get(wl)
                 if isinstance(val, int):
                     self._pointer_tracker.bind(wl, val)
