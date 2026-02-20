@@ -827,8 +827,7 @@ class AnalysisPipeline:
                 "dispatcher_addresses", [],
             )
 
-            lifted = trace.to_lifted_instructions()
-            vip_candidate = identify_vip_register(lifted, dispatcher_addrs)
+            vip_candidate = identify_vip_register(trace, dispatcher_addrs)
 
             if vip_candidate is None:
                 return {
@@ -836,7 +835,7 @@ class AnalysisPipeline:
                     "reason": "Could not identify virtual instruction pointer register",
                 }
 
-            seg = segment_trace(lifted, vip_candidate, dispatcher_addrs)
+            seg = segment_trace(trace, vip_candidate, dispatcher_addrs)
             boundaries = seg.boundaries
 
             if not boundaries:
@@ -846,7 +845,7 @@ class AnalysisPipeline:
                 }
 
             # --- 3. Semantic analysis per handler ---------------------------
-            opcode_table = analyse_handler_semantics(lifted, boundaries)
+            opcode_table = analyse_handler_semantics(trace, boundaries)
 
             # --- 4. Pseudocode emission ------------------------------------
             pseudocode_result = emit_pseudocode(
@@ -854,7 +853,7 @@ class AnalysisPipeline:
             )
 
             result_data: Dict[str, Any] = {
-                "vip_register": vip_candidate.register,
+                "vip_register": vip_candidate.name,
                 "handler_count": len(boundaries),
                 "unique_operations": opcode_table.unique_operations,
                 "opcode_table": opcode_table.to_dict(),
