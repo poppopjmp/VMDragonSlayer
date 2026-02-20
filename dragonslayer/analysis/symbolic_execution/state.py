@@ -83,6 +83,17 @@ class MemoryWrite:
     timestamp: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Alias query results
+# ---------------------------------------------------------------------------
+
+class AliasResult:
+    """Result of a memory alias query."""
+    MUST = "must"   # addresses are provably equal
+    MAY = "may"     # addresses could be equal (under some constraints)
+    NO = "no"       # addresses are provably different
+
+
 class SymbolicState:
     """
     Captures the symbolic state of execution at a given program point.
@@ -130,6 +141,7 @@ class SymbolicState:
         self.memory: Dict[int, Any] = {}
         self.constraints: List[Any] = []
         self._memory_log: List[MemoryWrite] = []
+        self._symbolic_store: List[MemoryWrite] = []  # writes with symbolic addresses
         self._visited_pcs: Set[int] = set()
         self._last_cmp: Any = None  # legacy compat — kept for callers
 
@@ -370,8 +382,104 @@ class SymbolicState:
 
     # -- Memory access -------------------------------------------------------
 
-    def read_memory(self, address: int, size: int = 0) -> Any:
+    @staticmethod
+    def _is_symbolic_addr(address: Any) -> bool:
+        """Return True if *address* is a z3 expression (not a concrete int)."""
+        return _Z3_AVAILABLE and hasattr(address, "sort")
+
+    def _try_concretise(self, address: Any) -> Optional[int]:
+        """Try to reduce a symbolic address to a concrete int.
+
+        Uses the accumulated path constraints.  Returns ``None`` if
+        the address cannot be uniquely concretised.
+        """
+        if not _Z3_AVAILABLE or not hasattr(address, "sort"):
+            return int(address) if isinstance(address, int) else None
+        try:
+            s = z3.Solver()
+            s.add(*self.constraints)
+            if s.check() != z3.sat:
+                return None
+            model = s.model()
+            val = model.eval(address, model_completion=True)
+            if val is None:
+                return None
+            concrete = val.as_long() if hasattr(val, "as_long") else None
+            if concrete is None:
+                return None
+            # Check uniqueness: the address *must* equal this value
+            s2 = z3.Solver()
+            s2.add(*self.constraints)
+            s2.add(address != z3.BitVecVal(concrete, address.sort().size()))
+            if s2.check() == z3.unsat:
+                return concrete
+            return None  # multiple concrete values possible
+        except Exception:
+            return None
+
+    def query_alias(self, addr1: Any, addr2: Any) -> str:
+        """Determine the alias relationship between *addr1* and *addr2*.
+
+        Returns one of :attr:`AliasResult.MUST`, :attr:`AliasResult.MAY`,
+        or :attr:`AliasResult.NO`.
+        """
+        # Both concrete → trivial
+        if isinstance(addr1, int) and isinstance(addr2, int):
+            return AliasResult.MUST if addr1 == addr2 else AliasResult.NO
+
+        if not _Z3_AVAILABLE:
+            return AliasResult.MAY  # conservative
+
+        try:
+            a1 = addr1 if hasattr(addr1, "sort") else z3.BitVecVal(addr1, self.bit_width)
+            a2 = addr2 if hasattr(addr2, "sort") else z3.BitVecVal(addr2, self.bit_width)
+            # Normalise widths
+            w1 = a1.sort().size()
+            w2 = a2.sort().size()
+            if w1 != w2:
+                target = max(w1, w2)
+                if w1 < target:
+                    a1 = z3.ZeroExt(target - w1, a1)
+                if w2 < target:
+                    a2 = z3.ZeroExt(target - w2, a2)
+
+            s_eq = z3.Solver()
+            s_eq.add(*self.constraints)
+            s_eq.add(a1 != a2)
+            if s_eq.check() == z3.unsat:
+                return AliasResult.MUST  # can never differ → must alias
+
+            s_neq = z3.Solver()
+            s_neq.add(*self.constraints)
+            s_neq.add(a1 == a2)
+            if s_neq.check() == z3.unsat:
+                return AliasResult.NO  # can never be equal → no alias
+
+            return AliasResult.MAY
+        except Exception:
+            return AliasResult.MAY
+
+    def _forward_from_symbolic_store(self, address: Any, size: int) -> Optional[Any]:
+        """Search the symbolic store (most recent first) for a must-aliasing write.
+
+        If a prior write to a *must-alias* address of the same size is
+        found, the stored value is forwarded.  Returns ``None`` when no
+        forwarding is possible.
+        """
+        for write in reversed(self._symbolic_store):
+            if write.size != size:
+                continue
+            alias = self.query_alias(write.address, address)
+            if alias == AliasResult.MUST:
+                return write.value
+        return None
+
+    def read_memory(self, address: Any, size: int = 0) -> Any:
         """Read *size* bytes from memory at *address* (little-endian).
+
+        Supports both concrete and symbolic addresses.  For symbolic
+        addresses, attempts concretisation then falls back to store
+        forwarding from prior symbolic writes.
 
         The internal store is byte-granular.  If the requested region
         contains only concrete bytes they are assembled into a Python int.
@@ -381,6 +489,22 @@ class SymbolicState:
         if size == 0:
             size = self.bit_width // 8
 
+        # Handle symbolic addresses
+        if self._is_symbolic_addr(address):
+            concrete = self._try_concretise(address)
+            if concrete is not None:
+                address = concrete
+            else:
+                # Try store forwarding from symbolic writes
+                forwarded = self._forward_from_symbolic_store(address, size)
+                if forwarded is not None:
+                    return forwarded
+                # Last resort: return a fresh symbolic value
+                if _Z3_AVAILABLE:
+                    return z3.BitVec(f"mem_sym_{id(address):#x}", size * 8)
+                return 0
+
+        # Concrete address path (original logic)
         # Fast-path: single-slot legacy hit (un-split value from old API)
         if size > 1 and address in self.memory and (address + 1) not in self.memory:
             v = self.memory[address]
@@ -430,14 +554,34 @@ class SymbolicState:
             return result
         return 0
 
-    def write_memory(self, address: int, value: Any, size: int = 0) -> None:
+    def write_memory(self, address: Any, value: Any, size: int = 0) -> None:
         """Write *value* to memory at *address* (little-endian, byte-granular).
 
-        Splits the value into individual bytes and stores each one.
+        Supports both concrete and symbolic addresses.  Symbolic
+        addresses are recorded in the symbolic store for later
+        forwarding; concrete addresses are split into individual bytes.
         """
         if size == 0:
             size = self.bit_width // 8
 
+        # Handle symbolic addresses
+        if self._is_symbolic_addr(address):
+            concrete = self._try_concretise(address)
+            if concrete is not None:
+                address = concrete
+            else:
+                # Store in symbolic store for later forwarding
+                self._symbolic_store.append(MemoryWrite(
+                    address=address, value=value, size=size,
+                    timestamp=self.depth,
+                ))
+                self._memory_log.append(MemoryWrite(
+                    address=address, value=value, size=size,
+                    timestamp=self.depth,
+                ))
+                return
+
+        # Concrete address path (original logic)
         if _Z3_AVAILABLE and hasattr(value, "sort"):
             vw = value.sort().size()
             for i in range(size):
@@ -482,6 +626,7 @@ class SymbolicState:
         new.memory = dict(self.memory)
         new.constraints = list(self.constraints)
         new._memory_log = list(self._memory_log)
+        new._symbolic_store = list(self._symbolic_store)
         new._visited_pcs = set(self._visited_pcs)
         new._last_cmp = self._last_cmp
         new.flags = dict(self.flags)

@@ -6,9 +6,11 @@ modules have not been implemented yet.
 """
 
 try:
-    from .state import SymbolicState
+    from .state import SymbolicState, AliasResult, MemoryWrite
 except (ImportError, AttributeError):
     SymbolicState = None  # type: ignore[assignment,misc]
+    AliasResult = None  # type: ignore[assignment,misc]
+    MemoryWrite = None  # type: ignore[assignment,misc]
 
 try:
     from .solver import Z3Solver, SolverResult
