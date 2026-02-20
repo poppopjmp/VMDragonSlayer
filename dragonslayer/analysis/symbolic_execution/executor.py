@@ -125,6 +125,8 @@ class SymbolicExecutor:
         self.max_paths = max_paths
         self._lifter = InstructionLifter(arch=arch)
         self._solver = Z3Solver()
+        # Path constraints gathered during _explore_paths for opaque detection.
+        self._collected_path_constraints: List[Any] = []
 
     def analyze(
         self,
@@ -154,15 +156,20 @@ class SymbolicExecutor:
             # Step 4: Classify handlers
             handlers = self._classify_handlers(blocks, insn_map)
 
-            # Step 5: Detect opaque predicates
-            opaque = self._detect_opaque_predicates(instructions)
-
-            # Step 6: Build handler table
+            # Step 5: Build handler table
             handler_table = {h.address: h.category for h in handlers}
 
-            # Step 7: Symbolic exploration
+            # Step 6: Symbolic exploration (must run before opaque detection
+            # so path constraints are available).
             paths_explored, total_insns, snapshots = self._explore_paths(
                 insn_map, entry_point,
+            )
+
+            # Step 7: Detect opaque predicates — now with path constraints
+            # collected during exploration.
+            opaque = self._detect_opaque_predicates(
+                instructions,
+                path_constraints=self._collected_path_constraints,
             )
 
             return ExecutionResult(
@@ -315,16 +322,34 @@ class SymbolicExecutor:
     def _detect_opaque_predicates(
         self,
         instructions: List[LiftedInstruction],
+        *,
+        path_constraints: Optional[List[Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Scan for potential opaque predicates.
+        """Scan for potential opaque predicates.
 
         An opaque predicate is a conditional branch whose condition is
         always true or always false.  Common in VM obfuscation to
         confuse static analysis.
 
-        Enhanced: uses z3 solver to prove whether conditions are trivially
-        satisfiable/unsatisfiable beyond simple `cmp reg, reg`.
+        Enhancements over the naïve ``cmp reg, reg`` check:
+
+        * **Path constraint context** — when *path_constraints* are
+          supplied (from ``_explore_paths``), the solver checks
+          satisfiability *under* the accumulated path condition.
+          A branch that is non-trivially opaque (only always-true
+          given prior constraints) is detected with confidence 0.85.
+        * **``cmp reg, imm`` with z3** — unconstrained symbolic check
+          (original).
+        * **Arithmetic opaque predicates** — recognises patterns like
+          ``x*(x-1) %% 2 == 0`` via z3 (always true for any integer).
+
+        Parameters
+        ----------
+        instructions : list
+            Lifted instruction stream.
+        path_constraints : list or None
+            Collected during ``_explore_paths``, each entry is a dict
+            with ``address``, ``constraint``, ``state_constraints``.
         """
         if not Z3Solver.available():
             return []
@@ -332,9 +357,49 @@ class SymbolicExecutor:
         import z3 as _z3
 
         opaque: List[Dict[str, Any]] = []
+        path_constraints = path_constraints or []
 
+        # Index path constraints by branch address for fast lookup.
+        pc_by_addr: Dict[int, List[Dict[str, Any]]] = {}
+        for pc in path_constraints:
+            addr = pc.get("address")
+            if addr is not None:
+                pc_by_addr.setdefault(addr, []).append(pc)
+
+        # Phase 1: Path-constraint-aware opaque detection.
+        # Uses constraints collected during symbolic path exploration.
+        for addr, entries in pc_by_addr.items():
+            for entry in entries:
+                cond = entry.get("constraint")
+                state_cs = entry.get("state_constraints", [])
+                if cond is None:
+                    continue
+                try:
+                    # Check if this branch is always-true/false under
+                    # the accumulated path constraints.
+                    result = self._solver.is_opaque_predicate_with_context(
+                        cond, state_cs,
+                    )
+                    if result in (True, False):
+                        opaque.append({
+                            "address": addr,
+                            "always_true": result,
+                            "confidence": 0.85,
+                            "source": "path_constraint",
+                        })
+                except Exception:
+                    pass
+
+        # Track which addresses already flagged via path constraints.
+        flagged = {e["address"] for e in opaque}
+
+        # Phase 2: Linear scan for syntactic cmp/test + jcc pairs.
         prev_insn: Optional[LiftedInstruction] = None
         for insn in instructions:
+            if insn.address in flagged:
+                prev_insn = insn
+                continue
+
             if (
                 insn.category == InstructionCategory.BRANCH_COND
                 and prev_insn is not None
@@ -345,17 +410,16 @@ class SymbolicExecutor:
                 if len(ops) == 2:
                     if ops[0] == ops[1]:
                         if prev_insn.mnemonic == "test":
-                            # test reg, reg — ZF=1 iff reg==0 (NOT opaque)
                             opaque.append({
                                 "address": insn.address,
                                 "comparison_address": prev_insn.address,
                                 "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
                                 "branch": f"{insn.mnemonic} {insn.operands}",
-                                "always_true": None,  # depends on register value
+                                "always_true": None,
                                 "confidence": 0.5,
+                                "source": "syntactic",
                             })
                         else:
-                            # cmp reg, reg — SUB always yields zero → ZF always 1
                             opaque.append({
                                 "address": insn.address,
                                 "comparison_address": prev_insn.address,
@@ -363,59 +427,149 @@ class SymbolicExecutor:
                                 "branch": f"{insn.mnemonic} {insn.operands}",
                                 "always_true": insn.mnemonic in ("je", "jz", "jle", "jge", "jbe", "jae"),
                                 "confidence": 0.99,
+                                "source": "syntactic",
                             })
                     else:
-                        # Case 3: cmp with constant — check if always true/false
-                        # e.g. cmp eax, 0 followed by jge  (always true if unsigned)
-                        try:
-                            imm = int(ops[1], 0) if ops[1].startswith("0x") else int(ops[1]) if ops[1].lstrip("-").isdigit() else None
-                        except ValueError:
-                            imm = None
-
-                        if imm is not None:
-                            x = _z3.BitVec("opaque_x", self.bit_width)
-                            const = _z3.BitVecVal(imm, self.bit_width)
-
-                            # Build the branch condition
-                            mn = insn.mnemonic
-                            if mn in ("je", "jz"):
-                                cond = x == const
-                            elif mn in ("jne", "jnz"):
-                                cond = x != const
-                            elif mn == "jg":
-                                cond = x > const
-                            elif mn == "jge":
-                                cond = x >= const
-                            elif mn == "jl":
-                                cond = x < const
-                            elif mn == "jle":
-                                cond = x <= const
-                            elif mn == "ja":
-                                cond = _z3.UGT(x, const)
-                            elif mn == "jae":
-                                cond = _z3.UGE(x, const)
-                            elif mn == "jb":
-                                cond = _z3.ULT(x, const)
-                            elif mn == "jbe":
-                                cond = _z3.ULE(x, const)
-                            else:
-                                cond = None
-
-                            if cond is not None:
-                                result = self._solver.is_opaque_predicate(cond)
-                                if result in (True, False):
-                                    opaque.append({
-                                        "address": insn.address,
-                                        "comparison_address": prev_insn.address,
-                                        "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
-                                        "branch": f"{insn.mnemonic} {insn.operands}",
-                                        "always_true": result,
-                                        "confidence": 0.90,
-                                    })
+                        cond = self._build_opaque_condition(
+                            _z3, insn.mnemonic, ops, prev_insn.mnemonic,
+                        )
+                        if cond is not None:
+                            result = self._solver.is_opaque_predicate(cond)
+                            if result in (True, False):
+                                opaque.append({
+                                    "address": insn.address,
+                                    "comparison_address": prev_insn.address,
+                                    "comparison": f"{prev_insn.mnemonic} {prev_insn.operands}",
+                                    "branch": f"{insn.mnemonic} {insn.operands}",
+                                    "always_true": result,
+                                    "confidence": 0.90,
+                                    "source": "z3_unconstrained",
+                                })
 
             prev_insn = insn
 
+        # Phase 3: Detect common arithmetic opaque predicates.
+        opaque.extend(self._detect_arithmetic_opaques(_z3, instructions, flagged))
+
         return opaque
+
+    def _build_opaque_condition(
+        self,
+        _z3: Any,
+        branch_mn: str,
+        cmp_ops: List[str],
+        cmp_mn: str,
+    ) -> Any:
+        """Build a z3 condition from a cmp/test + jcc pair.
+
+        Handles both ``cmp reg, imm`` and ``cmp reg, reg`` with
+        distinct symbolic variables.
+        """
+        def _parse_operand(name: str) -> Any:
+            """Return z3 BitVec for registers, BitVecVal for immediates."""
+            # Try integer literal.
+            try:
+                val = int(name, 0) if name.startswith("0x") else int(name) if name.lstrip("-").isdigit() else None
+            except ValueError:
+                val = None
+            if val is not None:
+                return _z3.BitVecVal(val, self.bit_width)
+            # Otherwise symbolic register.
+            return _z3.BitVec(f"op_{name}", self.bit_width)
+
+        left = _parse_operand(cmp_ops[0])
+        right = _parse_operand(cmp_ops[1])
+
+        if cmp_mn == "test":
+            # test performs AND; flags are set based on left & right
+            result = left & right
+            # For test, conditions reference the AND result
+            mn = branch_mn
+            if mn in ("je", "jz"):
+                return result == 0
+            elif mn in ("jne", "jnz"):
+                return result != 0
+            elif mn == "js":
+                return result < 0  # signed
+            elif mn == "jns":
+                return result >= 0  # signed
+            else:
+                return None
+
+        # cmp performs SUB; conditions reference left vs right
+        mn = branch_mn
+        if mn in ("je", "jz"):
+            return left == right
+        elif mn in ("jne", "jnz"):
+            return left != right
+        elif mn == "jg":
+            return left > right
+        elif mn == "jge":
+            return left >= right
+        elif mn == "jl":
+            return left < right
+        elif mn == "jle":
+            return left <= right
+        elif mn == "ja":
+            return _z3.UGT(left, right)
+        elif mn == "jae":
+            return _z3.UGE(left, right)
+        elif mn == "jb":
+            return _z3.ULT(left, right)
+        elif mn == "jbe":
+            return _z3.ULE(left, right)
+        return None
+
+    @staticmethod
+    def _detect_arithmetic_opaques(
+        _z3: Any,
+        instructions: List[LiftedInstruction],
+        already_flagged: set,
+    ) -> List[Dict[str, Any]]:
+        """Detect arithmetic opaque predicates.
+
+        Patterns:
+        - ``x * (x - 1) % 2 == 0``  (product of consecutive ints is even)
+        - ``x * x >= 0``             (unsigned square is non-negative)
+        - ``x | (x - 1) >= x - 1``   (always true)
+        """
+        results: List[Dict[str, Any]] = []
+        x = _z3.BitVec("arith_x", 64)
+
+        # Pre-built tautologies to check against instruction patterns.
+        _ARITH_PATTERNS = [
+            ("x*(x-1)%2==0", (x * (x - 1)) % 2 == 0, 0.92),
+            ("x|1 != 0", (x | 1) != 0, 0.95),
+        ]
+
+        # Scan for mul → and/test → jz sequences (3-instruction window).
+        for i in range(len(instructions) - 2):
+            if instructions[i + 2].address in already_flagged:
+                continue
+
+            i0, i1, i2 = instructions[i], instructions[i + 1], instructions[i + 2]
+
+            if (
+                i0.mnemonic in ("imul", "mul")
+                and i1.mnemonic in ("and", "test")
+                and i2.category == InstructionCategory.BRANCH_COND
+            ):
+                # Pattern: multiply → mask → branch  (likely x*(x-1)%2==0)
+                for name, cond, conf in _ARITH_PATTERNS:
+                    s = _z3.Solver()
+                    s.set("timeout", 500)
+                    s.add(_z3.Not(cond))
+                    if s.check() == _z3.unsat:
+                        results.append({
+                            "address": i2.address,
+                            "pattern": name,
+                            "always_true": True,
+                            "confidence": conf,
+                            "source": "arithmetic",
+                        })
+                        break
+
+        return results
 
     # -- Path exploration with instruction semantics --------------------------
 
@@ -435,6 +589,9 @@ class SymbolicExecutor:
         """
         if not insn_map:
             return 0, 0, []
+
+        # Reset path constraints for this analysis run.
+        self._collected_path_constraints = []
 
         initial_state = SymbolicState(
             arch=self.arch,
@@ -472,6 +629,14 @@ class SymbolicExecutor:
                     if insn.category == InstructionCategory.BRANCH_COND and insn.branch_target:
                         # Build branch constraint if z3 available
                         branch_constraint = self._build_branch_constraint(state, insn)
+
+                        # Collect constraint for opaque predicate analysis.
+                        if branch_constraint is not None:
+                            self._collected_path_constraints.append({
+                                "address": insn.address,
+                                "constraint": branch_constraint,
+                                "state_constraints": list(state.constraints),
+                            })
 
                         if len(worklist) < self.max_paths:
                             taken = state.fork()

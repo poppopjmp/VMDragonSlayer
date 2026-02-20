@@ -151,6 +151,53 @@ class Z3Solver:
         s.pop()
         return None  # Genuinely conditional
 
+    def is_opaque_predicate_with_context(
+        self,
+        condition: Any,
+        path_constraints: Any,
+    ) -> Optional[bool]:
+        """Determine if *condition* is opaque *under* accumulated path
+        constraints.
+
+        Unlike :meth:`is_opaque_predicate` which checks for universal
+        tautology/contradiction, this method adds the *path_constraints*
+        (a list of z3 expressions or z3-compatible objects) to the solver
+        before testing.  A branch that is genuinely conditional in
+        isolation may be always-true given the path context.
+
+        Returns ``True``, ``False``, or ``None`` (genuinely conditional
+        even under constraints).
+        """
+        s = z3.Solver()
+        s.set("timeout", self.timeout_ms)
+
+        # Add path constraints.
+        if path_constraints:
+            for c in path_constraints:
+                try:
+                    s.add(c)
+                except Exception:
+                    continue
+
+        # Check if ¬condition is UNSAT under path → always true in context.
+        s.push()
+        s.add(z3.Not(condition))
+        if s.check() == z3.unsat:
+            s.pop()
+            return True
+
+        s.pop()
+
+        # Check if condition is UNSAT under path → always false in context.
+        s.push()
+        s.add(condition)
+        if s.check() == z3.unsat:
+            s.pop()
+            return False
+
+        s.pop()
+        return None
+
     @staticmethod
     def simplify(expr: Any) -> Any:
         """Simplify a z3 expression."""
