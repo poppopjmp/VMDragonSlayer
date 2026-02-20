@@ -28,6 +28,13 @@ from .yara_engine import (
     YARA_AVAILABLE,
 )
 
+from .matcher import (
+    PatternMatcher,
+    RankedMatch,
+    MatchContext,
+    find_signature_collisions,
+)
+
 __all__ = [
     # Database
     'Pattern',
@@ -39,6 +46,12 @@ __all__ = [
     'Match',
     'PatternRecognizer',
     'SequenceRecognizer',
+
+    # Context-Aware Matching
+    'PatternMatcher',
+    'RankedMatch',
+    'MatchContext',
+    'find_signature_collisions',
 
     # Classification
     'PatternClassifier',
