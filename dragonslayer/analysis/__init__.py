@@ -103,3 +103,7 @@ from .mba_simplifier import (  # noqa: F401
     MBAResult,
     MBAStats,
 )
+
+from .devirtualisation_result import (  # noqa: F401
+    DevirtualisationResult,
+)

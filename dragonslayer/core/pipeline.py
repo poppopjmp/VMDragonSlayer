@@ -209,6 +209,7 @@ class AnalysisPipeline:
 
         # --- stage dispatch map -------------------------------------------
         stage_handlers: Dict[str, Callable] = {
+            "binary_parse": lambda: self._run_binary_parse(binary_data, ctx),
             "pattern_analysis": lambda: self._run_pattern_analysis(binary_data, ctx),
             "vm_discovery": lambda: self._run_vm_discovery(binary_data, ctx),
             "anti_evasion": lambda: self._run_anti_evasion(binary_data, ctx),
@@ -342,6 +343,57 @@ class AnalysisPipeline:
             )
 
     # -- built-in engine stages --------------------------------------------
+
+    def _run_binary_parse(
+        self,
+        binary_data: bytes,
+        ctx: Any,
+    ) -> StageResult:
+        """Parse binary format and populate shared_data with PE/ELF info.
+
+        Stores ``image_base``, ``entry_point``, ``architecture``,
+        and ``sections`` so downstream stages can access them
+        without redoing PE parsing.
+        """
+        t0 = time.monotonic()
+        try:
+            from ..analysis.binary_format import parse_binary
+            parsed = parse_binary(binary_data)
+            ctx.shared_data["parsed_binary"] = parsed
+            ctx.shared_data["image_base"] = parsed.image_base
+            ctx.shared_data["entry_point"] = parsed.entry_point
+            arch_val = getattr(parsed.architecture, "value", str(parsed.architecture))
+            ctx.shared_data["architecture"] = arch_val
+            ctx.shared_data["binary_format"] = getattr(
+                parsed.format, "value", str(parsed.format)
+            )
+            ctx.shared_data["sections"] = [
+                {
+                    "name": s.name,
+                    "virtual_address": s.virtual_address,
+                    "virtual_size": s.virtual_size,
+                    "raw_size": s.raw_size,
+                    "characteristics": s.characteristics,
+                    "entropy": getattr(s, "entropy", 0.0),
+                }
+                for s in parsed.sections
+            ]
+            data = {
+                "image_base": parsed.image_base,
+                "entry_point": parsed.entry_point,
+                "architecture": arch_val,
+                "section_count": len(parsed.sections),
+            }
+            return StageResult(
+                stage="binary_parse", success=True, data=data,
+                duration=time.monotonic() - t0,
+            )
+        except Exception as exc:
+            logger.debug("Binary parse stage failed: %s", exc)
+            return StageResult(
+                stage="binary_parse", success=False, error=str(exc),
+                duration=time.monotonic() - t0,
+            )
 
     def _run_pattern_analysis(
         self,
@@ -972,6 +1024,7 @@ class AnalysisPipeline:
             )
             from ..analysis.handler_semantics import analyse_handler_semantics
             from ..analysis.pseudocode import emit_pseudocode
+            from ..analysis.devirtualisation_result import DevirtualisationResult
 
             # ── 1. Obtain an ExecutionTrace ──────────────────────────────
             trace: ExecutionTrace | None = None
@@ -981,16 +1034,16 @@ class AnalysisPipeline:
                 pass
 
             if trace is None or not trace.instructions:
-                return {
-                    "skipped": True,
-                    "reason": "No execution trace available — run dynamic analysis first",
-                }
+                return DevirtualisationResult.skipped_result(
+                    "No execution trace available — run dynamic analysis first",
+                ).to_dict()
 
             # Derive base address from PE analysis or shared_data.
-            base_address: int = 0
-            pe_info = ctx.shared_data.get("pe_analyzer", {})
-            if isinstance(pe_info, dict):
-                base_address = pe_info.get("image_base", 0) or pe_info.get("base_address", 0)
+            base_address: int = ctx.shared_data.get("image_base", 0)
+            if not base_address:
+                pe_info = ctx.shared_data.get("pe_analyzer", {})
+                if isinstance(pe_info, dict):
+                    base_address = pe_info.get("image_base", 0) or pe_info.get("base_address", 0)
             if not base_address:
                 base_address = ctx.shared_data.get("base_address", 0)
 
@@ -1118,19 +1171,17 @@ class AnalysisPipeline:
             vip_candidate = identify_vip_register(trace, dispatcher_addrs)
 
             if vip_candidate is None:
-                return {
-                    "skipped": True,
-                    "reason": "Could not identify virtual instruction pointer register",
-                }
+                return DevirtualisationResult.skipped_result(
+                    "Could not identify virtual instruction pointer register",
+                ).to_dict()
 
             seg = segment_trace(trace, vip_candidate, dispatcher_addrs)
             boundaries = seg.boundaries
 
             if not boundaries:
-                return {
-                    "skipped": True,
-                    "reason": "Trace segmentation produced no handler boundaries",
-                }
+                return DevirtualisationResult.skipped_result(
+                    "Trace segmentation produced no handler boundaries",
+                ).to_dict()
 
             # ── 5. Handler extraction (Batch 14) ─────────────────────────
             extraction_data: Optional[Dict[str, Any]] = None
@@ -1206,6 +1257,63 @@ class AnalysisPipeline:
             except Exception as exc:
                 logger.debug("Handler clustering skipped: %s", exc)
 
+            # ── 7c. ML ensemble classification (Batch 39) ────────────────
+            ml_labels: Optional[Dict[str, str]] = None
+            try:
+                from ..ml.model import SymbolicClassifierModel, VMHandlerModel
+                from ..ml.ensemble import WeightedEnsemble
+
+                sym_model = SymbolicClassifierModel()
+                heur_model = VMHandlerModel()
+                ensemble = WeightedEnsemble(
+                    models=[heur_model, sym_model],
+                    weights=[0.4, 0.6],
+                )
+
+                ml_labels = {}
+                for entry in opcode_table.entries:
+                    features: Dict[str, Any] = {}
+                    # Attach symbolic summary if available
+                    if sym_summaries and entry.handler_address in sym_summaries:
+                        s = sym_summaries[entry.handler_address]
+                        features["symbolic_summary"] = (
+                            s.to_dict() if hasattr(s, "to_dict") else s
+                        )
+                    # Attach heuristic features from the semantic
+                    sem = entry.semantic
+                    if sem is not None:
+                        hist = getattr(sem, "mnemonic_histogram", {}) or {}
+                        total = max(sum(hist.values()), 1)
+                        features["values"] = [
+                            hist.get("add", 0) / total,
+                            hist.get("and", 0) / total,
+                            hist.get("mov", 0) / total,
+                            hist.get("push", 0) / total,
+                            0.0, 0.0, 0.0, 0.0, 0.0,
+                            float(total), 0.0, 0.0, 0.0,
+                        ]
+                        features["names"] = [
+                            "arith_ratio", "logic_ratio", "mem_ratio",
+                            "stack_ratio", "branch_ratio", "vip_delta",
+                            "nop_ratio", "junk_ratio", "reg_diversity",
+                            "insn_count", "avg_operands", "push_ratio",
+                            "pop_ratio",
+                        ]
+
+                    pred = ensemble.predict(features)
+                    addr_hex = f"0x{entry.handler_address:x}"
+                    ml_labels[addr_hex] = pred.label
+
+                    # Confidence boost when ML agrees with symbolic
+                    if (
+                        sem is not None
+                        and pred.label == sem.operation
+                        and pred.confidence > 0.7
+                    ):
+                        sem.confidence = min(sem.confidence + 0.05, 1.0)
+            except Exception as exc:
+                logger.debug("ML ensemble classification skipped: %s", exc)
+
             # ── 7b. Handler-level CFG construction (Batch 19 + B24) ────
             handler_cfg = None
             handler_cfg_data: Optional[Dict[str, Any]] = None
@@ -1258,39 +1366,26 @@ class AnalysisPipeline:
             )
 
             # ── Assemble result ──────────────────────────────────────────
-            result_data: Dict[str, Any] = {
-                "vip_register": vip_candidate.name,
-                "handler_count": len(boundaries),
-                "unique_operations": opcode_table.unique_operations,
-                "opcode_table": opcode_table.to_dict(),
-                "pseudocode": pseudocode_result.to_dict(),
-                "pseudocode_text": pseudocode_result.text,
-            }
-
-            # Attach optional Batch 13-17 products.
-            if hook_set_data is not None:
-                result_data["anti_evasion_hooks"] = hook_set_data
-            if vmprotect_match is not None:
-                result_data["vmprotect_dispatcher"] = vmprotect_match
-            if extraction_data is not None:
-                result_data["handler_extraction"] = extraction_data
-            if context_layout_data is not None:
-                result_data["vm_context_layout"] = context_layout_data
-            if clustering_data is not None:
-                result_data["handler_clustering"] = clustering_data
-            if handler_cfg_data is not None:
-                result_data["handler_cfg"] = handler_cfg_data
-            if vm_entry_data is not None:
-                result_data["vm_entry_points"] = vm_entry_data
-            dec_table = ctx.shared_data.get("decrypted_handler_table")
-            if dec_table is not None:
-                result_data["decrypted_handler_table"] = dec_table
-            dec_info = ctx.shared_data.get("bytecode_decryptor")
-            if dec_info is not None:
-                result_data["bytecode_decryptor"] = dec_info
-            static_cfg = ctx.shared_data.get("static_handler_cfg")
-            if static_cfg is not None:
-                result_data["static_handler_cfg"] = static_cfg
+            result = DevirtualisationResult(
+                success=True,
+                vip_register=vip_candidate.name,
+                handler_count=len(boundaries),
+                unique_operations=opcode_table.unique_operations,
+                opcode_table=opcode_table.to_dict(),
+                pseudocode=pseudocode_result.to_dict(),
+                pseudocode_text=pseudocode_result.text,
+                anti_evasion_hooks=hook_set_data,
+                vmprotect_dispatcher=vmprotect_match,
+                handler_extraction=extraction_data,
+                vm_context_layout=context_layout_data,
+                handler_clustering=clustering_data,
+                handler_cfg=handler_cfg_data,
+                vm_entry_points=vm_entry_data,
+                decrypted_handler_table=ctx.shared_data.get("decrypted_handler_table"),
+                bytecode_decryptor=ctx.shared_data.get("bytecode_decryptor"),
+                static_handler_cfg=ctx.shared_data.get("static_handler_cfg"),
+                ml_classifications=ml_labels,
+            )
 
             # Store boundaries for downstream stages.
             ctx.shared_data["devirt_boundaries"] = [
@@ -1303,7 +1398,7 @@ class AnalysisPipeline:
                 for b in boundaries
             ]
 
-            return result_data
+            return result.to_dict()
 
         return self._run_stage("devirtualize", _do_devirt, ctx)
 
