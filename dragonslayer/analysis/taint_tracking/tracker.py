@@ -25,6 +25,95 @@ from typing import Any, Dict, List, Optional, Set
 logger = logging.getLogger(__name__)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# x86 sub-register family map  (Batch 31)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Maps every GP sub-register name to (canonical_64, bit_lo, width_bits,
+# zero_extend).  ``zero_extend`` is True for 32-bit writes that zero the
+# upper 32 bits of the 64-bit parent.
+
+_SUBREG_FAMILIES: Dict[str, tuple] = {}
+_REG_FAMILY: Dict[str, Set[str]] = {}   # canonical → all names in family
+
+def _build_family_tables() -> None:
+    """Populate the sub-register lookup tables once at import time."""
+    _specs: List[tuple] = [
+        # (canonical64, [(name, bit_lo, width, zero_ext), ...])
+    ]
+    _base_names = [
+        ("rax", "eax", "ax", "al", "ah"),
+        ("rbx", "ebx", "bx", "bl", "bh"),
+        ("rcx", "ecx", "cx", "cl", "ch"),
+        ("rdx", "edx", "dx", "dl", "dh"),
+        ("rsi", "esi", "si", "sil"),
+        ("rdi", "edi", "di", "dil"),
+        ("rbp", "ebp", "bp", "bpl"),
+        ("rsp", "esp", "sp", "spl"),
+    ]
+    for fam in _base_names:
+        canonical = fam[0]  # 64-bit parent
+        members: List[tuple] = []
+        for name in fam:
+            if name == canonical:
+                members.append((name, 0, 64, False))
+            elif name.startswith("e"):
+                members.append((name, 0, 32, True))
+            elif len(name) == 2 and name.endswith("x"):
+                members.append((name, 0, 16, False))
+            elif len(name) == 2 and name.endswith("h"):
+                members.append((name, 8, 8, False))
+            elif len(name) == 2 and name.endswith("l"):
+                members.append((name, 0, 8, False))
+            elif len(name) == 3 and name.endswith("l"):  # e.g. sil
+                members.append((name, 0, 8, False))
+            elif len(name) == 2 and name.endswith("i"):  # si, di
+                members.append((name, 0, 16, False))
+            elif len(name) == 2 and name.endswith("p"):  # bp, sp
+                members.append((name, 0, 16, False))
+            else:
+                members.append((name, 0, 16, False))  # fallback
+        _specs.append((canonical, members))
+
+    # r8 – r15
+    for n in range(8, 16):
+        canonical = f"r{n}"
+        members = [
+            (f"r{n}", 0, 64, False),
+            (f"r{n}d", 0, 32, True),
+            (f"r{n}w", 0, 16, False),
+            (f"r{n}b", 0, 8, False),
+        ]
+        _specs.append((canonical, members))
+
+    for canonical, members in _specs:
+        family_set: Set[str] = set()
+        for name, bit_lo, width, zext in members:
+            _SUBREG_FAMILIES[name] = (canonical, bit_lo, width, zext)
+            family_set.add(name)
+        _REG_FAMILY[canonical] = family_set
+
+_build_family_tables()
+
+
+def subreg_canonical(reg: str) -> str:
+    """Return the canonical 64-bit parent for *reg*, or *reg* itself."""
+    info = _SUBREG_FAMILIES.get(reg.lower())
+    return info[0] if info else reg.lower()
+
+
+def subreg_aliases(reg: str) -> Set[str]:
+    """Return all names in the same register family as *reg*."""
+    info = _SUBREG_FAMILIES.get(reg.lower())
+    if info is None:
+        return {reg.lower()}
+    return _REG_FAMILY.get(info[0], {reg.lower()})
+
+
+def subreg_info(reg: str) -> Optional[tuple]:
+    """Return ``(canonical, bit_lo, width, zero_ext)`` or ``None``."""
+    return _SUBREG_FAMILIES.get(reg.lower())
+
+
 class TaintTag(IntFlag):
     """Taint source categories (combinable via OR)."""
     CLEAN = 0
@@ -92,27 +181,78 @@ class TaintTracker:
         result = tracker.analyze(lifted_instructions)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, sub_register_aware: bool = True) -> None:
         self._reg_taint: Dict[str, TaintTag] = {}
         self._mem_taint: Dict[int, TaintTag] = {}
         self._events: List[TaintEvent] = []
         self._flow_graph: Dict[str, Set[str]] = {}
+        self._subreg_aware = sub_register_aware
+
+    # ── Sub-register helpers (Batch 31) ─────────────────────────────────────
+
+    def _resolve_reg(self, reg: str) -> str:
+        """Normalise to canonical 64-bit name when sub-register aware."""
+        r = reg.lower()
+        if self._subreg_aware:
+            return subreg_canonical(r)
+        return r
+
+    def _propagate_subreg_taint(self, reg: str, tag: TaintTag) -> None:
+        """Set taint on *reg* and, if sub-register aware, all aliases."""
+        r = reg.lower()
+        self._reg_taint[r] = tag
+        if self._subreg_aware:
+            for alias in subreg_aliases(r):
+                self._reg_taint[alias] = tag
+
+    def _clear_subreg_taint(self, reg: str) -> None:
+        """Clear taint on *reg* and all aliases."""
+        r = reg.lower()
+        self._reg_taint[r] = TaintTag.CLEAN
+        if self._subreg_aware:
+            info = subreg_info(r)
+            if info is not None:
+                _canon, bit_lo, width, zext = info
+                if width == 64 or zext:
+                    # Full-width or 32-bit zero-extend → clears whole family
+                    for alias in subreg_aliases(r):
+                        self._reg_taint[alias] = TaintTag.CLEAN
+                # For 8/16-bit writes we do NOT auto-clear the parent,
+                # only the exact sub-register is cleared.
+
+    def _collect_taint(self, reg: str) -> TaintTag:
+        """Read the taint for *reg*, checking aliases when sub-register aware."""
+        r = reg.lower()
+        tag = self._reg_taint.get(r, TaintTag.CLEAN)
+        if tag != TaintTag.CLEAN:
+            return tag
+        if self._subreg_aware:
+            # Check canonical parent and all wider aliases
+            for alias in subreg_aliases(r):
+                at = self._reg_taint.get(alias, TaintTag.CLEAN)
+                if at != TaintTag.CLEAN:
+                    return at
+        return TaintTag.CLEAN
 
     def taint_register(self, reg: str, tag: TaintTag = TaintTag.INPUT) -> None:
-        """Mark a register as tainted with the given tag."""
-        self._reg_taint[reg.lower()] = tag
+        """Mark a register as tainted with the given tag.
+
+        When sub-register aware, all aliases (e.g. rax/eax/ax/al/ah) are
+        also tainted.
+        """
+        self._propagate_subreg_taint(reg, tag)
 
     def taint_memory(self, address: int, tag: TaintTag = TaintTag.MEMORY) -> None:
         """Mark a memory address as tainted."""
         self._mem_taint[address] = tag
 
     def is_tainted(self, reg: str) -> bool:
-        """Check if a register is tainted."""
-        return self._reg_taint.get(reg.lower(), TaintTag.CLEAN) != TaintTag.CLEAN
+        """Check if a register (or any alias) is tainted."""
+        return self._collect_taint(reg) != TaintTag.CLEAN
 
     def get_taint(self, reg: str) -> TaintTag:
-        """Get the taint tag for a register."""
-        return self._reg_taint.get(reg.lower(), TaintTag.CLEAN)
+        """Get the taint tag for a register (checking aliases)."""
+        return self._collect_taint(reg)
 
     def reset(self) -> None:
         """Clear all taint state for reuse across analyses."""
@@ -201,7 +341,7 @@ class TaintTracker:
 
         for reg in reads:
             reg_lower = reg.lower()
-            tag = self._reg_taint.get(reg_lower, TaintTag.CLEAN)
+            tag = self._collect_taint(reg_lower)
             if tag != TaintTag.CLEAN:
                 combined_taint |= tag
                 tainted_sources.append(reg_lower)
@@ -220,7 +360,7 @@ class TaintTracker:
         # Taint from base register used as memory pointer
         for reg in reads:
             reg_lower = reg.lower()
-            tag = self._reg_taint.get(reg_lower, TaintTag.CLEAN)
+            tag = self._collect_taint(reg_lower)
             if tag != TaintTag.CLEAN and category in ("memory_read", "memory_write"):
                 combined_taint |= TaintTag.MEMORY
                 if reg_lower not in tainted_sources:
@@ -232,7 +372,7 @@ class TaintTracker:
 
             for reg in writes:
                 reg_lower = reg.lower()
-                self._reg_taint[reg_lower] = output_tag
+                self._propagate_subreg_taint(reg_lower, output_tag)
 
                 for src in tainted_sources:
                     self._events.append(TaintEvent(
@@ -276,7 +416,7 @@ class TaintTracker:
             # Clean writes clear taint on destination
             for reg in writes:
                 reg_lower = reg.lower()
-                if self._reg_taint.get(reg_lower, TaintTag.CLEAN) != TaintTag.CLEAN:
+                if self._collect_taint(reg_lower) != TaintTag.CLEAN:
                     self._events.append(TaintEvent(
                         address=address,
                         instruction=f"{mnemonic} {operands}",
@@ -285,7 +425,7 @@ class TaintTracker:
                         destination=reg_lower,
                         tag=TaintTag.CLEAN,
                     ))
-                    self._reg_taint[reg_lower] = TaintTag.CLEAN
+                    self._clear_subreg_taint(reg_lower)
 
     @staticmethod
     def _extract_memory_address(

@@ -15,6 +15,9 @@ try:
         TaintState,
         TaintEvent,
         TaintResult,
+        subreg_canonical,
+        subreg_aliases,
+        subreg_info,
     )
 except (ImportError, AttributeError):
     TaintTracker = None  # type: ignore[assignment,misc]
@@ -22,6 +25,9 @@ except (ImportError, AttributeError):
     TaintState = None  # type: ignore[assignment,misc]
     TaintEvent = None  # type: ignore[assignment,misc]
     TaintResult = None  # type: ignore[assignment,misc]
+    subreg_canonical = None  # type: ignore[assignment,misc]
+    subreg_aliases = None  # type: ignore[assignment,misc]
+    subreg_info = None  # type: ignore[assignment,misc]
 
 try:
     from .analyzer import TaintAnalyzer
