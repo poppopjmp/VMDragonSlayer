@@ -102,6 +102,29 @@ def _known_rules(
         ("add_and_to_xor", (x + y) - 2 * (x & y), x ^ y),
         # ~(x ^ y) == (x & y) | (~x & ~y)  — XNOR
         ("xnor_expand", ~(x ^ y), (x & y) | (~x & ~y)),
+
+        # --- Phase 10: additional common MBA patterns ---
+
+        # ~(x | y) == ~x & ~y   (De Morgan)
+        ("demorgan_nor", ~(x | y), ~x & ~y),
+        # ~(x & y) == ~x | ~y   (De Morgan)
+        ("demorgan_nand", ~(x & y), ~x | ~y),
+        # (x | y) + (x & y) == x + y   (variant of rule 1)
+        ("or_and_to_add", (x | y) + (x & y), x + y),
+        # x + ~x == -1   (all-ones constant)
+        ("add_complement_all_ones", x + ~x, z3.BitVecVal(-1, x.size())),
+        # x ^ ~x == -1   (all-ones constant)
+        ("xor_complement_all_ones", x ^ ~x, z3.BitVecVal(-1, x.size())),
+        # x & ~x == 0   (annihilation)
+        ("and_complement_zero", x & ~x, z3.BitVecVal(0, x.size())),
+        # x | ~x == -1   (tautology)
+        ("or_complement_all_ones", x | ~x, z3.BitVecVal(-1, x.size())),
+        # (x & y) ^ (x | y) == x ^ y
+        ("and_xor_or_to_xor", (x & y) ^ (x | y), x ^ y),
+        # ~x + 1 == -x   (two's complement negation)
+        ("complement_to_neg", ~x + 1, -x),
+        # x ^ y ^ (x & y) == x | y
+        ("xor_xor_and_to_or", (x ^ y) ^ (x & y), x | y),
     ]
 
 
@@ -125,6 +148,18 @@ def _known_rules_3(
         ("xor_and_add_add3", (x ^ y) + 2 * (x & y) + w, x + y + w),
         # --- x + y + z obfuscation via masks ---
         ("triple_xor_and_carries", (x ^ y ^ w) + 2 * ((x & y) | ((x ^ y) & w)), x + y + w),
+
+        # --- Phase 10: additional 3-variable patterns ---
+        # (x | y) - (x ^ y) + w == (x & y) + w
+        ("or_xor_to_and_add3", (x | y) - (x ^ y) + w, (x & y) + w),
+        # (x | y) - (x ^ y) - w == (x & y) - w
+        ("or_xor_to_and_sub3", (x | y) - (x ^ y) - w, (x & y) - w),
+        # (x | y) + (x & y) - w == x + y - w   (or_and variant)
+        ("or_and_add_sub3", (x | y) + (x & y) - w, x + y - w),
+        # (x | y) + (x & y) + w == x + y + w   (or_and variant)
+        ("or_and_add_add3", (x | y) + (x & y) + w, x + y + w),
+        # (~x + 1) + y + w == y + w - x
+        ("neg_add_3", (~x + 1) + y + w, y + w - x),
     ]
 
 

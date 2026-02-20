@@ -207,3 +207,124 @@ class TestSimplifyMBA3Var:
         # Should detect variables x, y, z and simplify
         assert r.rule_name is not None
         assert r.proven is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 10: Tests for expanded MBA rules
+# ---------------------------------------------------------------------------
+
+class TestExpandedRules2Var:
+    """Verify new 2-variable rules added in Phase 10."""
+
+    def test_demorgan_nor(self):
+        x = z3.BitVec("a", 64)
+        y = z3.BitVec("b", 64)
+        expr = ~(x | y)
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, ~x & ~y)
+
+    def test_demorgan_nand(self):
+        x = z3.BitVec("a", 64)
+        y = z3.BitVec("b", 64)
+        expr = ~(x & y)
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, ~x | ~y)
+
+    def test_or_and_to_add(self):
+        x = z3.BitVec("a", 64)
+        y = z3.BitVec("b", 64)
+        expr = (x | y) + (x & y)
+        simplified, rule = simplify_expr(expr, 64)
+        assert rule is not None
+        assert verify_equivalence(simplified, x + y)
+
+    def test_add_complement_all_ones(self):
+        x = z3.BitVec("a", 64)
+        expr = x + ~x
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, z3.BitVecVal(-1, 64))
+
+    def test_and_complement_zero(self):
+        x = z3.BitVec("a", 64)
+        expr = x & ~x
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, z3.BitVecVal(0, 64))
+
+    def test_and_xor_or_to_xor(self):
+        x = z3.BitVec("a", 64)
+        y = z3.BitVec("b", 64)
+        expr = (x & y) ^ (x | y)
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, x ^ y)
+
+    def test_complement_to_neg(self):
+        x = z3.BitVec("a", 64)
+        expr = ~x + 1
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, -x)
+
+    def test_xor_xor_and_to_or(self):
+        x = z3.BitVec("a", 64)
+        y = z3.BitVec("b", 64)
+        expr = (x ^ y) ^ (x & y)
+        simplified, rule = simplify_expr(expr, 64)
+        assert verify_equivalence(simplified, x | y)
+
+    def test_all_new_2var_rules_proven(self):
+        """Every rule in _known_rules must be semantically correct."""
+        x = z3.BitVec("x", 64)
+        y = z3.BitVec("y", 64)
+        rules = _known_rules(x, y)
+        assert len(rules) >= 20, f"Expected >= 20 rules, got {len(rules)}"
+        for name, pattern, replacement in rules:
+            ok = verify_equivalence(pattern, replacement, timeout_ms=10000)
+            assert ok, f"Rule {name!r} failed equivalence proof"
+
+    def test_32bit_complement_to_neg(self):
+        """Rules work at 32-bit width too."""
+        x = z3.BitVec("a", 32)
+        expr = ~x + 1
+        simplified, rule = simplify_expr(expr, 32)
+        assert verify_equivalence(simplified, -x)
+
+
+class TestExpandedRules3Var:
+    """Verify new 3-variable rules added in Phase 10."""
+
+    def test_or_xor_to_and_add3(self):
+        a = z3.BitVec("a", 64)
+        b = z3.BitVec("b", 64)
+        c = z3.BitVec("c", 64)
+        expr = (a | b) - (a ^ b) + c
+        simplified, rule = simplify_expr(expr, 64)
+        assert rule is not None
+        assert verify_equivalence(simplified, (a & b) + c)
+
+    def test_or_and_add_sub3(self):
+        a = z3.BitVec("a", 64)
+        b = z3.BitVec("b", 64)
+        c = z3.BitVec("c", 64)
+        expr = (a | b) + (a & b) - c
+        simplified, rule = simplify_expr(expr, 64)
+        assert rule is not None
+        assert verify_equivalence(simplified, a + b - c)
+
+    def test_neg_add_3(self):
+        a = z3.BitVec("a", 64)
+        b = z3.BitVec("b", 64)
+        c = z3.BitVec("c", 64)
+        expr = (~a + 1) + b + c
+        simplified, rule = simplify_expr(expr, 64)
+        assert rule is not None
+        assert verify_equivalence(simplified, b + c - a)
+
+    def test_all_new_3var_rules_proven(self):
+        """Every rule in _known_rules_3 must be semantically correct."""
+        x = z3.BitVec("x", 64)
+        y = z3.BitVec("y", 64)
+        w = z3.BitVec("w", 64)
+        rules = _known_rules_3(x, y, w)
+        assert len(rules) >= 10, f"Expected >= 10 3-var rules, got {len(rules)}"
+        for name, pattern, replacement in rules:
+            ok = verify_equivalence(pattern, replacement, timeout_ms=10000)
+            assert ok, f"3-var rule {name!r} failed equivalence proof"
