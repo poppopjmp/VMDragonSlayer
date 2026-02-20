@@ -84,17 +84,24 @@ class PatternRecognizer:
         Recognize patterns in instruction byte sequence.
 
         Uses YARA when available, otherwise falls back to regex matching.
+
+        .. versionchanged:: B70
+           Applies :meth:`normalize_semantics` before matching to strip
+           junk NOP opcodes inserted by obfuscators.
         """
         # Convert enum to string if needed
         if architecture and hasattr(architecture, 'value'):
             architecture = architecture.value
         if handler_type and hasattr(handler_type, 'value'):
             handler_type = handler_type.value
+
+        # B70: normalise semantics (strip NOP junk) before matching
+        normalised = self.normalize_semantics(instruction_bytes)
         
         # ---- YARA fast path ----
         if self._yara is not None:
             return self._recognize_yara(
-                instruction_bytes,
+                normalised,
                 min_confidence=min_confidence,
                 architecture=architecture,
                 handler_type=handler_type,
@@ -102,7 +109,7 @@ class PatternRecognizer:
         
         # ---- Regex fallback ----
         return self._recognize_regex(
-            instruction_bytes,
+            normalised,
             min_confidence=min_confidence,
             architecture=architecture,
             handler_type=handler_type,

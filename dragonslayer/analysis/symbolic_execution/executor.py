@@ -157,12 +157,14 @@ class SymbolicExecutor:
         max_loop_iters: int = 3,
         solver_timeout_ms: int = 10000,
         memory_limit_mb: int = 0,
+        per_path_timeout_ms: int = 0,
     ) -> None:
         self.arch = arch
         self.bit_width = 64 if "64" in arch else 32
         self.max_depth = max_depth
         self.max_paths = max_paths
         self.max_loop_iters = max_loop_iters
+        self.per_path_timeout_ms = per_path_timeout_ms  # B70: 0 = unlimited
         self._lifter = InstructionLifter(arch=arch)
         self._solver = Z3Solver(
             timeout_ms=solver_timeout_ms,
@@ -174,6 +176,8 @@ class SymbolicExecutor:
         self._detected_loops: Dict[int, LoopInfo] = {}
         # B54: monotonic counter for heapq tie-breaking
         self._state_seq: int = 0
+        # B70: Dispatcher result cache — keyed by (code_hash, entry_point).
+        self._dispatcher_cache: Dict[tuple, tuple[Optional[int], float]] = {}
 
     @classmethod
     def from_config(cls, config: Any = None) -> "SymbolicExecutor":
@@ -223,7 +227,14 @@ class SymbolicExecutor:
             cfg = self._build_cfg(blocks, entry_point)
 
             # Step 3: Identify dispatcher using VMProtect pattern matching
-            dispatcher_addr, dispatcher_confidence = self._find_dispatcher(instructions)
+            # B70: Check cache first to avoid recomputation.
+            import hashlib as _hashlib
+            _cache_key = (_hashlib.sha256(code).hexdigest(), entry_point)
+            if _cache_key in self._dispatcher_cache:
+                dispatcher_addr, dispatcher_confidence = self._dispatcher_cache[_cache_key]
+            else:
+                dispatcher_addr, dispatcher_confidence = self._find_dispatcher(instructions)
+                self._dispatcher_cache[_cache_key] = (dispatcher_addr, dispatcher_confidence)
             # Also run the new VMProtect-specific dispatcher identification
             self._vmprotect_dispatcher = self._find_vmprotect_dispatcher(
                 instructions, code, entry_point,
@@ -1103,8 +1114,17 @@ class SymbolicExecutor:
             state = self._try_merge_worklist(state, worklist)
 
             path_len = 0
+            # B70: Per-path timeout — record start time.
+            import time as _time
+            _path_start = _time.monotonic()
+            _path_timeout_s = self.per_path_timeout_ms / 1000.0 if self.per_path_timeout_ms > 0 else 0.0
 
             while not state.halted and path_len < self.max_depth:
+                # B70: Check per-path timeout
+                if _path_timeout_s > 0 and (_time.monotonic() - _path_start) > _path_timeout_s:
+                    state.halt("per-path timeout")
+                    break
+
                 insn = insn_map.get(state.pc)
                 if insn is None:
                     state.halt("address not in map")

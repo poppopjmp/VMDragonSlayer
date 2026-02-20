@@ -526,6 +526,32 @@ class TaintTracker:
         """Mark a memory address as tainted."""
         self._mem_taint[address] = tag
 
+    def taint_memory_region(
+        self,
+        address: int,
+        size: int,
+        tag: TaintTag = TaintTag.MEMORY,
+    ) -> None:
+        """Mark a contiguous memory region as tainted (B70).
+
+        Taints every byte from *address* to *address + size - 1*,
+        modelling multi-byte writes (e.g. ``mov [rdi], rax`` writes 8
+        bytes).
+        """
+        for offset in range(size):
+            self._mem_taint[address + offset] = tag
+
+    def is_memory_region_tainted(
+        self,
+        address: int,
+        size: int,
+    ) -> bool:
+        """Check whether *any* byte in a memory region is tainted (B70)."""
+        return any(
+            self._mem_taint.get(address + offset, TaintTag.CLEAN) != TaintTag.CLEAN
+            for offset in range(size)
+        )
+
     def is_tainted(self, reg: str) -> bool:
         """Check if a register (or any alias) is tainted."""
         return self._collect_taint(reg) != TaintTag.CLEAN

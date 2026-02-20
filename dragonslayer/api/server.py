@@ -223,13 +223,39 @@ async def body_size_limit_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    """Attach a unique X-Request-ID header to every request/response."""
+    """Attach a unique X-Request-ID header to every request/response.
+
+    B70: Also injects ``request_id`` into all log records emitted during
+    the request via a logging filter, so that JSON log lines include
+    the correlation ID automatically.
+    """
     req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     # Store on request state so downstream handlers can access it
     request.state.request_id = req_id
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = req_id
-    return response
+
+    # B70: Inject request_id into logging context for correlation
+    _rid_filter = _RequestIDFilter(req_id)
+    logging.getLogger().addFilter(_rid_filter)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
+    finally:
+        logging.getLogger().removeFilter(_rid_filter)
+
+
+class _RequestIDFilter(logging.Filter):
+    """Inject ``request_id`` attribute into every log record."""
+
+    __slots__ = ("_request_id",)
+
+    def __init__(self, request_id: str) -> None:
+        super().__init__()
+        self._request_id = request_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = self._request_id  # type: ignore[attr-defined]
+        return True
 
 
 # --- Per-request timeout middleware ------------------------------------------
