@@ -180,7 +180,61 @@ class TritonAnalyzer(Plugin):
                 unique_addrs.append(a)
         exec_addrs = unique_addrs
 
-        # Symbolic execution (limited to prevent explosion)
+        # ---- Register list for snapshots -----------------------------------
+        if is_64:
+            snapshot_regs = [
+                tc.registers.rax, tc.registers.rbx, tc.registers.rcx,
+                tc.registers.rdx, tc.registers.rsi, tc.registers.rdi,
+                tc.registers.rbp, tc.registers.rsp, tc.registers.r8,
+                tc.registers.r9,  tc.registers.r10, tc.registers.r11,
+                tc.registers.r12, tc.registers.r13, tc.registers.r14,
+                tc.registers.r15, tc.registers.rip,
+            ]
+        else:
+            snapshot_regs = [
+                tc.registers.eax, tc.registers.ebx, tc.registers.ecx,
+                tc.registers.edx, tc.registers.esi, tc.registers.edi,
+                tc.registers.ebp, tc.registers.esp, tc.registers.eip,
+            ]
+
+        # ---- Memory-access hooks ------------------------------------------
+        mem_accesses: List[Dict[str, Any]] = []
+
+        def _on_mem_read(ctx_unused: Any, mem: Any) -> None:
+            addr = mem.getAddress()
+            size = mem.getSize()
+            try:
+                val = int(tc.getConcreteMemoryValue(mem))
+            except Exception:
+                val = 0
+            mem_accesses.append({
+                "type": "read",
+                "address": addr,
+                "size": size,
+                "value": val,
+            })
+
+        def _on_mem_write(ctx_unused: Any, mem: Any, value: Any) -> None:
+            addr = mem.getAddress()
+            size = mem.getSize()
+            try:
+                val = int(value) if value is not None else 0
+            except Exception:
+                val = 0
+            mem_accesses.append({
+                "type": "write",
+                "address": addr,
+                "size": size,
+                "value": val,
+            })
+
+        try:
+            tc.addCallback(CALLBACK.GET_CONCRETE_MEMORY_VALUE, _on_mem_read)
+            tc.addCallback(CALLBACK.SET_CONCRETE_MEMORY_VALUE, _on_mem_write)
+        except Exception:
+            logger.debug("Triton memory callbacks not available")
+
+        # ---- Symbolic execution (limited to prevent explosion) -------------
         MAX_INSNS = 5_000
         insn_count = 0
         ast_counter: Counter[str] = Counter()
@@ -188,6 +242,10 @@ class TritonAnalyzer(Plugin):
         executed_addrs: List[int] = []
         taint_flow: List[Dict[str, Any]] = []
         path_constraints: List[str] = []
+
+        # Per-instruction trace — the critical enrichment for devirt pipeline
+        instruction_trace: List[Dict[str, Any]] = []
+        mem_access_idx = 0  # track which mem_accesses belong to each insn
 
         for start_addr in exec_addrs:
             pc = start_addr
@@ -200,6 +258,7 @@ class TritonAnalyzer(Plugin):
                     break
 
                 inst = Instruction(pc, opcode)
+                mem_before = len(mem_accesses)
                 try:
                     if not tc.processing(inst):
                         break
@@ -210,6 +269,36 @@ class TritonAnalyzer(Plugin):
                 local_insns += 1
                 executed_addrs.append(pc)
 
+                # --- Per-instruction register snapshot ----------------------
+                reg_snapshot: Dict[str, int] = {}
+                for reg in snapshot_regs:
+                    try:
+                        reg_snapshot[reg.getName()] = int(
+                            tc.getConcreteRegisterValue(reg)
+                        )
+                    except Exception:
+                        pass
+
+                # --- Per-instruction memory accesses ------------------------
+                insn_mem: List[Dict[str, Any]] = mem_accesses[mem_before:]
+
+                # --- Build enriched trace record ----------------------------
+                insn_size = inst.getSize()
+                try:
+                    raw = bytes(inst.getOpcode()[:insn_size])
+                except Exception:
+                    raw = b""
+
+                trace_record: Dict[str, Any] = {
+                    "address": pc,
+                    "size": insn_size,
+                    "raw_bytes": raw.hex(),
+                    "disassembly": inst.getDisassembly(),
+                    "registers": reg_snapshot,
+                    "memory_accesses": list(insn_mem),
+                    "is_tainted": False,
+                }
+
                 # Collect AST expressions
                 for expr in inst.getSymbolicExpressions():
                     ast_node = expr.getAst()
@@ -219,23 +308,49 @@ class TritonAnalyzer(Plugin):
 
                 # --- Taint tracking: record taint propagation ---------------
                 if taint_regs and inst.isTainted():
-                    taint_entry = {
+                    trace_record["is_tainted"] = True
+                    taint_entry: Dict[str, Any] = {
                         "address": pc,
                         "disasm": inst.getDisassembly(),
                     }
                     try:
-                        tainted_read = [
-                            op.getRegister().getName()
-                            for op in inst.getOperands()
-                            if hasattr(op, "getRegister") and op.getType() == OPERAND.REG
-                            and tc.isRegisterTainted(op.getRegister())
-                        ]
-                        tainted_write = [
-                            op.getRegister().getName()
-                            for op in inst.getOperands()
-                            if hasattr(op, "getRegister") and op.getType() == OPERAND.REG
-                            and tc.isRegisterTainted(op.getRegister())
-                        ]
+                        # Distinguish reads (source operands) vs writes (dest)
+                        # In x86, destination is typically the first operand
+                        operands = inst.getOperands()
+                        tainted_read: List[str] = []
+                        tainted_write: List[str] = []
+                        for i, op in enumerate(operands):
+                            if op.getType() != OPERAND.REG:
+                                continue
+                            if not hasattr(op, "getRegister"):
+                                continue
+                            r = op.getRegister()
+                            if not tc.isRegisterTainted(r):
+                                continue
+                            rname = r.getName()
+                            # First operand = destination (written)
+                            if i == 0:
+                                tainted_write.append(rname)
+                            else:
+                                tainted_read.append(rname)
+                        # Memory operands can also be tainted reads/writes
+                        for mem in insn_mem:
+                            if mem["type"] == "read":
+                                try:
+                                    if tc.isMemoryTainted(mem["address"], mem["size"]):
+                                        tainted_read.append(
+                                            f"mem[0x{mem['address']:x}:{mem['size']}]"
+                                        )
+                                except Exception:
+                                    pass
+                            elif mem["type"] == "write":
+                                try:
+                                    if tc.isMemoryTainted(mem["address"], mem["size"]):
+                                        tainted_write.append(
+                                            f"mem[0x{mem['address']:x}:{mem['size']}]"
+                                        )
+                                except Exception:
+                                    pass
                         taint_entry["tainted_reads"] = tainted_read
                         taint_entry["tainted_writes"] = tainted_write
                     except Exception:
@@ -250,6 +365,8 @@ class TritonAnalyzer(Plugin):
                             path_constraints.append(str(pc_ast)[:500])
                 except Exception:
                     pass
+
+                instruction_trace.append(trace_record)
 
                 pc = int(tc.getConcreteRegisterValue(
                     tc.registers.rip if is_64 else tc.registers.eip
@@ -273,7 +390,7 @@ class TritonAnalyzer(Plugin):
 
         confidence = min(1.0, insn_count / 1000) if insn_count else 0.0
 
-        return {
+        result = {
             "arch": "x86_64" if is_64 else "x86",
             "entry_point": hex(entry),
             "instructions_executed": insn_count,
@@ -287,5 +404,12 @@ class TritonAnalyzer(Plugin):
             "tainted_registers_initial": taint_regs,
             "path_constraints": path_constraints[:50],
             "path_constraint_count": len(path_constraints),
+            # Enriched per-instruction trace for devirtualisation pipeline
+            "instruction_trace": instruction_trace,
+            "memory_accesses": mem_accesses,
             "confidence": round(confidence, 4),
         }
+
+        # Publish enriched data to shared context for downstream stages
+        ctx.shared_data["triton"] = result
+        return result
