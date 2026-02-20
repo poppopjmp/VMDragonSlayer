@@ -199,6 +199,12 @@ class SymbolicState:
         # B45: Alias query result cache  {(id(a1), id(a2)): result}
         self._alias_cache: Dict[tuple, str] = {}
 
+        # B54: Priority for coverage-guided scheduling (lower = higher prio)
+        self.priority: float = 0.0
+        self._seq: int = 0  # tie-breaker for heapq
+        # B54: Symbolic call stack for call/return tracking
+        self.call_stack: List[int] = []
+
         # Explicit EFLAGS: ZF (zero), CF (carry/borrow), SF (sign), OF (overflow)
         self.flags: Dict[str, Any] = {
             "ZF": False,
@@ -215,6 +221,37 @@ class SymbolicState:
         else:
             for name in reg_names:
                 self.registers[name] = 0
+
+    # -- Priority / ordering (B54) -------------------------------------------
+
+    def __lt__(self, other: "SymbolicState") -> bool:
+        """Support heapq ordering: lower priority value = explored first."""
+        if self.priority != other.priority:
+            return self.priority < other.priority
+        return self._seq < other._seq
+
+    def compute_priority(self) -> None:
+        """Recompute priority based on coverage heuristic.
+
+        States that have visited more *unique* PCs are more interesting
+        (lower priority number) since they explore new code.  Deeper
+        states are penalised slightly to balance breadth vs depth.
+        """
+        coverage_bonus = len(self._visited_pcs)
+        depth_penalty = self.depth * 0.01
+        self.priority = -(coverage_bonus) + depth_penalty
+
+    # -- Call stack helpers (B54) --------------------------------------------
+
+    def push_call(self, return_addr: int) -> None:
+        """Push *return_addr* onto the symbolic call stack."""
+        self.call_stack.append(return_addr)
+
+    def pop_call(self) -> Optional[int]:
+        """Pop return address from call stack, or *None* if empty."""
+        if self.call_stack:
+            return self.call_stack.pop()
+        return None
 
     # -- EFLAGS helpers ------------------------------------------------------
 
@@ -885,6 +922,10 @@ class SymbolicState:
         new._regions = dict(self._regions)
         new._sym_read_counter = self._sym_read_counter
         new._alias_cache = dict(self._alias_cache)
+        # B54: propagate priority / call stack
+        new.priority = self.priority
+        new._seq = self._seq
+        new.call_stack = list(self.call_stack)
         # B52: propagate incremental solver reference
         inc = getattr(self, "_incremental_solver", None)
         if inc is not None:

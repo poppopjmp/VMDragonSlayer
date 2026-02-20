@@ -15,6 +15,7 @@ the pipeline and LLM analyzer consume.
 
 from __future__ import annotations
 
+import heapq
 import logging
 from collections import deque
 from dataclasses import dataclass, field
@@ -167,6 +168,8 @@ class SymbolicExecutor:
         self._collected_path_constraints: List[Any] = []
         # Loop analysis results gathered during exploration.
         self._detected_loops: Dict[int, LoopInfo] = {}
+        # B54: monotonic counter for heapq tie-breaking
+        self._state_seq: int = 0
 
     @classmethod
     def from_config(cls, config: Any = None) -> "SymbolicExecutor":
@@ -773,17 +776,20 @@ class SymbolicExecutor:
         entry_point: int,
     ) -> tuple[int, int, List[Dict[str, Any]]]:
         """
-        BFS path exploration with real symbolic state updates.
+        Coverage-guided path exploration with symbolic state updates.
 
-        For each instruction, updates registers, memory, and constraints
-        on the :class:`SymbolicState` so downstream consumers (taint,
-        handler classification) see meaningful values.
+        Uses a **priority worklist** (B54): states that have explored more
+        unique PCs are dequeued first, giving a coverage-guided strategy
+        instead of plain BFS.
 
-        Includes **loop-aware execution** (Batch 35): when a program
-        counter has been visited more than ``max_loop_iters`` times on a
-        single path, the executor performs *widening* (replaces loop-
-        modified registers with fresh symbols) and terminates the loop
-        iteration with a ``"loop_bound"`` halt.
+        Supports **symbolic call/return tracking** (B54): CALL instructions
+        push the return address onto the state's ``call_stack`` so that
+        RET can continue execution at the return site instead of halting.
+
+        Includes **veritesting** (B54): when a conditional branch's
+        fall-through and taken paths both immediately rejoin at a common
+        merge point within a short window, both sides are executed inline
+        on a single path using an ITE merge, avoiding a fork entirely.
 
         Returns (paths_explored, total_instructions_executed, state_snapshots).
         """
@@ -799,18 +805,21 @@ class SymbolicExecutor:
             bit_width=self.bit_width,
             initial_pc=entry_point,
         )
+        initial_state._seq = self._state_seq
+        self._state_seq += 1
 
-        worklist: deque[SymbolicState] = deque([initial_state])
+        # B54: Priority-based worklist (heapq — min-heap on state.priority)
+        worklist: List[SymbolicState] = [initial_state]
+        heapq.heapify(worklist)
+
         paths = 0
         total_insns = 0
         snapshots: List[Dict[str, Any]] = []
 
         while worklist and paths < self.max_paths:
-            state = worklist.popleft()
+            state = heapq.heappop(worklist)
 
             # --- B52: Path merging at join points ---
-            # When another state in the worklist has the same PC,
-            # merge them to reduce path explosion.
             state = self._try_merge_worklist(state, worklist)
 
             path_len = 0
@@ -829,11 +838,9 @@ class SymbolicExecutor:
                 # --- Loop detection & bounded execution (B35) ----
                 vc = state.visit_count(pc)
                 if vc > 1:
-                    # We've been here before → this is a back-edge target
                     self._record_loop_header(pc, state)
 
                 if vc > self.max_loop_iters:
-                    # Exceed iteration bound → widen and halt this path
                     self._widen_state(state, pc)
                     state.halt("loop_bound")
                     break
@@ -841,7 +848,21 @@ class SymbolicExecutor:
                 # === Apply instruction semantics to state ===
                 self._apply_instruction(state, insn)
 
+                # B54: CALL handling — push return addr, jump to target
+                if insn.category == InstructionCategory.CALL:
+                    return_addr = insn.address + insn.size
+                    if insn.branch_target is not None and insn.branch_target in insn_map:
+                        state.push_call(return_addr)
+                        state.pc = insn.branch_target
+                        continue
+                    # If target not in map, fall through normally
+
                 if insn.category == InstructionCategory.RETURN:
+                    # B54: Pop call stack first; only halt if stack empty
+                    ret_addr = state.pop_call()
+                    if ret_addr is not None and ret_addr in insn_map:
+                        state.pc = ret_addr
+                        continue
                     state.halt("return")
                     break
 
@@ -858,12 +879,23 @@ class SymbolicExecutor:
                                 "state_constraints": list(state.constraints),
                             })
 
+                        # --- B54: Veritesting — try inline merge -----------
+                        if self._try_veritest(
+                            state, insn, branch_constraint, insn_map
+                        ):
+                            # Veritesting succeeded: state.pc updated to merge
+                            continue
+
                         if len(worklist) < self.max_paths:
                             taken = state.fork()
                             taken.pc = insn.branch_target
                             if branch_constraint is not None:
                                 taken.add_constraint(branch_constraint)
-                            worklist.append(taken)
+                            # B54: assign priority and sequence
+                            taken.compute_priority()
+                            taken._seq = self._state_seq
+                            self._state_seq += 1
+                            heapq.heappush(worklist, taken)
 
                         # Fall-through with negated constraint
                         next_addr = insn.address + insn.size
@@ -881,12 +913,14 @@ class SymbolicExecutor:
                         # B45: Attempt Z3-based indirect dispatch resolution.
                         targets = self._resolve_indirect_branch(state, insn)
                         if targets:
-                            # Fork paths for each resolved target.
                             for t in targets[1:]:
                                 if len(worklist) < self.max_paths:
                                     fork = state.fork()
                                     fork.pc = t
-                                    worklist.append(fork)
+                                    fork.compute_priority()
+                                    fork._seq = self._state_seq
+                                    self._state_seq += 1
+                                    heapq.heappush(worklist, fork)
                             state.pc = targets[0]
                         else:
                             state.halt("indirect branch")
@@ -903,6 +937,104 @@ class SymbolicExecutor:
             snapshots.append(state.to_dict())
 
         return paths, total_insns, snapshots[:32]
+
+    # -- Veritesting (B54) ---------------------------------------------------
+
+    def _try_veritest(
+        self,
+        state: SymbolicState,
+        insn: LiftedInstruction,
+        branch_constraint: Any,
+        insn_map: Dict[int, LiftedInstruction],
+        max_window: int = 6,
+    ) -> bool:
+        """Attempt veritesting: inline both sides if they merge quickly.
+
+        Looks ahead up to *max_window* instructions on each branch side.
+        If both sides reach the same merge PC via straight-line (no further
+        branches), executes both paths on cloned states, then merges the
+        results using ITE phi-nodes.
+
+        Returns ``True`` if veritesting succeeded (state updated to merge
+        point), ``False`` if the caller should fork normally.
+        """
+        if branch_constraint is None or not Z3Solver.available():
+            return False
+
+        taken_target = insn.branch_target
+        fall_target = insn.address + insn.size
+        if taken_target is None or fall_target not in insn_map or taken_target not in insn_map:
+            return False
+
+        # Trace each side for a short straight-line window
+        taken_trace = self._trace_straight_line(insn_map, taken_target, max_window)
+        fall_trace = self._trace_straight_line(insn_map, fall_target, max_window)
+
+        if not taken_trace or not fall_trace:
+            return False
+
+        # Check for a common merge point at the end of the traces
+        taken_end = taken_trace[-1].address + taken_trace[-1].size
+        fall_end = fall_trace[-1].address + fall_trace[-1].size
+        if taken_end != fall_end:
+            return False
+
+        merge_pc = taken_end
+
+        # Both sides reach the same merge point — execute inline
+        import z3 as _z3
+
+        taken_state = state.fork()
+        taken_state.add_constraint(branch_constraint)
+        for ti in taken_trace:
+            self._apply_instruction(taken_state, ti)
+
+        fall_state = state.fork()
+        fall_state.add_constraint(_z3.Not(branch_constraint))
+        for fi in fall_trace:
+            self._apply_instruction(fall_state, fi)
+
+        # Merge taken_state into fall_state (ITE phi-nodes)
+        merged = fall_state.merge(taken_state)
+        # Copy merged result back into the original state
+        state.registers = merged.registers
+        state.memory = merged.memory
+        state.flags = merged.flags
+        state.constraints = merged.constraints
+        state.depth = merged.depth
+        state._visited_pcs = merged._visited_pcs
+        state._visit_counts = merged._visit_counts
+        state.pc = merge_pc
+        return True
+
+    def _trace_straight_line(
+        self,
+        insn_map: Dict[int, LiftedInstruction],
+        start_pc: int,
+        max_len: int,
+    ) -> List[LiftedInstruction]:
+        """Collect up to *max_len* straight-line instructions from *start_pc*.
+
+        Returns empty list if a branch is encountered (veritesting bail-out).
+        """
+        trace: List[LiftedInstruction] = []
+        pc = start_pc
+        for _ in range(max_len):
+            insn = insn_map.get(pc)
+            if insn is None:
+                break
+            if insn.is_branch or insn.category in (
+                InstructionCategory.CALL,
+                InstructionCategory.RETURN,
+            ):
+                # Branch in both: bail if it's the very first instruction
+                if not trace:
+                    return []
+                trace.append(insn)
+                return trace  # include the branch as last insn
+            trace.append(insn)
+            pc = insn.address + insn.size
+        return trace
 
     # -- Loop analysis helpers (Batch 35) ------------------------------------
 
@@ -969,7 +1101,7 @@ class SymbolicExecutor:
     def _try_merge_worklist(
         self,
         state: SymbolicState,
-        worklist: deque,
+        worklist: Any,
     ) -> SymbolicState:
         """Merge *state* with any worklist entry sharing the same PC.
 
@@ -983,6 +1115,8 @@ class SymbolicExecutor:
                 if candidate.pc == state.pc and not candidate.halted:
                     # Remove the partner from the worklist
                     del worklist[i]
+                    # B54: re-heapify after removal (worklist may be a heapq list)
+                    heapq.heapify(worklist)
                     merged = state.merge(candidate)
                     logger.debug(
                         "Merged two paths at PC %#x (depths %d + %d → %d)",
