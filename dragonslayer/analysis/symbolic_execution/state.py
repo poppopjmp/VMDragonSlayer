@@ -346,22 +346,89 @@ class SymbolicState:
     # -- Memory access -------------------------------------------------------
 
     def read_memory(self, address: int, size: int = 0) -> Any:
-        """Read *size* bytes from memory at *address*.
-        
-        If *size* is 0 (default), uses the architecture word size.
+        """Read *size* bytes from memory at *address* (little-endian).
+
+        The internal store is byte-granular.  If the requested region
+        contains only concrete bytes they are assembled into a Python int.
+        If any byte is symbolic (z3 BitVec), a z3 expression is returned.
+        Missing bytes are treated as symbolic (z3) or zero (no z3).
         """
         if size == 0:
             size = self.bit_width // 8
-        val = self.memory.get(address)
-        if val is not None:
-            return val
+
+        # Fast-path: single-slot legacy hit (un-split value from old API)
+        if size > 1 and address in self.memory and (address + 1) not in self.memory:
+            v = self.memory[address]
+            # If it was stored without byte-split, return it directly
+            if not isinstance(v, int) or v > 255:
+                return v
+
+        byte_vals: list[Any] = []
+        all_concrete = True
+        for i in range(size):
+            b = self.memory.get(address + i)
+            if b is None:
+                all_concrete = False
+                if _Z3_AVAILABLE:
+                    b = z3.BitVec(f"mem_{(address + i):#x}", 8)
+                else:
+                    b = 0
+            elif _Z3_AVAILABLE and hasattr(b, "sort"):
+                all_concrete = False
+                if b.sort().size() != 8:
+                    b = z3.Extract(7, 0, b)
+            else:
+                b = b & 0xFF
+            byte_vals.append(b)
+
+        if all_concrete:
+            # Little-endian assembly
+            result = 0
+            for i, bv in enumerate(byte_vals):
+                result |= (bv & 0xFF) << (i * 8)
+            return result
+
+        # Symbolic assembly — Concat(byte[n-1], ..., byte[0]) in big-endian order
         if _Z3_AVAILABLE:
-            return z3.BitVec(f"mem_{address:#x}", size * 8)
+            parts = []
+            for bv in reversed(byte_vals):
+                if not hasattr(bv, "sort"):
+                    bv = z3.BitVecVal(bv, 8)
+                elif bv.sort().size() != 8:
+                    bv = z3.Extract(7, 0, bv)
+                parts.append(bv)
+            if len(parts) == 1:
+                return parts[0]
+            result = parts[0]
+            for p in parts[1:]:
+                result = z3.Concat(result, p)
+            return result
         return 0
 
-    def write_memory(self, address: int, value: Any, size: int = 8) -> None:
-        """Write *value* to memory at *address*."""
-        self.memory[address] = value
+    def write_memory(self, address: int, value: Any, size: int = 0) -> None:
+        """Write *value* to memory at *address* (little-endian, byte-granular).
+
+        Splits the value into individual bytes and stores each one.
+        """
+        if size == 0:
+            size = self.bit_width // 8
+
+        if _Z3_AVAILABLE and hasattr(value, "sort"):
+            vw = value.sort().size()
+            for i in range(size):
+                lo = i * 8
+                hi = lo + 7
+                if hi < vw:
+                    self.memory[address + i] = z3.Extract(hi, lo, value)
+                else:
+                    self.memory[address + i] = z3.BitVecVal(0, 8)
+        elif isinstance(value, int):
+            for i in range(size):
+                self.memory[address + i] = (value >> (i * 8)) & 0xFF
+        else:
+            # Fallback: store raw value at base address only
+            self.memory[address] = value
+
         self._memory_log.append(MemoryWrite(
             address=address, value=value, size=size, timestamp=self.depth,
         ))

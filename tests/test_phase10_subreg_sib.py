@@ -323,7 +323,7 @@ class TestInstructionIntegration:
         insn = self._insn(Insn, "mov", "[rax+rbx*2], rcx", size=3)
         exe._apply_instruction(st, insn)
         addr = 0x1000 + 5 * 2
-        assert st.memory.get(addr) == 0xBEEF
+        assert st.read_memory(addr, 8) == 0xBEEF
 
     def test_mov_memory_sib_read(self):
         """mov rdx, [rax+rbx*4+0x8] should read from computed address."""
@@ -331,7 +331,7 @@ class TestInstructionIntegration:
         st.registers["rax"] = 0x2000
         st.registers["rbx"] = 2
         target_addr = 0x2000 + 2 * 4 + 0x8
-        st.memory[target_addr] = 0xCAFE
+        st.write_memory(target_addr, 0xCAFE, size=8)
         insn = self._insn(Insn, "mov", "rdx, [rax+rbx*4+0x8]", size=7)
         exe._apply_instruction(st, insn)
         assert st.registers["rdx"] == 0xCAFE
@@ -340,7 +340,7 @@ class TestInstructionIntegration:
         """dword ptr [rsp+0x8] should resolve correctly."""
         exe, st, Insn = self._make()
         st.registers["rsp"] = 0x7FFF0000
-        st.memory[0x7FFF0008] = 42
+        st.write_memory(0x7FFF0008, 42, size=4)
         val = exe._resolve_operand(st, "dword ptr [rsp+0x8]")
         assert val == 42
 
@@ -349,4 +349,110 @@ class TestInstructionIntegration:
         exe, st, Insn = self._make()
         st.registers["rsp"] = 0x7FFF0000
         exe._write_operand(st, "dword ptr [rsp+0x10]", 99)
-        assert st.memory.get(0x7FFF0010) == 99
+        # With byte-granular memory, value 99 is split into bytes
+        assert st.read_memory(0x7FFF0010, 8) == 99
+
+
+# ---------------------------------------------------------------------------
+# Multi-byte memory model
+# ---------------------------------------------------------------------------
+
+class TestMultiByteMemory:
+    """Test read_memory / write_memory with byte-granular storage."""
+
+    def _make_state(self, arch="x86_64", bw=64):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch=arch, bit_width=bw)
+        for reg in list(s.registers):
+            s.registers[reg] = 0
+        return s
+
+    def test_write_read_4bytes(self):
+        s = self._make_state()
+        s.write_memory(0x1000, 0xDEADBEEF, size=4)
+        assert s.read_memory(0x1000, 4) == 0xDEADBEEF
+
+    def test_write_read_8bytes(self):
+        s = self._make_state()
+        s.write_memory(0x2000, 0x0102030405060708, size=8)
+        assert s.read_memory(0x2000, 8) == 0x0102030405060708
+
+    def test_write_read_1byte(self):
+        s = self._make_state()
+        s.write_memory(0x3000, 0xAB, size=1)
+        assert s.read_memory(0x3000, 1) == 0xAB
+
+    def test_write_read_2bytes(self):
+        s = self._make_state()
+        s.write_memory(0x4000, 0xCAFE, size=2)
+        assert s.read_memory(0x4000, 2) == 0xCAFE
+
+    def test_byte_granularity(self):
+        """Individual bytes should be stored separately."""
+        s = self._make_state()
+        s.write_memory(0x1000, 0x04030201, size=4)
+        # Little-endian: byte at 0x1000 = 0x01
+        assert s.memory.get(0x1000) == 0x01
+        assert s.memory.get(0x1001) == 0x02
+        assert s.memory.get(0x1002) == 0x03
+        assert s.memory.get(0x1003) == 0x04
+
+    def test_partial_read(self):
+        """Reading fewer bytes than written should return the low portion."""
+        s = self._make_state()
+        s.write_memory(0x1000, 0xDEADBEEF, size=4)
+        # Low 2 bytes = 0xBEEF
+        assert s.read_memory(0x1000, 2) == 0xBEEF
+
+    def test_overlapping_write(self):
+        """A second write should overwrite only the affected bytes."""
+        s = self._make_state()
+        s.write_memory(0x1000, 0xAAAABBBB, size=4)
+        # Overwrite just the low 2 bytes
+        s.write_memory(0x1000, 0xCCDD, size=2)
+        # Result should have low 2 bytes replaced
+        assert s.read_memory(0x1000, 4) == 0xAAAACCDD
+
+    def test_read_uninitialized_returns_zero_no_z3(self):
+        """Reading uninitialised memory without z3 should return 0."""
+        from dragonslayer.analysis.symbolic_execution import state as st_mod
+        original = st_mod._Z3_AVAILABLE
+        try:
+            st_mod._Z3_AVAILABLE = False
+            s = self._make_state()
+            val = s.read_memory(0xDEAD, 4)
+            assert val == 0
+        finally:
+            st_mod._Z3_AVAILABLE = original
+
+    def test_symbolic_write_read(self):
+        """z3 symbolic values should round-trip through byte store."""
+        try:
+            import z3
+        except ImportError:
+            pytest.skip("z3 not available")
+        s = self._make_state()
+        sym = z3.BitVecVal(0xCAFEBABE, 32)
+        s.write_memory(0x5000, sym, size=4)
+        result = s.read_memory(0x5000, 4)
+        # Should simplify back to 0xCAFEBABE
+        assert z3.simplify(result == z3.BitVecVal(0xCAFEBABE, 32))
+
+    def test_memory_log_records(self):
+        s = self._make_state()
+        s.write_memory(0x1000, 42, size=4)
+        s.write_memory(0x2000, 99, size=8)
+        assert len(s._memory_log) == 2
+        assert s._memory_log[0].address == 0x1000
+        assert s._memory_log[0].size == 4
+        assert s._memory_log[1].size == 8
+
+    def test_fork_preserves_memory(self):
+        s = self._make_state()
+        s.write_memory(0x1000, 0xBEEF, size=2)
+        s2 = s.fork()
+        assert s2.read_memory(0x1000, 2) == 0xBEEF
+        # Writes to fork don't affect original
+        s2.write_memory(0x1000, 0xDEAD, size=2)
+        assert s.read_memory(0x1000, 2) == 0xBEEF
+        assert s2.read_memory(0x1000, 2) == 0xDEAD

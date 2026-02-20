@@ -861,9 +861,12 @@ class SymbolicExecutor:
         operand = operand.strip()
 
         # Size prefixed operands (e.g., "dword ptr [rax]")
-        for prefix in ("byte ptr ", "word ptr ", "dword ptr ", "qword ptr "):
+        _PREFIX_SIZES = {
+            "byte ptr ": 1, "word ptr ": 2, "dword ptr ": 4, "qword ptr ": 8,
+        }
+        for prefix, sz in _PREFIX_SIZES.items():
             if operand.lower().startswith(prefix):
-                return self._resolve_operand(state, operand[len(prefix):])
+                return self._resolve_operand_sized(state, operand[len(prefix):], sz)
 
         # Register? (includes sub-registers via state.get_register)
         reg = operand.lower()
@@ -891,6 +894,29 @@ class SymbolicExecutor:
             return 0
 
         return 0  # fallback
+
+    def _resolve_operand_sized(self, state: SymbolicState, operand: str, size: int) -> Any:
+        """Like _resolve_operand, but memory reads use an explicit byte *size*."""
+        operand = operand.strip()
+        reg = operand.lower()
+        if reg in state.registers or state._subreg_info(reg) is not None:
+            return state.get_register(reg)
+        try:
+            if operand.startswith("0x") or operand.startswith("-0x"):
+                return int(operand, 16)
+            if operand.lstrip("-").isdigit():
+                return int(operand)
+        except ValueError:
+            pass
+        if operand.startswith("[") and operand.endswith("]"):
+            addr = self._resolve_sib_address(state, operand[1:-1].strip())
+            if isinstance(addr, int):
+                return state.read_memory(addr, size)
+            if Z3Solver.available():
+                import z3 as _z3
+                return _z3.BitVec(f"mem_sym_{state.depth}", size * 8)
+            return 0
+        return self._resolve_operand(state, operand)
 
     def _write_operand(self, state: SymbolicState, operand: str, value: Any) -> None:
         """Write a value to the destination operand."""
