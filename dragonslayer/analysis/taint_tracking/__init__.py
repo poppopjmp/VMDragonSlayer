@@ -49,6 +49,23 @@ try:
 except (ImportError, AttributeError):
     DTTExecutor = None  # type: ignore[assignment,misc]
 
+try:
+    from .inter_handler import (
+        InterHandlerDataFlow,
+        InterHandlerFlowResult,
+        InterHandlerFlowEdge,
+        HandlerTaintSummary,
+        build_handler_summary,
+        canonicalize_reg,
+    )
+except (ImportError, AttributeError):
+    InterHandlerDataFlow = None  # type: ignore[assignment,misc]
+    InterHandlerFlowResult = None  # type: ignore[assignment,misc]
+    InterHandlerFlowEdge = None  # type: ignore[assignment,misc]
+    HandlerTaintSummary = None  # type: ignore[assignment,misc]
+    build_handler_summary = None  # type: ignore[assignment,misc]
+    canonicalize_reg = None  # type: ignore[assignment,misc]
+
 __all__ = [
     "TaintTracker",
     "TaintTag",
@@ -59,4 +76,10 @@ __all__ = [
     "VMTaintTracker",
     "VM_REG_PRESETS",
     "DTTExecutor",
+    "InterHandlerDataFlow",
+    "InterHandlerFlowResult",
+    "InterHandlerFlowEdge",
+    "HandlerTaintSummary",
+    "build_handler_summary",
+    "canonicalize_reg",
 ]
