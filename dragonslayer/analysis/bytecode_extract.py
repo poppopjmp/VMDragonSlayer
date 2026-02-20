@@ -44,6 +44,19 @@ from dragonslayer.analysis.vm_discovery.handler_boundaries import (
     SegmentationResult,
 )
 
+# Lazy import for ParsedBinary to avoid circular deps
+_ParsedBinary = None
+
+def _get_parsed_binary_type():
+    global _ParsedBinary
+    if _ParsedBinary is None:
+        try:
+            from dragonslayer.analysis.binary_format import ParsedBinary
+            _ParsedBinary = ParsedBinary
+        except ImportError:
+            _ParsedBinary = type(None)
+    return _ParsedBinary
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -151,6 +164,8 @@ def extract_bytecode(
     boundaries: List[HandlerBoundary],
     *,
     bytecode_width: int = 0,
+    parsed_binary: Optional[Any] = None,
+    binary_data: Optional[bytes] = None,
 ) -> BytecodeStream:
     """Extract the VM bytecode stream from a trace + handler boundaries.
 
@@ -172,6 +187,10 @@ def extract_bytecode(
         boundaries: Handler boundaries from segmentation.
         bytecode_width: If known, the fixed bytecode instruction width.
             0 = auto-detect from ``vip_delta`` values.
+        parsed_binary: Optional ``ParsedBinary`` for reading real bytes
+            from the target binary via VA → file-offset mapping.
+        binary_data: Raw bytes of the target binary. Required when
+            *parsed_binary* is supplied.
 
     Returns:
         A :class:`BytecodeStream` with the extracted bytecode.
@@ -204,11 +223,33 @@ def extract_bytecode(
             if addr in mem_map:
                 collected[addr] = mem_map[addr]
 
+    # Supplement sparse trace memory with binary reads when available.
+    if parsed_binary is not None and binary_data is not None:
+        for boundary in boundaries:
+            vip = boundary.vip_value
+            width = abs(boundary.vip_delta) if boundary.vip_delta != 0 else bytecode_width
+            if width == 0:
+                width = 1
+            # Only read for addresses not already in 'collected'
+            for off in range(width):
+                addr = vip + off * direction
+                if addr not in collected:
+                    try:
+                        chunk = parsed_binary.read_va(binary_data, addr, 1)
+                        if chunk is not None and len(chunk) == 1:
+                            collected[addr] = chunk[0]
+                    except Exception:
+                        pass
+
     # ---- 4. Build contiguous stream ------------------------------------
     if not collected:
         # Fall back: use vIP values and boundary info to build opcodes
         # even without memory access data.
-        return _build_from_boundaries_only(boundaries, direction, base, bytecode_width)
+        return _build_from_boundaries_only(
+            boundaries, direction, base, bytecode_width,
+            parsed_binary=parsed_binary,
+            binary_data=binary_data,
+        )
 
     sorted_addrs = sorted(collected.keys())
     stream_base = sorted_addrs[0]
@@ -274,46 +315,84 @@ def _build_from_boundaries_only(
     direction: int,
     base: int,
     bytecode_width: int,
+    *,
+    parsed_binary: Optional[Any] = None,
+    binary_data: Optional[bytes] = None,
 ) -> BytecodeStream:
     """Build a BytecodeStream from boundaries when no memory reads are
-    available (common when traces lack memory access detail)."""
+    available (common when traces lack memory access detail).
+
+    When *parsed_binary* and *binary_data* are supplied the function
+    attempts to read real opcode + operand bytes from the binary via
+    ``parsed_binary.read_va(binary_data, vip, width)``.  This avoids
+    fabricating synthetic sequential opcodes and zero-filled operands.
+    The synthetic fallback is still used when the binary cannot supply
+    the requested bytes.
+    """
 
     opcode_map = OpcodeMap()
     opcodes: List[VMOpcode] = []
 
-    # Assign synthetic opcode values based on handler address uniqueness.
+    # --- attempt real byte reads from the binary -----------------------
+    can_read_binary = (
+        parsed_binary is not None
+        and binary_data is not None
+        and hasattr(parsed_binary, "read_va")
+    )
+
+    # Assign synthetic opcode values only when we cannot read real bytes.
     handler_to_opcode: Dict[int, int] = {}
     next_opcode = 0
 
     for boundary in boundaries:
-        if boundary.handler_address not in handler_to_opcode:
-            handler_to_opcode[boundary.handler_address] = next_opcode
-            next_opcode += 1
-
-        opval = handler_to_opcode[boundary.handler_address]
+        vip = boundary.vip_value
         width = abs(boundary.vip_delta) if boundary.vip_delta != 0 else bytecode_width
         if width == 0:
             width = 1
 
-        offset = abs(boundary.vip_value - base)
+        real_bytes: Optional[bytes] = None
+        if can_read_binary:
+            try:
+                real_bytes = parsed_binary.read_va(binary_data, vip, width)
+            except Exception:
+                real_bytes = None
+
+        if real_bytes is not None and len(real_bytes) == width:
+            # Use real opcode + operand bytes from the binary.
+            opval = real_bytes[0]
+            operand = real_bytes[1:]
+        else:
+            # Fallback: synthetic sequential opcode, zero-fill operands.
+            if boundary.handler_address not in handler_to_opcode:
+                handler_to_opcode[boundary.handler_address] = next_opcode
+                next_opcode += 1
+            opval = handler_to_opcode[boundary.handler_address]
+            operand = b"\x00" * max(width - 1, 0)
+
+        offset = abs(vip - base)
         opcodes.append(VMOpcode(
             offset=offset,
             value=opval,
             size=1,
             handler_address=boundary.handler_address,
             handler_category=boundary.category,
-            operand_bytes=b"\x00" * max(width - 1, 0),
-            vip_value=boundary.vip_value,
+            operand_bytes=operand,
+            vip_value=vip,
         ))
         opcode_map.add(opval, boundary.handler_address, boundary.category)
 
-    # Build a raw stream of the synthesised opcodes.
+    # Build a raw stream of the opcodes.
     if opcodes:
         max_offset = max(op.offset + 1 + len(op.operand_bytes) for op in opcodes)
         raw = bytearray(b"\xCC" * max_offset)
         for op in opcodes:
             if 0 <= op.offset < len(raw):
                 raw[op.offset] = op.value & 0xFF
+                # Also fill in operand bytes
+                for i, b in enumerate(op.operand_bytes):
+                    pos = op.offset + 1 + i
+                    if 0 <= pos < len(raw):
+                        raw[pos] = b
     else:
         raw = bytearray()
 
