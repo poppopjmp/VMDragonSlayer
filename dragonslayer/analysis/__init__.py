@@ -59,6 +59,18 @@ from .pseudocode import (  # noqa: F401
     PseudocodeResult,
 )
 
+from .bytecode_cfg import (  # noqa: F401
+    build_handler_cfg as build_handler_cfg_v2,
+    build_static_cfg,
+    walk_trace_bytecode,
+    walk_static_bytecode,
+    detect_natural_loops,
+    VMInstruction,
+    HandlerBasicBlock,
+    CFGEdge,
+    HandlerCFG,
+)
+
 from .mba_simplifier import (  # noqa: F401
     simplify_mba,
     simplify_expr,

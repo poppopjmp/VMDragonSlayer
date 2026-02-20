@@ -1121,9 +1121,24 @@ class AnalysisPipeline:
             except Exception as exc:
                 logger.debug("Handler clustering skipped: %s", exc)
 
+            # ── 7b. Handler-level CFG construction (Batch 19) ────────────
+            handler_cfg = None
+            handler_cfg_data: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.bytecode_cfg import build_handler_cfg
+                handler_cfg_obj = build_handler_cfg(
+                    opcode_table, boundaries, trace,
+                )
+                if handler_cfg_obj.blocks:
+                    handler_cfg = handler_cfg_obj.graph  # networkx DiGraph
+                    handler_cfg_data = handler_cfg_obj.to_dict()
+                    ctx.shared_data["handler_cfg"] = handler_cfg_data
+            except Exception as exc:
+                logger.debug("Handler CFG construction skipped: %s", exc)
+
             # ── 8. Pseudocode emission ───────────────────────────────────
             pseudocode_result = emit_pseudocode(
-                opcode_table, boundaries, style="c_like",
+                opcode_table, boundaries, handler_cfg, style="c_like",
             )
 
             # ── Assemble result ──────────────────────────────────────────
@@ -1147,6 +1162,8 @@ class AnalysisPipeline:
                 result_data["vm_context_layout"] = context_layout_data
             if clustering_data is not None:
                 result_data["handler_clustering"] = clustering_data
+            if handler_cfg_data is not None:
+                result_data["handler_cfg"] = handler_cfg_data
 
             # Store boundaries for downstream stages.
             ctx.shared_data["devirt_boundaries"] = [
