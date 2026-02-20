@@ -39,6 +39,15 @@ try:
         VMContextLayout,
         VMContextRegister,
     )
+    from dragonslayer.analysis.handler_clustering import (
+        cluster_handlers_by_semantics,
+        normalize_symbolic_effect,
+        are_semantically_equivalent,
+        refine_opcode_table,
+        NormalizedEffect,
+        SemanticCluster,
+        ClusteringResult,
+    )
 except ImportError:
     pass
 
@@ -64,4 +73,11 @@ __all__ = [
     "identify_vm_context",
     "VMContextLayout",
     "VMContextRegister",
+    "cluster_handlers_by_semantics",
+    "normalize_symbolic_effect",
+    "are_semantically_equivalent",
+    "refine_opcode_table",
+    "NormalizedEffect",
+    "SemanticCluster",
+    "ClusteringResult",
 ]
