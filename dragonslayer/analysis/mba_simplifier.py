@@ -55,6 +55,7 @@ class MBAResult:
     proven: bool = False
     rule_name: Optional[str] = None
     bit_width: int = 64
+    iterations: int = 1
 
 
 @dataclass
@@ -179,6 +180,13 @@ def verify_equivalence(
     return s.check() == z3.unsat
 
 
+def _ast_size(expr: z3.ExprRef) -> int:
+    """Count nodes in a z3 AST — used as a complexity metric."""
+    if z3.is_const(expr):
+        return 1
+    return 1 + sum(_ast_size(c) for c in expr.children())
+
+
 def simplify_expr(
     expr: z3.BitVecRef,
     bit_width: int = 64,
@@ -234,6 +242,306 @@ def simplify_expr(
     return expr, None
 
 
+# ---------------------------------------------------------------------------
+# Deep canonicalization — linear MBA decomposition & iterative simplify
+# ---------------------------------------------------------------------------
+
+# Coefficient → operation lookup tables for 1- and 2-variable linear MBAs.
+# Tuple index maps to corner-point bitmask: bit *i* set ⇒ var[i] = −1.
+_COEFF_SIGS_1VAR: Dict[Tuple[int, ...], str] = {
+    (0, 0): "zero",
+    (0, 1): "x",
+    (1, 0): "~x",
+    (0, -1): "-x",
+    (1, 1): "-1",
+}
+
+_COEFF_SIGS_2VAR: Dict[Tuple[int, ...], str] = {
+    (0, 0, 0, 0): "zero",
+    (0, 1, 0, 1): "x",
+    (0, 0, 1, 1): "y",
+    (0, 1, 1, 2): "x + y",
+    (0, 1, -1, 0): "x - y",
+    (0, -1, 1, 0): "y - x",
+    (0, 0, 0, 1): "x & y",
+    (0, 1, 1, 1): "x | y",
+    (0, 1, 1, 0): "x ^ y",
+    (1, 0, 1, 0): "~x",
+    (1, 1, 0, 0): "~y",
+    (0, -1, 0, -1): "-x",
+    (0, 0, -1, -1): "-y",
+    (1, 1, 1, 0): "~(x & y)",
+    (1, 0, 0, 0): "~(x | y)",
+    (1, 0, 0, 1): "~(x ^ y)",
+    (1, 1, 1, 1): "-1",
+    (0, -1, -1, -2): "-(x + y)",
+    (0, 1, 0, 0): "x & ~y",
+    (0, 0, 1, 0): "~x & y",
+}
+
+
+def _linear_mba_coefficients(
+    expr: z3.BitVecRef,
+    free_vars: List[z3.BitVecRef],
+    bit_width: int,
+) -> Optional[List[int]]:
+    """Extract linear MBA coefficients via corner-point evaluation.
+
+    For *n* free variables, evaluates the expression at the 2^n points
+    where each variable is either 0 or −1 (all ones).  Each such point
+    activates exactly one minterm (value −1), so the coefficient for
+    that minterm equals ``−f(point)``.
+
+    Returns a list of 2^n signed coefficients, or ``None`` when the
+    expression cannot be evaluated concretely or has > 4 variables.
+    A quick non-corner-point probe guards against false positives for
+    non-linear expressions (e.g. ``x * y``).
+    """
+    n = len(free_vars)
+    if n == 0 or n > 4:
+        return None
+
+    modulus = 1 << bit_width
+    half = modulus >> 1
+    all_ones = modulus - 1
+    coefficients: List[int] = []
+
+    for mask in range(1 << n):
+        subs = [
+            (free_vars[i],
+             z3.BitVecVal(all_ones if (mask >> i) & 1 else 0, bit_width))
+            for i in range(n)
+        ]
+        evaluated = z3.simplify(z3.substitute(expr, *subs))
+        if not z3.is_bv_value(evaluated):
+            return None
+        raw = evaluated.as_long()
+        coeff = (-raw) & all_ones
+        if coeff >= half:
+            coeff -= modulus
+        coefficients.append(coeff)
+
+    # --- Probe verification: reject non-linear expressions -----------
+    _PROBE_BASE = [0x6A09E667F3BCC908, 0xBB67AE8584CAA73B,
+                   0x3C6EF372FE94F82B]
+    for pidx in range(min(2, 1 + n)):
+        probe_subs = [
+            (free_vars[i],
+             z3.BitVecVal(
+                 _PROBE_BASE[(pidx + i) % len(_PROBE_BASE)] & all_ones,
+                 bit_width))
+            for i in range(n)
+        ]
+        actual = z3.simplify(z3.substitute(expr, *probe_subs))
+        if not z3.is_bv_value(actual):
+            return None
+        expected = 0
+        for cmask in range(1 << n):
+            c = coefficients[cmask]
+            if c == 0:
+                continue
+            mval = all_ones
+            for i in range(n):
+                vi = probe_subs[i][1].as_long()
+                mval &= (vi if (cmask >> i) & 1 else (~vi) & all_ones)
+            expected = (expected + c * mval) & all_ones
+        if actual.as_long() != expected:
+            return None
+
+    return coefficients
+
+
+def _reconstruct_from_coefficients(
+    coefficients: List[int],
+    free_vars: List[z3.BitVecRef],
+    bit_width: int,
+) -> Optional[Tuple[z3.BitVecRef, str]]:
+    """Reconstruct a minimal expression from its linear MBA coefficients.
+
+    Uses lookup tables for 1- and 2-variable expressions and falls
+    back to a minterm-sum construction for higher arities.
+    """
+    n = len(free_vars)
+    key = tuple(coefficients)
+
+    # --- 1-variable fast path ----------------------------------------
+    if n == 1:
+        label = _COEFF_SIGS_1VAR.get(key)
+        if label is not None:
+            (xv,) = free_vars
+            _b1: Dict[str, z3.BitVecRef] = {
+                "zero": z3.BitVecVal(0, bit_width),
+                "x": xv, "~x": ~xv, "-x": -xv,
+                "-1": z3.BitVecVal(-1, bit_width),
+            }
+            return _b1[label], f"linear_mba_{label}"
+
+    # --- 2-variable fast path ----------------------------------------
+    if n == 2:
+        label = _COEFF_SIGS_2VAR.get(key)
+        if label is not None:
+            x, y = free_vars
+            _b2: Dict[str, z3.BitVecRef] = {
+                "zero": z3.BitVecVal(0, bit_width),
+                "x": x, "y": y,
+                "x + y": x + y, "x - y": x - y, "y - x": y - x,
+                "x & y": x & y, "x | y": x | y, "x ^ y": x ^ y,
+                "~x": ~x, "~y": ~y, "-x": -x, "-y": -y,
+                "~(x & y)": ~(x & y), "~(x | y)": ~(x | y),
+                "~(x ^ y)": ~(x ^ y),
+                "-1": z3.BitVecVal(-1, bit_width),
+                "-(x + y)": -(x + y),
+                "x & ~y": x & ~y, "~x & y": ~x & y,
+            }
+            return _b2[label], f"linear_mba_{label.replace(' ', '_')}"
+
+    # --- General: build minterm sum ----------------------------------
+    return _build_minterm_sum(coefficients, free_vars, bit_width)
+
+
+def _build_minterm_sum(
+    coefficients: List[int],
+    free_vars: List[z3.BitVecRef],
+    bit_width: int,
+) -> Optional[Tuple[z3.BitVecRef, str]]:
+    """Construct ``Σ cᵢ · mintermᵢ`` and z3-simplify the result."""
+    n = len(free_vars)
+    terms: List[z3.BitVecRef] = []
+
+    for mask in range(1 << n):
+        c = coefficients[mask]
+        if c == 0:
+            continue
+        mt: Optional[z3.BitVecRef] = None
+        for i in range(n):
+            factor = free_vars[i] if (mask >> i) & 1 else ~free_vars[i]
+            mt = factor if mt is None else (mt & factor)
+        assert mt is not None
+        if c == 1:
+            terms.append(mt)
+        elif c == -1:
+            terms.append(-mt)
+        else:
+            terms.append(z3.BitVecVal(c, bit_width) * mt)
+
+    if not terms:
+        return z3.BitVecVal(0, bit_width), "linear_mba_zero"
+
+    result = terms[0]
+    for t in terms[1:]:
+        result = result + t
+    return z3.simplify(result), "linear_mba_decompose"
+
+
+def _simplify_children(
+    expr: z3.BitVecRef,
+    bit_width: int,
+    timeout_ms: int,
+    _depth: int = 0,
+) -> z3.BitVecRef:
+    """Bottom-up z3 simplification of each sub-expression.
+
+    Re-builds the AST with simplified children, then applies
+    ``z3.simplify`` at each node.  Depth capped at 8.
+    """
+    if _depth > 8 or z3.is_const(expr):
+        return expr
+    children = expr.children()
+    if not children:
+        return expr
+    new_children = [
+        _simplify_children(c, bit_width, timeout_ms, _depth + 1)
+        for c in children
+    ]
+    try:
+        rebuilt = expr.decl()(*new_children)
+        return z3.simplify(rebuilt)
+    except z3.Z3Exception:
+        return expr
+
+
+def simplify_expr_deep(
+    expr: z3.BitVecRef,
+    bit_width: int = 64,
+    timeout_ms: int = 5000,
+    max_rounds: int = 5,
+) -> Tuple[z3.BitVecRef, Optional[str], int]:
+    """Iterative deep simplification combining all available techniques.
+
+    Each round applies (in order):
+
+    1. **Bottom-up sub-expression simplification** — simplifies children
+       before the parent, enabling cascading reductions.
+    2. **Pattern-based rewrite rules** — the 31 static MBA templates from
+       :func:`simplify_expr`.
+    3. **Linear MBA decomposition** — evaluates at corner points to extract
+       minterm coefficients, then reconstructs a minimal equivalent.
+    4. **z3 aggressive built-in simplify** — ``som=True`` etc.
+
+    Iteration stops at a fixed point or after *max_rounds*.  The
+    smallest expression (by AST node count) seen is returned.
+
+    Returns ``(simplified_expr, rule_name_or_None, num_iterations)``.
+    """
+    best = expr
+    best_size = _ast_size(expr)
+    rule_name: Optional[str] = None
+    iterations = 0
+
+    for _ in range(max_rounds):
+        iterations += 1
+        prev = best
+
+        # --- 1. bottom-up sub-expression ---
+        candidate = _simplify_children(best, bit_width, timeout_ms)
+        cand_size = _ast_size(candidate)
+        if cand_size < best_size:
+            if verify_equivalence(best, candidate, timeout_ms):
+                best, best_size = candidate, cand_size
+                rule_name = rule_name or "subexpr_simplify"
+
+        # --- 2. static rewrite rules ---
+        result, rname = simplify_expr(best, bit_width, timeout_ms)
+        if rname is not None:
+            r_size = _ast_size(result)
+            if r_size <= best_size:
+                best, best_size = result, r_size
+                rule_name = rname
+
+        # --- 3. linear MBA decomposition ---
+        free_vars = _free_bitvec_vars(best)
+        if 1 <= len(free_vars) <= 4:
+            actual_bw = free_vars[0].size()
+            coeffs = _linear_mba_coefficients(best, free_vars, actual_bw)
+            if coeffs is not None:
+                recon = _reconstruct_from_coefficients(
+                    coeffs, free_vars, actual_bw,
+                )
+                if recon is not None:
+                    recon_expr, recon_name = recon
+                    recon_size = _ast_size(recon_expr)
+                    if recon_size < best_size:
+                        if verify_equivalence(best, recon_expr, timeout_ms):
+                            best, best_size = recon_expr, recon_size
+                            rule_name = recon_name
+
+        # --- 4. z3 aggressive simplify ---
+        z3s = z3.simplify(
+            best, som=True, pull_cheap_ite=True, local_ctx=True,
+        )
+        z3s_size = _ast_size(z3s)
+        if z3s_size < best_size and not _z3_eq(z3s, best):
+            if verify_equivalence(best, z3s, timeout_ms):
+                best, best_size = z3s, z3s_size
+                rule_name = rule_name or "z3_simplify"
+
+        # Fixed-point?
+        if _z3_eq(best, prev):
+            break
+
+    return best, rule_name, iterations
+
+
 def simplify_mba(
     text: str,
     bit_width: int = 64,
@@ -260,7 +568,7 @@ def simplify_mba(
         logger.debug("Failed to parse MBA expression %r: %s", text, exc)
         return MBAResult(original=text, simplified=text, proven=False, bit_width=bit_width)
 
-    simplified, rule_name = simplify_expr(expr, bit_width, timeout_ms)
+    simplified, rule_name, iters = simplify_expr_deep(expr, bit_width, timeout_ms)
 
     proven = False
     if rule_name is not None:
@@ -272,6 +580,7 @@ def simplify_mba(
         proven=proven,
         rule_name=rule_name,
         bit_width=bit_width,
+        iterations=iters,
     )
 
 
