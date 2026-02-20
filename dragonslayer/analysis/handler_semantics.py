@@ -111,6 +111,42 @@ _MNEMONIC_MAP: Dict[str, str] = {
     "retn": VMOperation.RET,
     "jmp": VMOperation.JMP,
     "nop": VMOperation.NOP,
+    # --- Data-movement instructions (context-dependent resolution) ------
+    # mov is the most common instruction in VM handlers; its VM
+    # operation depends on whether the destination or source is a
+    # memory operand.  _mnemonic_to_vm_op resolves this dynamically.
+    "mov": VMOperation.LOAD,      # default; overridden per-instruction
+    "movzx": VMOperation.LOAD,
+    "movsx": VMOperation.LOAD,
+    "movsxd": VMOperation.LOAD,
+    "lea": VMOperation.LOAD,
+    # Conditional moves
+    "cmove": VMOperation.LOAD,  "cmovne": VMOperation.LOAD,
+    "cmova": VMOperation.LOAD,  "cmovae": VMOperation.LOAD,
+    "cmovb": VMOperation.LOAD,  "cmovbe": VMOperation.LOAD,
+    "cmovg": VMOperation.LOAD,  "cmovge": VMOperation.LOAD,
+    "cmovl": VMOperation.LOAD,  "cmovle": VMOperation.LOAD,
+    # Byte-set instructions
+    "sete": VMOperation.CMP,  "setne": VMOperation.CMP,
+    "seta": VMOperation.CMP,  "setae": VMOperation.CMP,
+    "setb": VMOperation.CMP,  "setbe": VMOperation.CMP,
+    "setg": VMOperation.CMP,  "setge": VMOperation.CMP,
+    "setl": VMOperation.CMP,  "setle": VMOperation.CMP,
+    # Exchange (common in handlers) — map to LOAD as it's data movement
+    "xchg": VMOperation.LOAD,
+    "bswap": VMOperation.LOAD,
+}
+
+# Instructions that are typically VM infrastructure / junk code.
+# Used by junk-code filter to down-weight noise instructions.
+_JUNK_MNEMONICS: Set[str] = {
+    "nop", "int3", "ud2", "hlt",
+    # Opaque predicate building blocks
+    "pushf", "pushfd", "pushfq", "popf", "popfd", "popfq",
+    "clc", "stc", "cmc", "cld", "std",
+    # Often used as NOPs or alignment
+    "xchg",  # when source == dest
+    "fnop", "fwait", "wait",
 }
 
 # Conditional jumps all map to JCC.
@@ -293,9 +329,14 @@ def _classify_handler(
             detail="empty handler",
         )
 
+    # Apply junk-code filter: remove instructions that are likely noise
+    # (opaque predicates, alignment nops, etc.).
+    filtered = _filter_junk(instructions)
+    effective = filtered if filtered else instructions
+
     # Build mnemonic histogram.
     mnemonics: List[str] = []
-    for ti in instructions:
+    for ti in effective:
         mnem = _extract_mnemonic(ti.disassembly)
         if mnem:
             mnemonics.append(mnem)
@@ -324,7 +365,14 @@ def _classify_handler(
     infra_ops = {VMOperation.PUSH, VMOperation.POP}
 
     for mnem, count in hist.items():
-        vm_op = _mnemonic_to_vm_op(mnem)
+        # Pass disasm context for mov resolution — use first instruction
+        # with this mnemonic to determine memory direction.
+        sample_disasm = ""
+        for ti in effective:
+            if _extract_mnemonic(ti.disassembly) == mnem:
+                sample_disasm = ti.disassembly
+                break
+        vm_op = _mnemonic_to_vm_op(mnem, sample_disasm)
         if vm_op and vm_op != VMOperation.UNKNOWN:
             weight = 0.3 if vm_op in infra_ops else 1.0
             scores[vm_op] = scores.get(vm_op, 0) + (count / total) * weight
@@ -400,17 +448,121 @@ def _extract_mnemonic(disasm: str) -> str:
     """Extract the mnemonic from a disassembly string."""
     if not disasm:
         return ""
+    # Handle prefix-annotated lines like "lock add ..."
     parts = disasm.strip().split(None, 1)
-    return parts[0].lower() if parts else ""
+    if not parts:
+        return ""
+    mnem = parts[0].lower()
+    # Skip address prefixes (e.g. "0x401000:")
+    if mnem.endswith(":"):
+        parts = parts[1].split(None, 1) if len(parts) > 1 else []
+        mnem = parts[0].lower() if parts else ""
+    # Skip lock/rep prefixes
+    if mnem in ("lock", "rep", "repe", "repne", "repz", "repnz"):
+        sub = parts[1].split(None, 1) if len(parts) > 1 else []
+        mnem = sub[0].lower() if sub else mnem
+    return mnem
 
 
-def _mnemonic_to_vm_op(mnem: str) -> str:
-    """Map a native mnemonic to a VM operation."""
+def _filter_junk(
+    instructions: List[TraceInstruction],
+) -> List[TraceInstruction]:
+    """Remove likely junk / opaque-predicate code from a handler slice.
+
+    Junk-code patterns common in VM-protected binaries:
+    * ``xor reg, reg`` followed by branch (opaque predicate)
+    * Pure flag manipulation (pushf/popf/clc/stc) sequences
+    * ``nop``-equivalent instructions (``xchg reg, reg``, ``lea reg, [reg]``)
+    * Unreachable dead code after unconditional jumps
+
+    Returns the filtered list, or the original list if filtering would
+    remove everything (safety net).
+    """
+    if not instructions:
+        return instructions
+
+    filtered: List[TraceInstruction] = []
+    skip_until_label = False
+
+    for i, ti in enumerate(instructions):
+        mnem = _extract_mnemonic(ti.disassembly)
+        disasm = ti.disassembly.lower().strip()
+
+        # Skip known junk mnemonics
+        if mnem in _JUNK_MNEMONICS:
+            # Exception: xchg is only junk when source == dest
+            if mnem == "xchg":
+                ops = disasm.split(None, 1)
+                operands = ops[1] if len(ops) > 1 else ""
+                op_parts = [p.strip() for p in operands.split(",")]
+                if len(op_parts) == 2 and op_parts[0] == op_parts[1]:
+                    continue  # Skip xchg reg, reg
+                # else: keep it, it's meaningful data exchange
+            else:
+                continue
+
+        # Skip dead code after unconditional jump
+        if skip_until_label:
+            # A label / new basic block starts at branch targets
+            # Heuristic: next handler instruction or a target of a jmp
+            if mnem and mnem not in _JUNK_MNEMONICS:
+                skip_until_label = False
+            else:
+                continue
+
+        # Detect opaque-predicate pattern: xor reg, reg → jz/jnz
+        if mnem == "xor":
+            ops = disasm.split(None, 1)
+            operands = ops[1] if len(ops) > 1 else ""
+            op_parts = [p.strip() for p in operands.split(",")]
+            if len(op_parts) == 2 and op_parts[0] == op_parts[1]:
+                # xor reg, reg is opaque predicate setup — skip it
+                # and the following conditional branch
+                if i + 1 < len(instructions):
+                    next_mnem = _extract_mnemonic(instructions[i + 1].disassembly)
+                    if next_mnem in _JCC_PREFIXES:
+                        continue
+                continue
+
+        # Detect nop-equivalents: lea reg, [reg] (no displacement)
+        if mnem == "lea":
+            # lea rax, [rax] is a nop-equivalent
+            ops = disasm.split(None, 1)
+            operands = ops[1] if len(ops) > 1 else ""
+            match = re.match(r"(\w+),\s*\[\1\]$", operands)
+            if match:
+                continue
+
+        # After unconditional jmp, mark dead code
+        if mnem == "jmp":
+            skip_until_label = True
+
+        filtered.append(ti)
+
+    # Safety net: never return empty
+    return filtered if filtered else instructions
+
+
+def _mnemonic_to_vm_op(mnem: str, disasm: str = "") -> str:
+    """Map a native mnemonic to a VM operation.
+
+    For ``mov`` and variants, resolves to LOAD or STORE based on
+    whether the destination operand is a memory reference.
+    """
     if mnem in _MNEMONIC_MAP:
-        return _MNEMONIC_MAP[mnem]
+        vm_op = _MNEMONIC_MAP[mnem]
+        # Context-dependent resolution for mov/movzx/movsx
+        if mnem in ("mov", "movzx", "movsx", "movsxd") and disasm:
+            if _accesses_memory(disasm, "write"):
+                return VMOperation.STORE
+            return VMOperation.LOAD
+        return vm_op
     if mnem in _JCC_PREFIXES:
         return VMOperation.JCC
-    # mov is context-dependent — handled separately.
+    if mnem.startswith("cmov"):
+        return VMOperation.LOAD
+    if mnem.startswith("set"):
+        return VMOperation.CMP
     return VMOperation.UNKNOWN
 
 
@@ -418,17 +570,32 @@ def _accesses_memory(disasm: str, mode: str) -> bool:
     """Check if a disassembly line accesses memory.
 
     Mode 'read' checks source operand, 'write' checks destination.
+    Supports both Intel syntax (``[...]``) and AT&T syntax (``(...)``
+    with ``%`` register prefix).
     """
     if not disasm:
         return False
-    # Memory operands use [] in Intel syntax.
-    parts = disasm.split(",")
-    if mode == "write" and parts:
-        return "[" in parts[0]
-    if mode == "read" and len(parts) > 1:
-        return "[" in parts[-1]
-    # Single-operand check.
-    return "[" in disasm
+
+    # Detect syntax: AT&T uses %reg and (reg) for memory
+    is_att = "%" in disasm
+
+    if is_att:
+        # AT&T: source is first, destination is last
+        parts = disasm.split(",")
+        has_mem = lambda s: "(" in s and ")" in s
+        if mode == "write" and parts:
+            return has_mem(parts[-1])  # AT&T dest is last
+        if mode == "read" and parts:
+            return has_mem(parts[0])   # AT&T source is first
+        return any(has_mem(p) for p in parts)
+    else:
+        # Intel: destination is first, source is last
+        parts = disasm.split(",")
+        if mode == "write" and parts:
+            return "[" in parts[0]
+        if mode == "read" and len(parts) > 1:
+            return "[" in parts[-1]
+        return "[" in disasm
 
 
 def _estimate_operands(hist: Dict[str, int]) -> int:
