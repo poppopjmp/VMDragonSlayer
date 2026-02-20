@@ -7,6 +7,7 @@ FastAPI-based REST API server for binary analysis operations.
 import asyncio
 import base64
 import logging
+import os as _os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -127,13 +128,16 @@ app = FastAPI(
 )
 
 # CORS middleware
-# NOTE: allow_origins=["*"] and allow_credentials=True is invalid per the
-# CORS spec; browsers will reject the response.  Use explicit origins in
-# production and set allow_credentials=True only with a restricted list.
+# B66: allow_origins configurable via VMDS_CORS_ORIGINS env-var (comma-separated).
+# Defaults to ["*"] for development; set explicitly in production.
+_cors_origins_raw = _os.environ.get("VMDS_CORS_ORIGINS", "*")
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+_cors_credentials = _cors_origins != ["*"]  # spec forbids credentials with wildcard
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately in production
-    allow_credentials=False,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -141,6 +145,34 @@ app.add_middleware(
 # ═══════════════════════════════════════════════════════════════════════════════
 # B62: Production middleware
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# --- B66: Request body size limit middleware ---------------------------------
+
+MAX_REQUEST_BODY_BYTES: int = 100 * 1024 * 1024  # 100 MB
+
+
+@app.middleware("http")
+async def body_size_limit_middleware(request: Request, call_next):
+    """Reject requests with Content-Length exceeding MAX_REQUEST_BODY_BYTES.
+
+    This catches oversized uploads *before* the body is fully read, avoiding
+    unnecessary memory allocation.
+    """
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Request too large",
+                        "detail": f"Body exceeds {MAX_REQUEST_BODY_BYTES} byte limit",
+                    },
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
+
 
 # --- Request-ID middleware ---------------------------------------------------
 
@@ -186,7 +218,6 @@ async def timeout_middleware(request: Request, call_next):
 
 # Set VMDS_API_KEY env-var (or config) to enable; empty/unset = no auth.
 import hmac as _hmac
-import os as _os
 
 API_KEY: str = _os.environ.get("VMDS_API_KEY", "")
 

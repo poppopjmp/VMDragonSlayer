@@ -404,26 +404,40 @@ class SymbolicExecutor:
                         "type": "fallthrough",
                     })
 
-        # Back edges
-        back_edges = [e for e in edges if e["target"] <= e["source"]
-                      and e["type"] != "indirect"]
+        # B66: Dominators via networkx (required dependency)
+        # Use dominator tree for proper back-edge detection.
+        import networkx as nx
 
-        # Dominators via networkx (optional)
         dominators: Dict[int, int] = {}
-        try:
-            import networkx as nx
-            G = nx.DiGraph()
-            for addr in block_addrs:
-                G.add_node(addr)
+        back_edges: list[dict] = []
+
+        G = nx.DiGraph()
+        for addr in block_addrs:
+            G.add_node(addr)
+        for e in edges:
+            if e["target"] != 0:  # skip unresolved indirect
+                G.add_edge(e["source"], e["target"])
+
+        entry = entry_point if entry_point in G else (block_addrs[0] if block_addrs else None)
+        if entry is not None and entry in G:
+            idom = nx.immediate_dominators(G, entry)
+            dominators = {k: v for k, v in idom.items()}
+
+            # B66: Dominator-based back-edge detection — an edge (u→v) is
+            # a back edge iff v dominates u in the dominator tree.
+            dom_set: Dict[int, set[int]] = {n: set() for n in G.nodes}
+            for node, parent in idom.items():
+                # Walk up the dominator tree to build full dominator sets
+                cur = node
+                while cur != idom.get(cur, cur):
+                    dom_set[node].add(cur)
+                    cur = idom[cur]
+                dom_set[node].add(cur)  # root dominates itself
+
             for e in edges:
-                if e["target"] != 0:  # skip indirect
-                    G.add_edge(e["source"], e["target"])
-            entry = entry_point if entry_point in G else (block_addrs[0] if block_addrs else None)
-            if entry is not None and entry in G:
-                idom = nx.immediate_dominators(G, entry)
-                dominators = {hex(k): hex(v) for k, v in idom.items()}
-        except Exception:
-            pass
+                src, tgt = e["source"], e["target"]
+                if tgt != 0 and tgt in dom_set.get(src, set()):
+                    back_edges.append(e)
 
         return {
             "nodes": nodes,

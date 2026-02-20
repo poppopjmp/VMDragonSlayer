@@ -255,9 +255,9 @@ class TestCFGDiamondPattern:
         # No back edges in a diamond
         assert cfg["back_edge_count"] == 0
 
-        # Dominators: all dominated by entry
+        # Dominators: all dominated by entry (keys are ints since B66)
         try:
             import networkx
-            assert cfg["dominators"].get(hex(0x3000)) is not None
+            assert cfg["dominators"].get(0x3000) is not None
         except ImportError:
             pass

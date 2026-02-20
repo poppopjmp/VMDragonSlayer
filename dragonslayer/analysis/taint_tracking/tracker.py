@@ -18,11 +18,19 @@ disassembler.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import IntFlag
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+# B66: Pre-compiled regexes used by _extract_memory_address / _resolve_addr_expr
+_RE_INTEL_MEM = re.compile(r"\[([^\]]+)\]")
+_RE_ATT_MEM = re.compile(r"(-?(?:0x[0-9a-fA-F]+|\d+))?\(([^)]+)\)")
+_RE_ADDR_SPLIT = re.compile(r"(?=[+\-])")
+_RE_MUL = re.compile(r"(\w+)\s*\*\s*(\d+)")
+_RE_NUM = re.compile(r"(?:0x)?([0-9a-fA-F]+)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -802,20 +810,18 @@ class TaintTracker:
 
         Returns ``None`` if the address cannot be resolved.
         """
-        import re
-
         if reg_values is None:
             reg_values = {}
         # Normalise register-value keys to lowercase
         rv = {k.lower(): v for k, v in reg_values.items()}
 
         # --- Intel syntax: [...] ---
-        m_intel = re.search(r"\[([^\]]+)\]", operands)
+        m_intel = _RE_INTEL_MEM.search(operands)
         if m_intel:
             return TaintTracker._resolve_addr_expr(m_intel.group(1).strip(), rv)
 
         # --- AT&T syntax: disp(%base, %index, scale) or (%reg) ---
-        m_att = re.search(r"(-?(?:0x[0-9a-fA-F]+|\d+))?\(([^)]+)\)", operands)
+        m_att = _RE_ATT_MEM.search(operands)
         if m_att:
             disp_str = m_att.group(1) or "0"
             inner = m_att.group(2).replace("%", "").strip()
@@ -837,14 +843,12 @@ class TaintTracker:
         Supports: ``base``, ``base+disp``, ``base+index*scale``,
         ``base+index*scale+disp``, and variations with subtraction.
         """
-        import re
-
         expr = expr.strip().lower()
         total = 0
         resolved = True
 
         # Split on + / - while keeping the sign
-        tokens = re.split(r"(?=[+\-])", expr)
+        tokens = _RE_ADDR_SPLIT.split(expr)
         for tok in tokens:
             tok = tok.strip()
             if not tok:
@@ -859,7 +863,7 @@ class TaintTracker:
                 tok = tok[1:].strip()
 
             # Check for index*scale form
-            m_mul = re.fullmatch(r"(\w+)\s*\*\s*(\d+)", tok)
+            m_mul = _RE_MUL.fullmatch(tok)
             if m_mul:
                 reg_name = m_mul.group(1)
                 scale = int(m_mul.group(2))
@@ -870,7 +874,7 @@ class TaintTracker:
                 continue
 
             # Numeric literal (hex or decimal)
-            m_num = re.fullmatch(r"(?:0x)?([0-9a-fA-F]+)", tok)
+            m_num = _RE_NUM.fullmatch(tok)
             if m_num:
                 try:
                     val = int(m_num.group(0), 0) if tok.startswith("0x") else int(tok, 0)

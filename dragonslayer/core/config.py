@@ -174,15 +174,20 @@ class Config:
                 continue
             # Strip prefix and convert VMDS_SECTION__KEY → section.key
             path = env_key[5:].lower().replace("__", ".")
-            # Auto-parse numeric values
+            # Auto-parse numeric and boolean values
             parsed: Any = env_val
-            try:
-                parsed = int(env_val)
-            except ValueError:
+            if env_val.lower() in ("true", "yes", "1", "on"):
+                parsed = True
+            elif env_val.lower() in ("false", "no", "0", "off"):
+                parsed = False
+            else:
                 try:
-                    parsed = float(env_val)
+                    parsed = int(env_val)
                 except ValueError:
-                    pass
+                    try:
+                        parsed = float(env_val)
+                    except ValueError:
+                        pass
             self.set(path, parsed)
     
     def _merge_config(self, new_config: Dict[str, Any]):
@@ -230,9 +235,9 @@ class Config:
             config[keys[-1]] = value
     
     def get_section(self, section: str) -> Dict[str, Any]:
-
+        # B66: return deep-copy so callers can't mutate internal state
         with self._lock:
-            return self._config.get(section, {})
+            return copy.deepcopy(self._config.get(section, {}))
     
     def validate(self):
         """Validate configuration values (B53 — comprehensive).
