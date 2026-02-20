@@ -35,6 +35,12 @@ from .matcher import (
     find_signature_collisions,
 )
 
+from .version_fingerprint import (
+    VMProtectVersionFingerprinter,
+    VMProtectVersion,
+    VersionFingerprint,
+)
+
 __all__ = [
     # Database
     'Pattern',
@@ -57,6 +63,11 @@ __all__ = [
     'PatternClassifier',
     'ClassificationResult',
     'ClassificationReport',
+
+    # Version Fingerprinting
+    'VMProtectVersionFingerprinter',
+    'VMProtectVersion',
+    'VersionFingerprint',
 
     # YARA
     'YaraEngine',
