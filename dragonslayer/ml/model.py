@@ -68,6 +68,9 @@ HANDLER_CATEGORIES: List[str] = [
     "stack",         # PUSH, POP
     "load_store",    # MOV [mem] / MOV reg,[mem]
     "branch",        # JMP, JCC, CALL, RET
+    "vm_entry_exit", # VM_ENTER, VM_EXIT (context save/restore)
+    "context",       # CONTEXT_SAVE, CONTEXT_RESTORE, FETCH_OPCODE
+    "crypto",        # DECRYPT_OPCODE, KEY_UPDATE, flag-mixing MUL
     "nop",           # NOP / junk
     "unknown",
 ]
@@ -108,6 +111,21 @@ _HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
     "nop": [
         ("nop_ratio", 4.0, 0.50, "above"),
         ("instruction_count", 1.0, 3.0, "below"),
+    ],
+    "vm_entry_exit": [
+        ("stack_ratio", 2.0, 0.30, "above"),
+        ("instruction_count", 1.0, 8.0, "above"),
+        ("mem_ratio", 1.0, 0.20, "above"),
+    ],
+    "context": [
+        ("mem_ratio", 2.5, 0.25, "above"),
+        ("instruction_count", 1.0, 4.0, "above"),
+        ("stack_ratio", -0.5, 0.30, "above"),
+    ],
+    "crypto": [
+        ("logic_ratio", 2.5, 0.15, "above"),
+        ("arith_ratio", 0.8, 0.15, "above"),
+        ("instruction_count", 1.0, 4.0, "above"),
     ],
 }
 
@@ -162,6 +180,31 @@ class VMHandlerModel(BaseModel):
             with open(path, "rb") as f:
                 self._sklearn_model = pickle.load(f)
             logger.info("Loaded pickled model from %s", path)
+
+    def save(self, path: str) -> None:
+        """Save the trained scikit-learn model to *path*.
+
+        Uses joblib (preferred) or pickle as fallback.
+        Raises RuntimeError if no trained model is loaded.
+        """
+        if self._sklearn_model is None:
+            raise RuntimeError("No trained model to save")
+        from pathlib import Path as _Path
+        _Path(path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            import joblib  # type: ignore[import-untyped]
+            joblib.dump(self._sklearn_model, path)
+            logger.info("Saved sklearn model to %s (joblib)", path)
+        except ImportError:
+            import pickle
+            with open(path, "wb") as f:
+                pickle.dump(self._sklearn_model, f)
+            logger.info("Saved sklearn model to %s (pickle)", path)
+
+    @property
+    def is_trained(self) -> bool:
+        """Return True if a trained sklearn model is loaded."""
+        return self._sklearn_model is not None
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
         """Classify a handler from its feature vector.

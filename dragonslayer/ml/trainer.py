@@ -74,6 +74,8 @@ _OP_TO_LABEL: Dict[str, str] = {
     "vm_sar": "logic",
     "vm_rol": "logic",
     "vm_ror": "logic",
+    "vm_nand": "logic",
+    "vm_nor": "logic",
     "vm_push": "stack",
     "vm_pop": "stack",
     "vm_load": "load_store",
@@ -83,6 +85,19 @@ _OP_TO_LABEL: Dict[str, str] = {
     "vm_jcc": "branch",
     "vm_call": "branch",
     "vm_ret": "branch",
+    # VM entry/exit (Batch 34)
+    "vm_enter": "vm_entry_exit",
+    "vm_exit": "vm_entry_exit",
+    # Context / dispatch (Batch 34)
+    "vm_ctx_save": "context",
+    "vm_ctx_restore": "context",
+    "vm_fetch_opcode": "context",
+    "vm_dispatch": "context",
+    # Crypto / anti-debug (Batch 34)
+    "vm_decrypt": "crypto",
+    "vm_key_update": "crypto",
+    "vm_cpuid": "crypto",
+    "vm_rdtsc": "crypto",
     "vm_nop": "nop",
     "vm_unknown": "unknown",
 }
@@ -372,6 +387,144 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("nop", ""),
         ],
     ],
+    # ── Batch 34 new categories ─────────────────────────────────────────
+    "vm_entry_exit": [
+        # VM entry: push all registers (x64 style)
+        [
+            ("push", "rax"),
+            ("push", "rcx"),
+            ("push", "rdx"),
+            ("push", "rbx"),
+            ("push", "rbp"),
+            ("push", "rsi"),
+            ("push", "rdi"),
+            ("push", "r8"),
+            ("push", "r9"),
+            ("push", "r10"),
+            ("push", "r11"),
+            ("push", "r12"),
+            ("push", "r13"),
+            ("push", "r14"),
+            ("push", "r15"),
+            ("pushf", ""),
+        ],
+        # VM entry: individual stores to context area
+        [
+            ("mov", "[rdi], rax"),
+            ("mov", "[rdi+0x8], rcx"),
+            ("mov", "[rdi+0x10], rdx"),
+            ("mov", "[rdi+0x18], rbx"),
+            ("mov", "[rdi+0x20], rsp"),
+            ("mov", "[rdi+0x28], rbp"),
+            ("mov", "[rdi+0x30], rsi"),
+        ],
+        # VM exit: pop all (reverse order)
+        [
+            ("popf", ""),
+            ("pop", "r15"),
+            ("pop", "r14"),
+            ("pop", "r13"),
+            ("pop", "r12"),
+            ("pop", "r11"),
+            ("pop", "r10"),
+            ("pop", "r9"),
+            ("pop", "r8"),
+            ("pop", "rdi"),
+            ("pop", "rsi"),
+            ("pop", "rbp"),
+            ("pop", "rbx"),
+            ("pop", "rdx"),
+            ("pop", "rcx"),
+            ("pop", "rax"),
+            ("ret", ""),
+        ],
+        # VM exit: individual loads from context
+        [
+            ("mov", "rax, [rdi]"),
+            ("mov", "rcx, [rdi+0x8]"),
+            ("mov", "rdx, [rdi+0x10]"),
+            ("mov", "rsp, [rdi+0x20]"),
+            ("mov", "rbp, [rdi+0x28]"),
+            ("ret", ""),
+        ],
+    ],
+    "context": [
+        # Fetch opcode: read byte from vIP, increment vIP
+        [
+            ("movzx", "eax, byte ptr [rsi]"),
+            ("inc", "rsi"),
+        ],
+        # Fetch opcode with XOR decrypt
+        [
+            ("movzx", "eax, byte ptr [rsi]"),
+            ("xor", "al, cl"),
+            ("inc", "rsi"),
+        ],
+        # Dispatch: handler table lookup
+        [
+            ("movzx", "eax, byte ptr [rsi]"),
+            ("lea", "rcx, [rip+handler_table]"),
+            ("movsxd", "rax, dword ptr [rcx+rax*4]"),
+            ("add", "rax, rcx"),
+            ("jmp", "rax"),
+        ],
+        # Context save: save single register to VM context
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "[rdi+rcx*8], rax"),
+            ("add", "rbp, 8"),
+        ],
+        # Context restore: load single register from VM context
+        [
+            ("sub", "rbp, 8"),
+            ("mov", "rax, [rdi+rcx*8]"),
+            ("mov", "[rbp], rax"),
+        ],
+    ],
+    "crypto": [
+        # XOR decrypt opcode
+        [
+            ("mov", "al, [rsi]"),
+            ("xor", "al, cl"),
+            ("ror", "cl, 3"),
+            ("xor", "cl, al"),
+        ],
+        # ADD decrypt opcode
+        [
+            ("mov", "al, [rsi]"),
+            ("add", "al, cl"),
+            ("rol", "cl, 5"),
+            ("sub", "cl, al"),
+        ],
+        # Rolling key update
+        [
+            ("xor", "cl, al"),
+            ("rol", "cl, 3"),
+            ("add", "cl, al"),
+        ],
+        # CPUID check
+        [
+            ("cpuid", ""),
+            ("mov", "[rbp], eax"),
+            ("mov", "[rbp+4], ebx"),
+            ("mov", "[rbp+8], ecx"),
+            ("mov", "[rbp+12], edx"),
+        ],
+        # RDTSC timing check
+        [
+            ("rdtsc", ""),
+            ("shl", "rdx, 32"),
+            ("or", "rax, rdx"),
+            ("mov", "[rbp], rax"),
+        ],
+        # Flag-mixing multiply
+        [
+            ("imul", "rax, rcx"),
+            ("imul", "rdx, rbx"),
+            ("xor", "rax, rdx"),
+            ("mov", "[rbp], rax"),
+        ],
+    ],
 }
 
 
@@ -419,6 +572,9 @@ def generate_synthetic_handlers(
                 "stack": "vm_push",
                 "load_store": "vm_load",
                 "branch": "vm_jmp",
+                "vm_entry_exit": "vm_enter",
+                "context": "vm_fetch_opcode",
+                "crypto": "vm_decrypt",
                 "nop": "vm_nop",
             }
 
@@ -484,8 +640,11 @@ def train_full_pipeline(
     seed: int = 42,
     extended: bool = True,
     n_estimators: int = 100,
+    save_path: str | None = None,
 ) -> tuple[VMHandlerModel, TrainingResult, List[tuple[str, float]]]:
     """End-to-end: generate data, extract features, train, report.
+
+    If *save_path* is provided, the trained model is serialised there.
 
     Returns ``(model, training_result, top_importances)``.
     """
@@ -503,4 +662,8 @@ def train_full_pipeline(
     result = trainer.train(features, labels, n_estimators=n_estimators)
 
     imp = feature_importance(model, feature_names=names)
+
+    if save_path and model.is_trained:
+        model.save(save_path)
+
     return model, result, imp

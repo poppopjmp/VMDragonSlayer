@@ -248,14 +248,17 @@ class TestExtendedFeatures:
 class TestSyntheticDataGeneration:
     def test_generates_correct_count(self):
         handlers = generate_synthetic_handlers(n_per_category=10, seed=1)
-        # 7 categories * 10 = 70 (includes "unknown" only via templates)
-        # We have 6 categories in templates (arith, logic, stack, load_store, branch, nop)
-        assert len(handlers) == 6 * 10
+        # 9 categories with templates: arith, logic, stack, load_store, branch,
+        # nop, vm_entry_exit, context, crypto
+        assert len(handlers) == 9 * 10
 
     def test_all_categories_present(self):
         handlers = generate_synthetic_handlers(n_per_category=5, seed=2)
         cats = {h["category"] for h in handlers}
-        expected = {"arithmetic", "logic", "stack", "load_store", "branch", "nop"}
+        expected = {
+            "arithmetic", "logic", "stack", "load_store",
+            "branch", "nop", "vm_entry_exit", "context", "crypto",
+        }
         assert cats == expected
 
     def test_handlers_have_required_keys(self):
