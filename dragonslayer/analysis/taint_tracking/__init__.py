@@ -57,6 +57,7 @@ try:
         HandlerTaintSummary,
         build_handler_summary,
         canonicalize_reg,
+        compose_summaries,
     )
 except (ImportError, AttributeError):
     InterHandlerDataFlow = None  # type: ignore[assignment,misc]
@@ -65,6 +66,7 @@ except (ImportError, AttributeError):
     HandlerTaintSummary = None  # type: ignore[assignment,misc]
     build_handler_summary = None  # type: ignore[assignment,misc]
     canonicalize_reg = None  # type: ignore[assignment,misc]
+    compose_summaries = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "TaintTracker",
@@ -82,4 +84,5 @@ __all__ = [
     "HandlerTaintSummary",
     "build_handler_summary",
     "canonicalize_reg",
+    "compose_summaries",
 ]

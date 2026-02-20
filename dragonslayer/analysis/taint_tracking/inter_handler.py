@@ -20,6 +20,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
+# Late import to avoid circular dependency
+def _get_taint_tag():
+    from .tracker import TaintTag
+    return TaintTag
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +64,12 @@ class HandlerTaintSummary:
     taint_out: Set[str] = field(default_factory=set)
     kill: Set[str] = field(default_factory=set)
 
+    # B55: Tag-aware fields — map register → TaintTag (IntFlag)
+    tag_in: Dict[str, Any] = field(default_factory=dict)
+    tag_out: Dict[str, Any] = field(default_factory=dict)
+    # Transfer function: input_reg → set of output_regs it influences
+    transfer: Dict[str, Set[str]] = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "handler_id": self.handler_id,
@@ -69,6 +80,8 @@ class HandlerTaintSummary:
             "taint_in": sorted(self.taint_in),
             "taint_out": sorted(self.taint_out),
             "kill": sorted(self.kill),
+            "tag_in": {k: int(v) for k, v in self.tag_in.items()},
+            "tag_out": {k: int(v) for k, v in self.tag_out.items()},
         }
 
 
@@ -191,6 +204,13 @@ def build_handler_summary(
 
     # Kill set = defs that are unconditional (all defs for now).
     summary.kill = set(summary.defs)
+
+    # B55: Build default transfer function (uses → defs)
+    # Conservative: every use influences every def
+    if summary.uses and summary.defs:
+        for use_reg in summary.uses:
+            summary.transfer[use_reg] = set(summary.defs)
+
     return summary
 
 
@@ -403,6 +423,79 @@ class InterHandlerDataFlow:
 
         return contributing
 
+    def backward_propagate(
+        self,
+        summaries: List[HandlerTaintSummary],
+        *,
+        target_reg: str,
+        target_tag: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Backward tag-aware taint propagation (B55).
+
+        Starting from *target_reg* (optionally limited to *target_tag*)
+        at the last handler, propagate demands backward through the
+        handler chain using each summary's transfer function.
+
+        Parameters
+        ----------
+        summaries : list of HandlerTaintSummary
+            Ordered summaries (already forward-propagated or not).
+        target_reg : str
+            Canonical register to trace backward.
+        target_tag : TaintTag or None
+            If given, restrict to this specific tag combination.
+
+        Returns
+        -------
+        dict
+            ``{"required_inputs": {reg: tag, ...},
+               "contributing_handlers": [handler_id, ...],
+               "demand_chain": [(handler_id, {reg: tag}), ...]}``
+        """
+        TaintTag = _get_taint_tag()
+        target = canonicalize_reg(target_reg)
+
+        if target_tag is None:
+            target_tag = TaintTag.COMPUTED | TaintTag.INPUT
+
+        # demand: registers whose taint we need to explain
+        demand: Dict[str, Any] = {target: target_tag}
+        contributing: List[int] = []
+        demand_chain: List[tuple] = []
+
+        for s in reversed(summaries):
+            produced = s.defs & set(demand.keys())
+            if not produced:
+                continue
+
+            contributing.append(s.handler_id)
+            snapshot: Dict[str, Any] = {}
+
+            new_demand: Dict[str, Any] = {}
+            for d_reg in produced:
+                d_tag = demand.pop(d_reg)
+                # This handler defines d_reg; its inputs (uses) caused it
+                for u_reg in s.uses:
+                    # If transfer function is available, use it
+                    if u_reg in s.transfer and d_reg in s.transfer[u_reg]:
+                        combined = new_demand.get(u_reg, TaintTag.CLEAN) | d_tag
+                        new_demand[u_reg] = combined
+                    elif not s.transfer:
+                        # No transfer info → conservative: propagate to all uses
+                        combined = new_demand.get(u_reg, TaintTag.CLEAN) | d_tag
+                        new_demand[u_reg] = combined
+                snapshot = dict(new_demand)
+
+            demand.update(new_demand)
+            if snapshot:
+                demand_chain.append((s.handler_id, snapshot))
+
+        return {
+            "required_inputs": dict(demand),
+            "contributing_handlers": contributing,
+            "demand_chain": demand_chain,
+        }
+
     def get_live_registers(
         self,
         summaries: List[HandlerTaintSummary],
@@ -429,3 +522,104 @@ class InterHandlerDataFlow:
         if 0 <= handler_idx < n:
             return live_in[handler_idx]
         return set()
+
+
+# ---------------------------------------------------------------------------
+# Composable summary chaining (B55)
+# ---------------------------------------------------------------------------
+
+def compose_summaries(
+    summaries: List[HandlerTaintSummary],
+    *,
+    initial_tags: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Compose a chain of handler summaries into a single input→output tag map.
+
+    Walks the summary chain forward, propagating ``TaintTag`` values
+    through each handler's transfer function.  The result is a mapping
+    from initial input registers to the tags they contribute at the end
+    of the chain.
+
+    Parameters
+    ----------
+    summaries : list of HandlerTaintSummary
+        Ordered handler summaries.
+    initial_tags : dict or None
+        ``{register: TaintTag}`` at the chain entry.  If *None*, each
+        input register gets ``TaintTag.INPUT``.
+
+    Returns
+    -------
+    dict
+        ``{"input_tags": {reg: tag}, "output_tags": {reg: tag},
+           "composed_transfer": {in_reg: set_of_out_regs}}``
+    """
+    TaintTag = _get_taint_tag()
+
+    if not summaries:
+        return {"input_tags": {}, "output_tags": {}, "composed_transfer": {}}
+
+    # Determine initial input tags
+    if initial_tags is None:
+        # Use the first handler's uses as inputs
+        tags: Dict[str, Any] = {
+            reg: TaintTag.INPUT for reg in summaries[0].uses
+        }
+    else:
+        tags = dict(initial_tags)
+
+    input_tags = dict(tags)
+    # Track which original inputs flow to which outputs
+    composed_transfer: Dict[str, Set[str]] = {
+        reg: {reg} for reg in tags
+    }
+    # Reverse map: current register → set of original inputs that reached it
+    origin_map: Dict[str, Set[str]] = {
+        reg: {reg} for reg in tags
+    }
+
+    for s in summaries:
+        # New output tags after this handler
+        new_tags: Dict[str, Any] = {}
+        new_origin: Dict[str, Set[str]] = {}
+
+        # Pass-through: registers not killed
+        for reg, tag in tags.items():
+            if reg not in s.kill:
+                new_tags[reg] = tag
+                new_origin[reg] = set(origin_map.get(reg, set()))
+
+        # Defs: combine tags from tainted uses
+        for d_reg in s.defs:
+            combined = TaintTag.CLEAN
+            contributing_origins: Set[str] = set()
+            for u_reg in s.uses:
+                if u_reg in tags:
+                    # Check transfer function
+                    if s.transfer and u_reg in s.transfer:
+                        if d_reg in s.transfer[u_reg]:
+                            combined |= tags[u_reg] | TaintTag.COMPUTED
+                            contributing_origins.update(
+                                origin_map.get(u_reg, set())
+                            )
+                    elif not s.transfer:
+                        combined |= tags[u_reg] | TaintTag.COMPUTED
+                        contributing_origins.update(
+                            origin_map.get(u_reg, set())
+                        )
+            if combined != TaintTag.CLEAN:
+                new_tags[d_reg] = combined
+                new_origin[d_reg] = contributing_origins
+                for orig_input in contributing_origins:
+                    composed_transfer.setdefault(orig_input, set()).add(d_reg)
+
+        tags = new_tags
+        origin_map = new_origin
+
+    return {
+        "input_tags": {k: int(v) for k, v in input_tags.items()},
+        "output_tags": {k: int(v) for k, v in tags.items()},
+        "composed_transfer": {
+            k: sorted(v) for k, v in composed_transfer.items()
+        },
+    }
