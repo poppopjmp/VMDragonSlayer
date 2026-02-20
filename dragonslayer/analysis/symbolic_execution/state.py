@@ -834,12 +834,36 @@ class SymbolicState:
         self.constraints.append(constraint)
 
     def is_satisfiable(self) -> bool:
-        """Check if current path constraints are satisfiable."""
+        """Check if current path constraints are satisfiable.
+
+        When an incremental solver is attached (via :meth:`attach_solver`),
+        uses ``push``/``pop`` for efficient incremental checking (B52).
+        Otherwise falls back to creating a fresh solver.
+        """
         if not _Z3_AVAILABLE or not self.constraints:
             return True
+        inc_solver = getattr(self, "_incremental_solver", None)
+        if inc_solver is not None:
+            try:
+                inc_solver.push()
+                for c in self.constraints:
+                    inc_solver.add(c)
+                result = inc_solver.check() == z3.sat
+                inc_solver.pop()
+                return result
+            except Exception:
+                pass
         solver = z3.Solver()
         solver.add(*self.constraints)
         return solver.check() == z3.sat
+
+    def attach_solver(self, solver: Any) -> None:
+        """Attach a Z3 solver for incremental satisfiability checks (B52).
+
+        The solver will be used via push/pop in :meth:`is_satisfiable`
+        instead of creating a fresh solver each time.
+        """
+        self._incremental_solver = solver
 
     # -- State management ---------------------------------------------------
 
@@ -861,7 +885,165 @@ class SymbolicState:
         new._regions = dict(self._regions)
         new._sym_read_counter = self._sym_read_counter
         new._alias_cache = dict(self._alias_cache)
+        # B52: propagate incremental solver reference
+        inc = getattr(self, "_incremental_solver", None)
+        if inc is not None:
+            new._incremental_solver = inc
         return new
+
+    # -- Path merging (B52) -------------------------------------------------
+
+    @staticmethod
+    def _values_equal(a: Any, b: Any) -> bool:
+        """Check value equality, handling z3 objects."""
+        if a is b:
+            return True
+        if isinstance(a, int) and isinstance(b, int):
+            return a == b
+        if _Z3_AVAILABLE:
+            try:
+                if z3.is_expr(a) and z3.is_expr(b):
+                    return z3.eq(a, b)
+            except Exception:
+                pass
+        return False
+
+    def merge(self, other: "SymbolicState") -> "SymbolicState":
+        """Merge two states at a control-flow join point (B52).
+
+        Creates a merged state where:
+        - Registers that agree keep their value.
+        - Registers that diverge become ``z3.If(phi_cond, self.val, other.val)``.
+        - Memory cells are unioned; conflicts use ITE.
+        - Constraints become the disjunction of the two path suffixes
+          after the longest common constraint prefix.
+
+        Both states should have the same ``pc`` at the merge point.
+
+        Returns
+        -------
+        SymbolicState
+            A new merged state.
+        """
+        merged = SymbolicState(
+            arch=self.arch,
+            bit_width=self.bit_width,
+            initial_pc=self.pc,
+        )
+        merged.depth = max(self.depth, other.depth)
+        merged._visited_pcs = self._visited_pcs | other._visited_pcs
+        merged._visit_counts = dict(self._visit_counts)
+        for pc, cnt in other._visit_counts.items():
+            merged._visit_counts[pc] = max(
+                merged._visit_counts.get(pc, 0), cnt,
+            )
+
+        if not _Z3_AVAILABLE:
+            # Without z3, just take self's values (best effort)
+            merged.registers = dict(self.registers)
+            merged.memory = dict(self.memory)
+            merged.constraints = list(self.constraints)
+            merged.flags = dict(self.flags)
+            merged._memory_log = list(self._memory_log) + list(other._memory_log)
+            merged._symbolic_store = list(self._symbolic_store)
+            merged._read_log = list(self._read_log)
+            merged._write_log = list(self._write_log)
+            return merged
+
+        # -- Phi condition: a fresh Boolean variable representing which
+        # path was taken.  True → self, False → other.
+        phi_cond = z3.Bool(f"phi_merge_{self.pc:#x}_{id(self) & 0xFFFF:04x}")
+
+        # -- Merge registers --
+        all_regs = set(self.registers) | set(other.registers)
+        for reg in all_regs:
+            v_self = self.registers.get(reg)
+            v_other = other.registers.get(reg)
+            if v_self is None and v_other is None:
+                continue
+            if v_self is None:
+                merged.registers[reg] = v_other
+            elif v_other is None:
+                merged.registers[reg] = v_self
+            elif self._values_equal(v_self, v_other):
+                merged.registers[reg] = v_self
+            else:
+                # Create ITE phi-node
+                try:
+                    bw = self.bit_width
+                    a = v_self if z3.is_expr(v_self) else z3.BitVecVal(int(v_self), bw)
+                    b = v_other if z3.is_expr(v_other) else z3.BitVecVal(int(v_other), bw)
+                    merged.registers[reg] = z3.simplify(z3.If(phi_cond, a, b))
+                except Exception:
+                    merged.registers[reg] = v_self  # fallback
+
+        # -- Merge flags --
+        all_flags = set(self.flags) | set(other.flags)
+        for flag in all_flags:
+            f_self = self.flags.get(flag)
+            f_other = other.flags.get(flag)
+            if f_self is None:
+                merged.flags[flag] = f_other
+            elif f_other is None:
+                merged.flags[flag] = f_self
+            elif self._values_equal(f_self, f_other):
+                merged.flags[flag] = f_self
+            else:
+                try:
+                    a = f_self if z3.is_expr(f_self) else z3.BoolVal(bool(f_self))
+                    b = f_other if z3.is_expr(f_other) else z3.BoolVal(bool(f_other))
+                    merged.flags[flag] = z3.simplify(z3.If(phi_cond, a, b))
+                except Exception:
+                    merged.flags[flag] = f_self
+
+        # -- Merge memory --
+        merged.memory = dict(self.memory)
+        for addr, v_other in other.memory.items():
+            v_self = merged.memory.get(addr)
+            if v_self is None:
+                merged.memory[addr] = v_other
+            elif self._values_equal(v_self, v_other):
+                pass  # same value
+            else:
+                try:
+                    a = v_self if z3.is_expr(v_self) else z3.BitVecVal(int(v_self), 8)
+                    b = v_other if z3.is_expr(v_other) else z3.BitVecVal(int(v_other), 8)
+                    merged.memory[addr] = z3.simplify(z3.If(phi_cond, a, b))
+                except Exception:
+                    pass
+
+        # -- Merge constraints --
+        # Find common prefix, then disjoin the suffixes.
+        prefix_len = 0
+        min_len = min(len(self.constraints), len(other.constraints))
+        for i in range(min_len):
+            try:
+                if z3.eq(self.constraints[i], other.constraints[i]):
+                    prefix_len = i + 1
+                else:
+                    break
+            except Exception:
+                break
+
+        merged.constraints = list(self.constraints[:prefix_len])
+        suffix_self = self.constraints[prefix_len:]
+        suffix_other = other.constraints[prefix_len:]
+
+        if suffix_self or suffix_other:
+            clause_a = z3.And(*suffix_self) if suffix_self else z3.BoolVal(True)
+            clause_b = z3.And(*suffix_other) if suffix_other else z3.BoolVal(True)
+            merged.constraints.append(z3.simplify(z3.Or(clause_a, clause_b)))
+
+        # -- Merge logs (concatenate) --
+        merged._memory_log = list(self._memory_log) + list(other._memory_log)
+        merged._symbolic_store = list(self._symbolic_store) + list(other._symbolic_store)
+        merged._read_log = list(self._read_log) + list(other._read_log)
+        merged._write_log = list(self._write_log) + list(other._write_log)
+        merged._regions = dict(self._regions)
+        merged._regions.update(other._regions)
+        merged._alias_cache = {}  # invalidate cache post-merge
+
+        return merged
 
     def visit(self, pc: int) -> None:
         """Record a visited program counter and increment visit count."""

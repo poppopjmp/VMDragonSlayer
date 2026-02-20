@@ -780,6 +780,12 @@ class SymbolicExecutor:
 
         while worklist and paths < self.max_paths:
             state = worklist.popleft()
+
+            # --- B52: Path merging at join points ---
+            # When another state in the worklist has the same PC,
+            # merge them to reduce path explosion.
+            state = self._try_merge_worklist(state, worklist)
+
             path_len = 0
 
             while not state.halted and path_len < self.max_depth:
@@ -930,6 +936,35 @@ class SymbolicExecutor:
     def detected_loops(self) -> Dict[int, LoopInfo]:
         """Return loop headers detected during the most recent analysis."""
         return dict(self._detected_loops)
+
+    # -- Path merging (B52) --------------------------------------------------
+
+    def _try_merge_worklist(
+        self,
+        state: SymbolicState,
+        worklist: deque,
+    ) -> SymbolicState:
+        """Merge *state* with any worklist entry sharing the same PC.
+
+        If a mergeable partner is found, removes it from the worklist
+        and returns the merged state.  Otherwise returns *state* as-is.
+
+        At most one merge per pop to keep complexity manageable.
+        """
+        try:
+            for i, candidate in enumerate(worklist):
+                if candidate.pc == state.pc and not candidate.halted:
+                    # Remove the partner from the worklist
+                    del worklist[i]
+                    merged = state.merge(candidate)
+                    logger.debug(
+                        "Merged two paths at PC %#x (depths %d + %d → %d)",
+                        state.pc, state.depth, candidate.depth, merged.depth,
+                    )
+                    return merged
+        except Exception:
+            pass  # any merge failure → continue with original state
+        return state
 
     # -- Instruction semantics engine ----------------------------------------
 
