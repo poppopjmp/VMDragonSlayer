@@ -636,12 +636,19 @@ def _taint_slice(
 
         reads: List[str] = []
         writes: List[str] = []
-        for reg in _COMMON_TAINT_REGS:
-            if reg in operands.lower():
-                if not writes:
-                    writes.append(reg)
-                else:
-                    reads.append(reg)
+        # Use mnemonic-aware extraction from trace_ingestion module.
+        try:
+            from .trace_ingestion import _extract_reg_reads_writes
+            reads, writes = _extract_reg_reads_writes(mnem, operands)
+        except ImportError:
+            # Fallback: positional heuristic using sorted list
+            for reg in sorted(_COMMON_TAINT_REGS, key=len, reverse=True):
+                import re as _re
+                if _re.search(r"\b" + _re.escape(reg) + r"\b", operands.lower()):
+                    if not writes:
+                        writes.append(reg)
+                    else:
+                        reads.append(reg)
 
         lifted.append(_TaintableInstruction(
             address=ti.address,

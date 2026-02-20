@@ -205,3 +205,55 @@ class TestExecutionTrace:
         result = trace.to_lifted_instructions()
         assert len(result) >= 1
         assert result[0].address == 0x1000
+
+
+class TestExtractRegReadsWrites:
+    """Tests for mnemonic-aware register read/write extraction."""
+
+    def test_mov_dst_src(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("mov", "rax, rbx")
+        assert writes == ["rax"]
+        assert reads == ["rbx"]
+
+    def test_add_rmw(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("add", "rax, rbx")
+        assert "rax" in writes and "rax" in reads  # read-modify-write
+        assert "rbx" in reads
+
+    def test_cmp_read_only(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("cmp", "rax, rbx")
+        assert "rax" in reads and "rbx" in reads
+        assert writes == []
+
+    def test_push_read_only(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("push", "rax")
+        assert "rax" in reads
+        assert writes == []
+
+    def test_pop_write_only(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("pop", "rbx")
+        assert "rbx" in writes
+        assert reads == []
+
+    def test_xchg_both(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("xchg", "rax, rbx")
+        assert "rax" in reads and "rax" in writes
+        assert "rbx" in reads and "rbx" in writes
+
+    def test_word_boundary_no_r8_in_r12(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("mov", "r12, r8")
+        assert writes == ["r12"]
+        assert reads == ["r8"]
+
+    def test_memory_operand_registers(self):
+        from dragonslayer.analysis.trace_ingestion import _extract_reg_reads_writes
+        reads, writes = _extract_reg_reads_writes("mov", "rax, [rbx+rcx*4+0x10]")
+        assert writes == ["rax"]
+        assert "rbx" in reads and "rcx" in reads

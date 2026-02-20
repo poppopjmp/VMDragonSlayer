@@ -171,17 +171,7 @@ class ExecutionTrace:
         mnemonic = parts[0].lower() if parts else "nop"
         operands = parts[1] if len(parts) > 1 else ""
 
-        reads: list[str] = []
-        writes: list[str] = []
-        # Rough heuristic: first operand is destination
-        for reg in _COMMON_REGS:
-            if reg in operands:
-                # destination (first reference) goes into writes,
-                # everything else into reads
-                if not writes:
-                    writes.append(reg)
-                else:
-                    reads.append(reg)
+        reads, writes = _extract_reg_reads_writes(mnemonic, operands)
 
         return _SimpleInstruction(
             address=ti.address,
@@ -250,6 +240,98 @@ _COMMON_REGS = {
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
 }
+
+# Sorted longest-first so that "r12" matches before "r1".
+_COMMON_REGS_SORTED = sorted(_COMMON_REGS, key=len, reverse=True)
+
+import re as _re
+
+# Matches a register name at a word boundary.
+_REG_RE = _re.compile(
+    r"\b(" + "|".join(_re.escape(r) for r in _COMMON_REGS_SORTED) + r")\b",
+    _re.IGNORECASE,
+)
+
+# Instructions that read both operands and write only flags.
+_READ_ONLY_MNEMS = {"cmp", "test"}
+# Single-operand: read-only.
+_SINGLE_READ_MNEMS = {"push", "call", "jmp"}
+# Single-operand: write-only.
+_SINGLE_WRITE_MNEMS = {"pop"}
+# Read-modify-write on first operand: add, sub, xor, and, or, ...
+_RMW_MNEMS = {
+    "add", "sub", "adc", "sbb", "and", "or", "xor", "shl",
+    "shr", "sar", "rol", "ror", "inc", "dec", "neg", "not",
+}
+
+
+def _extract_reg_reads_writes(
+    mnemonic: str,
+    operands: str,
+) -> tuple[list[str], list[str]]:
+    """Mnemonic-aware extraction of register reads/writes.
+
+    Splits operands on ``,``, finds registers via word-boundary regex,
+    then applies x86 Intel-syntax operand rules to determine which
+    registers are read vs written.
+    """
+    ops = [o.strip() for o in operands.split(",")]
+    # Find registers per operand position (preserving order, deduped within each operand).
+    per_op_regs: list[list[str]] = []
+    for op_str in ops:
+        found: list[str] = []
+        for m in _REG_RE.finditer(op_str.lower()):
+            rn = m.group(1)
+            if rn not in found:
+                found.append(rn)
+        per_op_regs.append(found)
+
+    reads: list[str] = []
+    writes: list[str] = []
+
+    mn = mnemonic.lower()
+
+    if mn in _READ_ONLY_MNEMS:
+        # Both operands are read, nothing written (only flags).
+        for regs in per_op_regs:
+            reads.extend(regs)
+    elif mn in _SINGLE_READ_MNEMS:
+        for regs in per_op_regs:
+            reads.extend(regs)
+    elif mn in _SINGLE_WRITE_MNEMS:
+        # pop dst — write-only
+        if per_op_regs:
+            writes.extend(per_op_regs[0])
+    elif mn == "xchg" and len(per_op_regs) >= 2:
+        # Both read and written
+        for regs in per_op_regs:
+            reads.extend(regs)
+            writes.extend(regs)
+    elif mn in ("mov", "lea", "movzx", "movsx", "movsxd"):
+        # mov dst, src — dst is write-only, src is read
+        if per_op_regs:
+            writes.extend(per_op_regs[0])
+        for regs in per_op_regs[1:]:
+            reads.extend(regs)
+    elif mn in _RMW_MNEMS:
+        # Read-modify-write: first operand is read+write, rest are read
+        if per_op_regs:
+            writes.extend(per_op_regs[0])
+            reads.extend(per_op_regs[0])
+        for regs in per_op_regs[1:]:
+            reads.extend(regs)
+    else:
+        # Default Intel-syntax fallback: first operand = write, rest = read
+        if per_op_regs:
+            writes.extend(per_op_regs[0])
+        for regs in per_op_regs[1:]:
+            reads.extend(regs)
+
+    # Deduplicate while preserving order.
+    reads = list(dict.fromkeys(reads))
+    writes = list(dict.fromkeys(writes))
+
+    return reads, writes
 
 
 def _guess_category(mnemonic: str) -> str:
