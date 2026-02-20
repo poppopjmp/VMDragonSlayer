@@ -887,15 +887,31 @@ class SymbolicExecutor:
                             continue
 
                         if len(worklist) < self.max_paths:
-                            taken = state.fork()
-                            taken.pc = insn.branch_target
+                            # B59: Incremental feasibility check — prune
+                            # the taken branch if it is provably infeasible
+                            # under the current path constraints.
+                            taken_feasible = True
                             if branch_constraint is not None:
-                                taken.add_constraint(branch_constraint)
-                            # B54: assign priority and sequence
-                            taken.compute_priority()
-                            taken._seq = self._state_seq
-                            self._state_seq += 1
-                            heapq.heappush(worklist, taken)
+                                try:
+                                    self._solver.reset()
+                                    for c in state.constraints:
+                                        self._solver.add(c)
+                                    taken_feasible = self._solver.check_feasibility(
+                                        branch_constraint
+                                    )
+                                except Exception:
+                                    taken_feasible = True  # conservative
+
+                            if taken_feasible:
+                                taken = state.fork()
+                                taken.pc = insn.branch_target
+                                if branch_constraint is not None:
+                                    taken.add_constraint(branch_constraint)
+                                # B54: assign priority and sequence
+                                taken.compute_priority()
+                                taken._seq = self._state_seq
+                                self._state_seq += 1
+                                heapq.heappush(worklist, taken)
 
                         # Fall-through with negated constraint
                         next_addr = insn.address + insn.size
@@ -903,7 +919,24 @@ class SymbolicExecutor:
                             state.pc = next_addr
                             if branch_constraint is not None and Z3Solver.available():
                                 import z3 as _z3
-                                state.add_constraint(_z3.Not(branch_constraint))
+                                # B59: Check fall-through feasibility before
+                                # committing the negated constraint.
+                                neg_constraint = _z3.Not(branch_constraint)
+                                fall_feasible = True
+                                try:
+                                    self._solver.reset()
+                                    for c in state.constraints:
+                                        self._solver.add(c)
+                                    fall_feasible = self._solver.check_feasibility(
+                                        neg_constraint
+                                    )
+                                except Exception:
+                                    fall_feasible = True
+                                if fall_feasible:
+                                    state.add_constraint(neg_constraint)
+                                else:
+                                    state.halt("fall-through infeasible")
+                                    break
                         else:
                             state.halt("fall-through not in map")
                             break

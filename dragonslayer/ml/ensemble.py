@@ -5,18 +5,28 @@ Ensemble Classifiers
 Combine predictions from multiple :class:`~dragonslayer.ml.model.BaseModel`
 instances to improve classification accuracy.
 
-Stub — real ensemble strategies require trained component models.
+Three strategies are provided:
+
+* :class:`EnsembleClassifier` — majority vote.
+* :class:`WeightedEnsemble` — weighted confidence aggregation.
+* :class:`StackedEnsemble` — second-level meta-model trained on base
+  model outputs (stacking / blending).
 """
 
 from __future__ import annotations
 
 import logging
+from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Sequence
 
 from .model import BaseModel, PredictionResult
 
 logger = logging.getLogger(__name__)
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Majority-vote ensemble
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class EnsembleClassifier:
     """Run multiple models and aggregate their predictions.
@@ -28,8 +38,45 @@ class EnsembleClassifier:
     def __init__(self, models: Sequence[BaseModel] | None = None) -> None:
         self._models: List[BaseModel] = list(models) if models else []
 
+    @property
+    def n_models(self) -> int:
+        return len(self._models)
+
     def add_model(self, model: BaseModel) -> None:
         self._models.append(model)
+
+    # ── Fault-tolerant prediction (B59) ────────────────────────────────────
+
+    def predict_safe(self, features: Dict[str, Any]) -> PredictionResult:
+        """Like :meth:`predict` but tolerates individual model failures.
+
+        Models that raise are logged and skipped.  If *all* models fail,
+        returns a result with ``label="unknown"`` and ``confidence=0.0``.
+        """
+        if not self._models:
+            return PredictionResult(
+                label="unknown", confidence=0.0,
+                metadata={"error": "no models"},
+            )
+
+        results: List[PredictionResult] = []
+        failures: List[str] = []
+        for mdl in self._models:
+            try:
+                results.append(mdl.predict(features))
+            except Exception as exc:
+                failures.append(f"{getattr(mdl, 'name', type(mdl).__name__)}: {exc}")
+                logger.debug("Ensemble model failed: %s", failures[-1])
+
+        if not results:
+            return PredictionResult(
+                label="unknown", confidence=0.0,
+                metadata={"failures": failures},
+            )
+
+        return self._aggregate(results, failures=failures)
+
+    # ── Standard prediction ────────────────────────────────────────────────
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
         """Majority-vote prediction from all component models."""
@@ -39,16 +86,38 @@ class EnsembleClassifier:
                 "add trained models via add_model()"
             )
         results = [m.predict(features) for m in self._models]
-        # Majority vote
-        from collections import Counter
+        return self._aggregate(results)
+
+    # ── Aggregation (overridable) ──────────────────────────────────────────
+
+    def _aggregate(
+        self,
+        results: List[PredictionResult],
+        *,
+        failures: List[str] | None = None,
+    ) -> PredictionResult:
+        """Aggregate results via majority vote (B59 refactor)."""
         votes = Counter(r.label for r in results)
         winner, count = votes.most_common(1)[0]
+        agreement = count / len(results) if results else 0.0
+        meta: Dict[str, Any] = {
+            "votes": dict(votes),
+            "n_models": len(self._models),
+            "n_responded": len(results),
+            "agreement": agreement,
+        }
+        if failures:
+            meta["failures"] = failures
         return PredictionResult(
             label=winner,
-            confidence=count / len(results),
-            metadata={"votes": dict(votes), "n_models": len(results)},
+            confidence=agreement,
+            metadata=meta,
         )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Weighted-confidence ensemble
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class WeightedEnsemble(EnsembleClassifier):
     """Weighted combination of model predictions."""
@@ -61,26 +130,103 @@ class WeightedEnsemble(EnsembleClassifier):
         super().__init__(models)
         self._weights = list(weights) if weights else []
 
-    def predict(self, features: Dict[str, Any]) -> PredictionResult:
-        if not self._models:
-            raise NotImplementedError(
-                "WeightedEnsemble has no component models"
-            )
-        results = [m.predict(features) for m in self._models]
+    def _aggregate(
+        self,
+        results: List[PredictionResult],
+        *,
+        failures: List[str] | None = None,
+    ) -> PredictionResult:
         weights = self._weights or [1.0] * len(results)
-        if len(weights) != len(results):
-            raise ValueError(
-                f"Weight count ({len(weights)}) != model count ({len(results)})"
-            )
-        # Weighted vote
-        from collections import defaultdict
+        # Trim/pad weights to match responding models when some models failed.
+        if len(weights) > len(results):
+            weights = weights[:len(results)]
+        elif len(weights) < len(results):
+            weights = weights + [1.0] * (len(results) - len(weights))
         label_scores: Dict[str, float] = defaultdict(float)
         for r, w in zip(results, weights):
             label_scores[r.label] += r.confidence * w
         winner = max(label_scores, key=label_scores.get)  # type: ignore[arg-type]
-        total_w = sum(weights)
+        total_w = sum(weights) or 1.0
+        agreement = sum(1 for r in results if r.label == winner) / len(results) if results else 0.0
+        meta: Dict[str, Any] = {
+            "label_scores": dict(label_scores),
+            "n_models": len(self._models),
+            "n_responded": len(results),
+            "agreement": agreement,
+        }
+        if failures:
+            meta["failures"] = failures
         return PredictionResult(
             label=winner,
-            confidence=label_scores[winner] / total_w if total_w else 0.0,
-            metadata={"label_scores": dict(label_scores), "n_models": len(results)},
+            confidence=label_scores[winner] / total_w,
+            metadata=meta,
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stacked ensemble (meta-model)  — B59
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class StackedEnsemble(EnsembleClassifier):
+    """Two-level stacking ensemble.
+
+    Base models produce predictions; the *meta-model* then classifies
+    the concatenated base-model outputs.  Training the meta-model is
+    optional: if no meta-model is set, falls back to weighted voting.
+
+    Usage::
+
+        base = [model_a, model_b]
+        stack = StackedEnsemble(models=base)
+        stack.set_meta_model(meta_clf)
+        result = stack.predict(features)
+    """
+
+    def __init__(
+        self,
+        models: Sequence[BaseModel] | None = None,
+        meta_model: BaseModel | None = None,
+    ) -> None:
+        super().__init__(models)
+        self._meta_model: Optional[BaseModel] = meta_model
+
+    def set_meta_model(self, model: BaseModel) -> None:
+        self._meta_model = model
+
+    def _build_meta_features(
+        self, results: List[PredictionResult]
+    ) -> Dict[str, Any]:
+        """Build a feature dict from base-model outputs for the meta-model."""
+        meta: Dict[str, Any] = {}
+        for i, r in enumerate(results):
+            meta[f"base_{i}_label"] = r.label
+            meta[f"base_{i}_conf"] = r.confidence
+            for lbl, prob in r.probabilities.items():
+                meta[f"base_{i}_prob_{lbl}"] = prob
+        # Agreement ratio
+        labels = [r.label for r in results]
+        if labels:
+            most_common = Counter(labels).most_common(1)[0][1]
+            meta["agreement_ratio"] = most_common / len(labels)
+        return meta
+
+    def _aggregate(
+        self,
+        results: List[PredictionResult],
+        *,
+        failures: List[str] | None = None,
+    ) -> PredictionResult:
+        if self._meta_model is not None:
+            try:
+                meta_features = self._build_meta_features(results)
+                meta_result = self._meta_model.predict(meta_features)
+                meta_result.metadata["stacking"] = True
+                meta_result.metadata["n_models"] = len(self._models)
+                meta_result.metadata["n_responded"] = len(results)
+                if failures:
+                    meta_result.metadata["failures"] = failures
+                return meta_result
+            except Exception as exc:
+                logger.debug("Meta-model failed, falling back to vote: %s", exc)
+        # Fallback to majority vote
+        return super()._aggregate(results, failures=failures)

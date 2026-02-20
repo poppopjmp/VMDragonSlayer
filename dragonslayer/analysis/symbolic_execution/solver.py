@@ -111,6 +111,55 @@ class Z3Solver:
             self._constraints = self._constraints[:idx]
         self._solver.pop()
 
+    # -- B59: Named constraints & unsat core --------------------------------
+
+    def assert_and_track(self, constraint: Any, name: str) -> None:
+        """Add a *named* constraint for unsat-core extraction.
+
+        Unlike :meth:`add`, tracked constraints participate in
+        :meth:`unsat_core` so the caller can identify which subset of
+        named constraints is responsible for unsatisfiability.
+        """
+        label = z3.Bool(name)
+        self._constraints.append(constraint)
+        self._solver.assert_and_track(constraint, label)
+
+    def unsat_core(self) -> List[str]:
+        """Return the names of constraints in the UNSAT core.
+
+        Only meaningful after :meth:`check` returns UNSAT and the
+        conflicting constraints were added via :meth:`assert_and_track`.
+        """
+        try:
+            core = self._solver.unsat_core()
+            return [str(c) for c in core]
+        except Exception:
+            return []
+
+    # -- B59: Incremental feasibility check ---------------------------------
+
+    def check_feasibility(
+        self, *extra_constraints: Any
+    ) -> bool:
+        """Check whether *extra_constraints* are feasible under the current
+        constraint set **without** permanently adding them.
+
+        Uses push/pop on the persistent solver, avoiding the overhead of
+        creating a fresh ``z3.Solver`` instance.
+
+        Returns ``True`` if SAT, ``False`` otherwise (UNSAT or unknown).
+        """
+        self._solver.push()
+        try:
+            if extra_constraints:
+                self._solver.add(*extra_constraints)
+            result = self._solver.check()
+            return result == z3.sat
+        except Exception:
+            return False
+        finally:
+            self._solver.pop()
+
     # -- Solving -------------------------------------------------------------
 
     def check(self, *, raise_on_resource_limit: bool = False) -> SolverResult:

@@ -82,10 +82,11 @@ except (ImportError, AttributeError):
     load_ground_truth = None  # type: ignore[assignment,misc]
 
 try:
-    from .ensemble import EnsembleClassifier, WeightedEnsemble
+    from .ensemble import EnsembleClassifier, WeightedEnsemble, StackedEnsemble
 except (ImportError, AttributeError):
     EnsembleClassifier = None  # type: ignore[assignment,misc]
     WeightedEnsemble = None  # type: ignore[assignment,misc]
+    StackedEnsemble = None  # type: ignore[assignment,misc]
 
 try:
     from .classifier import VMClassifier
@@ -136,6 +137,7 @@ __all__ = [
     'load_ground_truth',
     'EnsembleClassifier',
     'WeightedEnsemble',
+    'StackedEnsemble',
     'VMClassifier',
     'TrainedHandlerModel',
     'classify_handlers',
