@@ -6,12 +6,13 @@ FastAPI-based REST API server for binary analysis operations.
 
 import asyncio
 import base64
+import json as _json
 import logging
 import os as _os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -36,11 +37,55 @@ from ..core.exceptions import (
 from ..core.config import get_config
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# ---------------------------------------------------------------------------
+# B68: Structured JSON log formatter for production log aggregation
+# ---------------------------------------------------------------------------
+
+class _JSONFormatter(logging.Formatter):
+    """Emit each log record as a single JSON line.
+
+    Output example::
+
+        {"ts":"2025-01-15T12:00:00Z","level":"INFO","logger":"dragonslayer.api.server","msg":"..."}
+
+    Activate via the ``VMDS_LOG_FORMAT`` environment variable::
+
+        VMDS_LOG_FORMAT=json  →  JSON lines
+        VMDS_LOG_FORMAT=text  →  human-readable (default)
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: Dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[1] is not None:
+            payload["exception"] = self.formatException(record.exc_info)
+        if hasattr(record, "request_id"):
+            payload["request_id"] = record.request_id  # type: ignore[attr-defined]
+        return _json.dumps(payload, default=str)
+
+
+def _configure_logging() -> None:
+    """Set up root handler with text or JSON formatting based on env."""
+    log_format = _os.environ.get("VMDS_LOG_FORMAT", "text").lower()
+    handler = logging.StreamHandler()
+    if log_format == "json":
+        handler.setFormatter(_JSONFormatter())
+    else:
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+    root = logging.getLogger()
+    # Avoid duplicate handlers on reimport
+    root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)]
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 

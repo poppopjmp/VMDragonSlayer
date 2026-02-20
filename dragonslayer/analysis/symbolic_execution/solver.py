@@ -355,3 +355,117 @@ class Z3Solver:
                 return SolverResult(satisfiable=True, error=f"Eval failed: {exc}")
 
         return SolverResult(satisfiable=False)
+
+    # -- B68: Streaming / chunked decryption helpers -------------------------
+
+    def solve_xor_key_schedule(
+        self,
+        ciphertext_chunks: List[int],
+        known_plaintext_chunks: List[int],
+        bits: int = 64,
+    ) -> SolverResult:
+        """Solve for a repeating XOR key given known-plaintext pairs.
+
+        Useful for VM bytecode decryption where a portion of the stream
+        has known semantics (e.g., ``NOP`` sleds or handler prologues).
+
+        Parameters
+        ----------
+        ciphertext_chunks:
+            Encrypted values extracted from the protected binary.
+        known_plaintext_chunks:
+            Expected plain values at the same positions.
+        bits:
+            Bit-width of each chunk (typically 8, 32, or 64).
+
+        Returns
+        -------
+        SolverResult
+            With ``model`` mapping ``key_0 … key_N-1`` to concrete ints.
+        """
+        if not ciphertext_chunks or len(ciphertext_chunks) != len(known_plaintext_chunks):
+            return SolverResult(satisfiable=False, error="chunk length mismatch")
+
+        n = len(ciphertext_chunks)
+        key_vars = [z3.BitVec(f"key_{i}", bits) for i in range(n)]
+
+        s = z3.Solver()
+        s.set("timeout", self.timeout_ms)
+
+        for i in range(n):
+            ct = z3.BitVecVal(ciphertext_chunks[i], bits)
+            pt = z3.BitVecVal(known_plaintext_chunks[i], bits)
+            s.add(ct ^ key_vars[i] == pt)
+
+        if s.check() == z3.sat:
+            model = s.model()
+            result_model: Dict[str, Any] = {}
+            for kv in key_vars:
+                val = model.eval(kv, model_completion=True)
+                try:
+                    result_model[str(kv)] = val.as_long()
+                except (AttributeError, z3.Z3Exception):
+                    result_model[str(kv)] = str(val)
+            return SolverResult(satisfiable=True, model=result_model)
+
+        return SolverResult(satisfiable=False, error="key schedule unsatisfiable")
+
+    def solve_chained_decryption(
+        self,
+        ciphertext_chain: List[int],
+        initial_state: int,
+        bits: int = 64,
+        known_plaintexts: Dict[int, int] | None = None,
+    ) -> SolverResult:
+        """Solve for a chained (CBC-like) XOR decryption key.
+
+        Assumes ``plain[i] = cipher[i] ^ key ^ plain[i-1]`` with
+        ``plain[-1] = initial_state``.
+
+        Parameters
+        ----------
+        known_plaintexts:
+            Optional mapping of ``{index: expected_plain_value}`` that
+            pins certain plaintext slots, making the key uniquely
+            determined.
+
+        Returns
+        -------
+        SolverResult
+            With ``model`` containing the single ``key`` value and
+            all recovered ``plain_i`` values.
+        """
+        if not ciphertext_chain:
+            return SolverResult(satisfiable=False, error="empty ciphertext chain")
+
+        n = len(ciphertext_chain)
+        key = z3.BitVec("key", bits)
+        plains = [z3.BitVec(f"plain_{i}", bits) for i in range(n)]
+
+        s = z3.Solver()
+        s.set("timeout", self.timeout_ms)
+
+        prev = z3.BitVecVal(initial_state, bits)
+        for i in range(n):
+            ct = z3.BitVecVal(ciphertext_chain[i], bits)
+            s.add(plains[i] == ct ^ key ^ prev)
+            prev = plains[i]
+
+        # Pin known plaintexts to make the key uniquely determined.
+        if known_plaintexts:
+            for idx, val in known_plaintexts.items():
+                if 0 <= idx < n:
+                    s.add(plains[idx] == z3.BitVecVal(val, bits))
+
+        if s.check() == z3.sat:
+            model = s.model()
+            result_model: Dict[str, Any] = {"key": model.eval(key, model_completion=True).as_long()}
+            for i, pv in enumerate(plains):
+                val = model.eval(pv, model_completion=True)
+                try:
+                    result_model[f"plain_{i}"] = val.as_long()
+                except (AttributeError, z3.Z3Exception):
+                    result_model[f"plain_{i}"] = str(val)
+            return SolverResult(satisfiable=True, model=result_model)
+
+        return SolverResult(satisfiable=False, error="chained decryption unsatisfiable")

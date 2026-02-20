@@ -59,6 +59,7 @@ class ExecutionResult:
     paths_explored: int = 0
     instructions_executed: int = 0
     dispatcher_address: Optional[int] = None
+    dispatcher_confidence: float = 0.0
     handler_table: Dict[int, str] = field(default_factory=dict)
     opaque_predicates: List[Dict[str, Any]] = field(default_factory=list)
     state_snapshots: List[Dict[str, Any]] = field(default_factory=list)
@@ -74,6 +75,7 @@ class ExecutionResult:
             "paths_explored": self.paths_explored,
             "instructions_executed": self.instructions_executed,
             "dispatcher_address": self.dispatcher_address,
+            "dispatcher_confidence": self.dispatcher_confidence,
             "handler_table": {hex(k): v for k, v in self.handler_table.items()},
             "opaque_predicates": self.opaque_predicates,
             "state_snapshot_count": len(self.state_snapshots),
@@ -221,7 +223,7 @@ class SymbolicExecutor:
             cfg = self._build_cfg(blocks, entry_point)
 
             # Step 3: Identify dispatcher using VMProtect pattern matching
-            dispatcher_addr = self._find_dispatcher(instructions)
+            dispatcher_addr, dispatcher_confidence = self._find_dispatcher(instructions)
             # Also run the new VMProtect-specific dispatcher identification
             self._vmprotect_dispatcher = self._find_vmprotect_dispatcher(
                 instructions, code, entry_point,
@@ -254,6 +256,7 @@ class SymbolicExecutor:
                 paths_explored=paths_explored,
                 instructions_executed=total_insns,
                 dispatcher_address=dispatcher_addr,
+                dispatcher_confidence=dispatcher_confidence,
                 handler_table=handler_table,
                 opaque_predicates=opaque,
                 state_snapshots=snapshots,
@@ -453,15 +456,20 @@ class SymbolicExecutor:
     # -- Dispatcher identification -------------------------------------------
 
     @staticmethod
-    def _find_dispatcher(instructions: List[LiftedInstruction]) -> Optional[int]:
+    def _find_dispatcher(
+        instructions: List[LiftedInstruction],
+    ) -> tuple[Optional[int], float]:
         """
-        Find the likely VM dispatcher address.
+        Find the likely VM dispatcher address and a confidence score.
+
+        Returns ``(address, confidence)`` where *confidence* is in ``[0.0, 1.0]``.
 
         Heuristic: score each indirect jump by how many *back-edges* (branches
         whose target is at or before the jump itself) exist in the instruction
         stream.  The indirect jump with the highest back-edge count is the most
-        likely dispatcher loop head.  Falls back to the first indirect jump if
-        no back-edge information is available.
+        likely dispatcher loop head.  Confidence is derived from the ratio of
+        the best score to the sum of all scores (normalised), multiplied by a
+        cap based on total evidence strength.
         """
         indirect_jumps: List[int] = []
         for insn in instructions:
@@ -469,10 +477,10 @@ class SymbolicExecutor:
                 indirect_jumps.append(insn.address)
 
         if not indirect_jumps:
-            return None
+            return None, 0.0
 
         if len(indirect_jumps) == 1:
-            return indirect_jumps[0]
+            return indirect_jumps[0], 0.5  # single candidate → moderate confidence
 
         # Build a set of indirect-jump addresses for fast lookup
         ij_set = set(indirect_jumps)
@@ -488,20 +496,35 @@ class SymbolicExecutor:
 
         # Score each indirect jump by the number of back-edges that land in
         # the same basic-block neighbourhood (within ±64 bytes of the jump).
-        best_addr = indirect_jumps[0]
-        best_score = 0
-
+        scores: Dict[int, int] = {}
         for ij_addr in indirect_jumps:
             score = 0
             for tgt, cnt in branch_targets.items():
                 # A "back-edge" targets at or before the indirect jump
                 if tgt <= ij_addr and abs(tgt - ij_addr) <= 64:
                     score += cnt
-            if score > best_score:
-                best_score = score
-                best_addr = ij_addr
+            scores[ij_addr] = score
 
-        return best_addr
+        best_addr = max(scores, key=scores.get)  # type: ignore[arg-type]
+        best_score = scores[best_addr]
+
+        # --- Confidence computation ---
+        total_score = sum(scores.values())
+        if total_score == 0:
+            # No back-edge evidence at all — fall back to first candidate.
+            return indirect_jumps[0], 0.1
+
+        # Ratio: how dominant is the best candidate?
+        ratio = best_score / total_score  # in (0, 1]
+
+        # Evidence cap: more back-edges ⇒ higher cap (saturates at 0.95).
+        evidence_cap = min(0.95, 0.4 + 0.05 * best_score)
+
+        confidence = min(evidence_cap, ratio)
+        # Ensure confidence stays in [0, 1]
+        confidence = max(0.0, min(1.0, confidence))
+
+        return best_addr, confidence
 
     def _find_vmprotect_dispatcher(
         self,

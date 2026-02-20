@@ -491,7 +491,9 @@ class TestDispatcherBackEdgeScoring:
                               raw_bytes=b"\xff\xe0", category=InstructionCategory.BRANCH_UNCOND,
                               branch_target=None),
         ]
-        assert SymbolicExecutor._find_dispatcher(insns) == 0x100
+        addr, conf = SymbolicExecutor._find_dispatcher(insns)
+        assert addr == 0x100
+        assert conf == 0.5  # single candidate → moderate confidence
 
     def test_no_indirect_jumps_returns_none(self):
         from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
@@ -502,7 +504,9 @@ class TestDispatcherBackEdgeScoring:
                               raw_bytes=b"\x75\x0a", category=InstructionCategory.BRANCH_COND,
                               branch_target=0x200),
         ]
-        assert SymbolicExecutor._find_dispatcher(insns) is None
+        addr, conf = SymbolicExecutor._find_dispatcher(insns)
+        assert addr is None
+        assert conf == 0.0
 
     def test_back_edge_scoring_picks_looped_jump(self):
         """Given two indirect jumps, the one with back-edges should win."""
@@ -531,7 +535,9 @@ class TestDispatcherBackEdgeScoring:
 
         insns = [ij1, br1, br2, ij2, br3]
         # ij2 (0x400) has 2 back-edges targeting ≤0x400 within ±64, ij1 has 0
-        assert SymbolicExecutor._find_dispatcher(insns) == 0x400
+        addr, conf = SymbolicExecutor._find_dispatcher(insns)
+        assert addr == 0x400
+        assert 0.0 < conf <= 1.0  # should have positive confidence
 
 
 class TestPushPopConcreteStack:

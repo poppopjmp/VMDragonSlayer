@@ -291,6 +291,15 @@ class Orchestrator:
         self.shutdown()
         return None
 
+    # B68: Async context manager ---------------------------------------------
+
+    async def __aenter__(self) -> "Orchestrator":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
+        self.shutdown()
+        return None
+
     # ------------------------------------------------------------------
     # Public entry points
     # ------------------------------------------------------------------
