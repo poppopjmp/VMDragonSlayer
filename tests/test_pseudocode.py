@@ -178,9 +178,9 @@ class TestEmitCLike:
     def test_variable_declarations(self):
         table, boundaries = _simple_table_and_boundaries()
         result = emit_c_like(table, boundaries)
-        # Should declare variables for pop and add results.
-        assert "v0" in result.text
-        assert "v1" in result.text
+        # SSA naming: pop → arg_N, add → sum_N, push uses operand names.
+        assert "arg_0" in result.text
+        assert "sum_0" in result.text
 
     def test_comments(self):
         table, boundaries = _simple_table_and_boundaries()
