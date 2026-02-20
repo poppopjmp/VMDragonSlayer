@@ -561,7 +561,11 @@ class AnalysisPipeline:
         binary_data: bytes,
         ctx: Any,
     ) -> StageResult:
-        """Detect and catalogue anti-analysis / anti-debug techniques."""
+        """Detect and catalogue anti-analysis / anti-debug techniques.
+
+        Also builds the runtime hook-set (Batch 17) so downstream
+        stages can install hooks into Qiling / angr / Triton.
+        """
         t0 = time.monotonic()
         try:
             from ..analysis.anti_evasion.environment_normalizer import EnvironmentNormalizer
@@ -572,6 +576,21 @@ class AnalysisPipeline:
 
             ctx.shared_data["anti_evasion"] = result_data
             ctx.shared_data["evasion_risk"] = report.risk_score
+
+            # Build runtime hook-set from the report (Batch 17).
+            try:
+                from ..analysis.anti_evasion.runtime_hooks import (
+                    build_hook_set_from_report,
+                )
+                hook_set = build_hook_set_from_report(result_data)
+                result_data["runtime_hooks"] = {
+                    "hook_count": len(hook_set.hooks),
+                    "categories": list({h.category.value for h in hook_set.hooks}),
+                    "hook_names": [h.name for h in hook_set.hooks],
+                }
+                ctx.shared_data["runtime_hook_set"] = hook_set
+            except Exception as exc:
+                logger.debug("Runtime hook-set generation skipped: %s", exc)
 
             return StageResult(
                 stage="anti_evasion",
@@ -917,20 +936,32 @@ class AnalysisPipeline:
         binary_data: bytes,
         ctx: Any,
     ) -> StageResult:
-        """
-        End-to-end devirtualisation pipeline stage.
+        """End-to-end devirtualisation pipeline stage.
 
-        Chains:
-        1. :func:`trace_ingestion.from_shared_data` — convert dynamic plugin
-           output to a unified :class:`ExecutionTrace`.
-        2. :func:`handler_boundaries.identify_vip_register` +
-           :func:`handler_boundaries.segment_trace` — locate the virtual IP
+        Chains eight sub-steps:
+
+        1. **Trace ingestion** — convert dynamic-plugin output to a
+           unified :class:`ExecutionTrace`.
+        2. **Anti-evasion hooks** — if an ``anti_evasion`` report is
+           available, build the hook-set and store it (Batch 17).
+        3. **VMProtect dispatcher identification** — locate the fetch →
+           decode → dispatch loop and reconstruct the handler table
+           (Batch 13).
+        4. **vIP identification + segmentation** — locate the virtual IP
            register and slice the trace into per-handler segments.
-        3. :func:`handler_semantics.analyse_handler_semantics` — determine
-           the VM-level operation each handler performs.
-        4. :func:`pseudocode.emit_pseudocode` — emit human-readable output.
+        5. **Handler extraction** — extract concrete handler bodies,
+           register deltas, and fingerprints from the trace segments
+           (Batch 14).
+        6. **VM context register identification** — identify virtual
+           stack pointer, table-base, decode-key, and context-base
+           registers from the trace (Batch 15).
+        7. **Semantic analysis + clustering** — classify each handler's
+           VM-level operation, then cluster semantically-equivalent
+           handler variants (Batch 16).
+        8. **Pseudocode emission** — emit human-readable output, passing
+           the handler-level CFG when available.
 
-        Results (including pseudocode text) are stored in
+        Results (including pseudocode) are stored in
         ``ctx.shared_data["devirtualize"]``.
         """
         def _do_devirt() -> Dict[str, Any]:
@@ -942,9 +973,8 @@ class AnalysisPipeline:
             from ..analysis.handler_semantics import analyse_handler_semantics
             from ..analysis.pseudocode import emit_pseudocode
 
-            # --- 1. Obtain an ExecutionTrace --------------------------------
+            # ── 1. Obtain an ExecutionTrace ──────────────────────────────
             trace: ExecutionTrace | None = None
-            # Prefer shared_data from dynamic plugins (angr/triton/qiling)
             try:
                 trace = from_shared_data(ctx.shared_data)
             except Exception:
@@ -956,20 +986,65 @@ class AnalysisPipeline:
                     "reason": "No execution trace available — run dynamic analysis first",
                 }
 
-            # --- 2. Identify vIP and segment into handler boundaries --------
+            # ── 2. Anti-evasion hook-set (Batch 17) ──────────────────────
+            hook_set_data: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.anti_evasion.runtime_hooks import (
+                    build_hook_set_from_report,
+                )
+                ae_report = ctx.shared_data.get("anti_evasion")
+                if ae_report is not None:
+                    hook_set = build_hook_set_from_report(ae_report)
+                    hook_set_data = {
+                        "hook_count": len(hook_set.hooks),
+                        "categories": list({h.category.value for h in hook_set.hooks}),
+                        "hook_names": [h.name for h in hook_set.hooks],
+                    }
+            except Exception as exc:
+                logger.debug("Anti-evasion hook-set skipped: %s", exc)
+
+            # ── 3. VMProtect dispatcher identification (Batch 13) ────────
+            vmprotect_match: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.vm_discovery.dispatcher import (
+                    find_vmprotect_dispatcher,
+                    find_dispatcher_in_trace,
+                )
+
+                # Try trace-based first (more reliable), fall back to binary
+                disp_match = find_dispatcher_in_trace(trace)
+                if disp_match is None:
+                    disp_match = find_vmprotect_dispatcher(binary_data)
+
+                if disp_match is not None:
+                    vmprotect_match = disp_match.to_dict()
+                    # Inject handler addresses into dispatcher_addrs pool
+                    ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
+            except Exception as exc:
+                logger.debug("VMProtect dispatcher identification skipped: %s", exc)
+
+            # ── 4. Identify vIP and segment into handler boundaries ──────
             dispatcher_addrs: list = list(
                 ctx.shared_data.get("vm_discovery", {}).get(
                     "dispatcher_addresses", [],
                 )
             )
 
-            # Supplement dispatcher_addrs with handler addresses from
-            # the DispatcherAnalyzer's handler_table (Batch 4 wiring).
+            # Supplement from DispatcherAnalyzer handler_table (Batch 4).
             handler_table = ctx.shared_data.get("handler_table", [])
             if handler_table:
                 ht_addrs = set(dispatcher_addrs)
                 for entry in handler_table:
                     addr = entry.get("handler_address") if isinstance(entry, dict) else getattr(entry, "handler_address", None)
+                    if addr and addr not in ht_addrs:
+                        dispatcher_addrs.append(addr)
+                        ht_addrs.add(addr)
+
+            # Also supplement from the VMProtect dispatcher match.
+            if vmprotect_match is not None:
+                ht_addrs = set(dispatcher_addrs)
+                for ht_entry in vmprotect_match.get("handler_table", []):
+                    addr = ht_entry.get("handler_address") if isinstance(ht_entry, dict) else getattr(ht_entry, "handler_address", None)
                     if addr and addr not in ht_addrs:
                         dispatcher_addrs.append(addr)
                         ht_addrs.add(addr)
@@ -991,9 +1066,31 @@ class AnalysisPipeline:
                     "reason": "Trace segmentation produced no handler boundaries",
                 }
 
-            # --- 3. Semantic analysis per handler ---------------------------
-            # Feed symbolic summaries from the symbolic_execution stage
-            # so handler classification uses expression matching (Batch 4).
+            # ── 5. Handler extraction (Batch 14) ─────────────────────────
+            extraction_data: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.vm_discovery.handler_extraction import (
+                    extract_handler_bodies,
+                )
+                extraction = extract_handler_bodies(trace, boundaries)
+                extraction_data = extraction.to_dict()
+                ctx.shared_data["handler_extraction"] = extraction_data
+            except Exception as exc:
+                logger.debug("Handler extraction skipped: %s", exc)
+
+            # ── 6. VM context register identification (Batch 15) ─────────
+            context_layout_data: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.vm_discovery.context_registers import (
+                    identify_vm_context,
+                )
+                context_layout = identify_vm_context(trace, boundaries)
+                context_layout_data = context_layout.to_dict()
+                ctx.shared_data["vm_context_layout"] = context_layout_data
+            except Exception as exc:
+                logger.debug("VM context register identification skipped: %s", exc)
+
+            # ── 7. Semantic analysis + clustering (Batch 16) ─────────────
             sym_summaries = ctx.shared_data.get(
                 "symbolic_execution", {},
             ).get("handler_summaries", None)
@@ -1003,11 +1100,33 @@ class AnalysisPipeline:
                 symbolic_summaries=sym_summaries,
             )
 
-            # --- 4. Pseudocode emission ------------------------------------
+            # Cluster semantically-equivalent handler variants.
+            clustering_data: Optional[Dict[str, Any]] = None
+            try:
+                from ..analysis.handler_clustering import (
+                    cluster_handlers_by_semantics,
+                    refine_opcode_table,
+                )
+                clustering_result = cluster_handlers_by_semantics(
+                    opcode_table,
+                    symbolic_summaries=sym_summaries,
+                )
+                clustering_data = clustering_result.to_dict()
+                ctx.shared_data["handler_clustering"] = clustering_data
+
+                # Refine the opcode table with cluster annotations.
+                opcode_table = refine_opcode_table(
+                    opcode_table, clustering_result,
+                )
+            except Exception as exc:
+                logger.debug("Handler clustering skipped: %s", exc)
+
+            # ── 8. Pseudocode emission ───────────────────────────────────
             pseudocode_result = emit_pseudocode(
                 opcode_table, boundaries, style="c_like",
             )
 
+            # ── Assemble result ──────────────────────────────────────────
             result_data: Dict[str, Any] = {
                 "vip_register": vip_candidate.name,
                 "handler_count": len(boundaries),
@@ -1017,7 +1136,19 @@ class AnalysisPipeline:
                 "pseudocode_text": pseudocode_result.text,
             }
 
-            # Also store the boundaries for downstream stages
+            # Attach optional Batch 13-17 products.
+            if hook_set_data is not None:
+                result_data["anti_evasion_hooks"] = hook_set_data
+            if vmprotect_match is not None:
+                result_data["vmprotect_dispatcher"] = vmprotect_match
+            if extraction_data is not None:
+                result_data["handler_extraction"] = extraction_data
+            if context_layout_data is not None:
+                result_data["vm_context_layout"] = context_layout_data
+            if clustering_data is not None:
+                result_data["handler_clustering"] = clustering_data
+
+            # Store boundaries for downstream stages.
             ctx.shared_data["devirt_boundaries"] = [
                 {
                     "vip_value": b.vip_value,
