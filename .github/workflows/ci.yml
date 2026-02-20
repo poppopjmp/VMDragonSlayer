@@ -36,7 +36,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          python -m pytest --tb=short -q --cov=dragonslayer --cov-report=term-missing --cov-fail-under=60
+          python -m pytest --tb=short -q --cov=dragonslayer --cov-report=term-missing --cov-fail-under=80
 
   lint:
     runs-on: ubuntu-latest
@@ -71,4 +71,4 @@ jobs:
           pip install -e .
 
       - name: Mypy (non-strict)
-        run: mypy dragonslayer/ --ignore-missing-imports --no-strict-optional || true
+        run: mypy dragonslayer/ --ignore-missing-imports --no-strict-optional

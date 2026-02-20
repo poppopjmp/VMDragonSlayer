@@ -841,6 +841,22 @@ class TaintTracker:
 
         mnem_lower = mnemonic.lower()
 
+        # B76: Auto-bind pointer values from concrete register snapshots
+        # so that MemoryAliasTracker can detect must-alias relationships
+        # during live instruction processing.
+        if reg_values:
+            for rname, rval in reg_values.items():
+                if isinstance(rval, int):
+                    self._pointer_tracker.bind(rname, rval)
+        # LEA and MOV-immediate: if the destination gets a concrete value,
+        # update the pointer tracker.
+        if mnem_lower in ("lea", "mov") and writes and reg_values:
+            for w in writes:
+                wl = w.lower()
+                val = reg_values.get(wl)
+                if isinstance(val, int):
+                    self._pointer_tracker.bind(wl, val)
+
         # B58: Decrement implicit-flow scope counter.
         if self._implicit_scope_remaining > 0:
             self._implicit_scope_remaining -= 1

@@ -30,6 +30,7 @@ except (ImportError, AttributeError):
     TaintEvent = None  # type: ignore[assignment,misc]
     TaintResult = None  # type: ignore[assignment,misc]
     ByteTaintMap = None  # type: ignore[assignment,misc]
+    MemoryAliasTracker = None  # type: ignore[assignment,misc]
     subreg_canonical = None  # type: ignore[assignment,misc]
     subreg_aliases = None  # type: ignore[assignment,misc]
     subreg_info = None  # type: ignore[assignment,misc]
@@ -78,6 +79,7 @@ __all__ = [
     "TaintEvent",
     "TaintResult",
     "ByteTaintMap",
+    "MemoryAliasTracker",
     "TaintAnalyzer",
     "VMTaintTracker",
     "VM_REG_PRESETS",
