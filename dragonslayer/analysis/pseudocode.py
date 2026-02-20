@@ -364,6 +364,7 @@ def emit_structured(
     lines: List[str] = []
     warnings: List[str] = []
     namer = _DefUseNamer()
+    open_loops = 0  # track how many while(true){ we've opened
 
     # Detect back-edges (loops).
     # Graph nodes can be handler addresses OR boundary indices — detect both.
@@ -392,6 +393,7 @@ def emit_structured(
         if is_loop_target:
             lines.append(f"  loop_{boundary.vip_value:#x}:")
             lines.append("  while (true) {")
+            open_loops += 1
 
         if entry is None:
             line = f"/* vIP={boundary.vip_value:#x} unknown */"
@@ -418,8 +420,8 @@ def emit_structured(
         addr_prefix = f"    /* {boundary.vip_value:#x} */  "
         lines.append(addr_prefix + line)
 
-    # Close any open loops.
-    if back_edge_target_indices or back_edge_target_addrs:
+    # Close any open loops — one closing brace per opened loop.
+    for _ in range(open_loops):
         lines.append("  }")
 
     text = "\n".join(lines)

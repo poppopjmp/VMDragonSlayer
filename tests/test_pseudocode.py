@@ -162,6 +162,35 @@ class TestEmitStructured:
         result = emit_structured(table, boundaries, handler_cfg=G)
         assert "while" in result.text
 
+    @pytest.mark.skipif(not NX_AVAILABLE, reason="networkx required")
+    def test_multiple_loops_close_correctly(self):
+        """Two back-edges => two 'while(true){' ... two closing '}'."""
+        table, boundaries = _simple_table_and_boundaries()
+        # Extend to 4 boundaries so we have room for 2 loop targets
+        extra_entries = [
+            _entry(0x7004, VMOperation.ADD, delta=2),
+        ]
+        for e in extra_entries:
+            table = SemanticOpcodeTable(
+                entries=table.entries + extra_entries,
+                handler_count=len(table.entries) + len(extra_entries),
+                unique_operations=table.unique_operations + 1,
+            )
+        boundaries = boundaries + [_boundary(0x106, 0x7004, delta=2)]
+        G = nx.DiGraph()
+        for i in range(len(boundaries)):
+            G.add_node(i)
+        for i in range(len(boundaries) - 1):
+            G.add_edge(i, i + 1, type="sequential")
+        G.add_edge(2, 0, type="back_edge")  # first loop
+        G.add_edge(3, 1, type="back_edge")  # second loop
+        result = emit_structured(table, boundaries, handler_cfg=G)
+        while_count = result.text.count("while (true) {")
+        close_count = result.text.strip().split("\n")
+        closing_braces = sum(1 for l in close_count if l.strip() == "}")
+        assert while_count == 2
+        assert closing_braces >= 2
+
 
 # ---------------------------------------------------------------------------
 # emit_c_like
