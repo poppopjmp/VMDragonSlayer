@@ -596,12 +596,8 @@ class SymbolicExecutor:
                 else:
                     result = (val + 1) if mnemonic == "inc" else (val - 1)
                 self._write_operand(state, ops[0], result)
-                # INC/DEC update all flags except CF
-                saved_cf = state.flags["CF"]
-                state.update_flags_arith(result, val,
-                                        1 if not (Z3Solver.available() and hasattr(val, "sort")) else __import__('z3').BitVecVal(1, state.bit_width),
-                                        is_sub=(mnemonic == "dec"))
-                state.flags["CF"] = saved_cf  # restore CF
+                # update_flags_inc_dec properly saves/restores CF
+                state.update_flags_inc_dec(result, val, is_dec=(mnemonic == "dec"))
 
             elif mnemonic == "neg" and len(ops) == 1:
                 val = self._resolve_operand(state, ops[0])

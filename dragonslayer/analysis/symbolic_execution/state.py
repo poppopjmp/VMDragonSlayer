@@ -236,12 +236,14 @@ class SymbolicState:
         one: Any = 1
         if _Z3_AVAILABLE and hasattr(result, "sort"):
             one = z3.BitVecVal(1, bw)
+        # Save CF — INC/DEC must not modify carry flag
+        saved_cf = self.flags.get("CF", False)
         if is_dec:
             self.update_flags_arith(result, original, one, is_sub=True)
         else:
             self.update_flags_arith(result, original, one, is_sub=False)
-        # Restore CF — INC/DEC don't touch it
-        # (update_flags_arith overwrote it; save/restore pattern)
+        # Restore CF
+        self.flags["CF"] = saved_cf
 
     @staticmethod
     def _ensure_bv_static(val: Any, bw: int) -> Any:

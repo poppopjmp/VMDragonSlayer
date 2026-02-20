@@ -456,3 +456,68 @@ class TestMultiByteMemory:
         s2.write_memory(0x1000, 0xDEAD, size=2)
         assert s.read_memory(0x1000, 2) == 0xBEEF
         assert s2.read_memory(0x1000, 2) == 0xDEAD
+
+
+# ---------------------------------------------------------------------------
+# INC/DEC CF preservation bug fix
+# ---------------------------------------------------------------------------
+
+class TestIncDecCFPreservation:
+    """Verify that INC/DEC does NOT modify the carry flag."""
+
+    def _make_state(self):
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+        s = SymbolicState(arch="x86_64", bit_width=64)
+        for reg in list(s.registers):
+            s.registers[reg] = 0
+        return s
+
+    def test_inc_preserves_cf_concrete(self):
+        s = self._make_state()
+        s.flags["CF"] = True
+        s.registers["rax"] = 5
+        result = 6
+        s.update_flags_inc_dec(result, 5, is_dec=False)
+        # CF must remain True
+        assert s.flags["CF"] is True
+
+    def test_dec_preserves_cf_concrete(self):
+        s = self._make_state()
+        s.flags["CF"] = False
+        s.registers["rax"] = 5
+        result = 4
+        s.update_flags_inc_dec(result, 5, is_dec=True)
+        assert s.flags["CF"] is False
+
+    def test_inc_sets_zf_correctly(self):
+        s = self._make_state()
+        s.flags["CF"] = True
+        # INC from max → 0
+        result = 0
+        original = 0xFFFFFFFF_FFFFFFFF
+        s.update_flags_inc_dec(result, original, is_dec=False)
+        # ZF should be set (result is 0)
+        assert s.flags["ZF"] is True or s.flags["ZF"] == True
+        # CF must still be True
+        assert s.flags["CF"] is True
+
+    def test_executor_inc_preserves_cf(self):
+        """Integration test: INC via executor should preserve CF."""
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        from dragonslayer.analysis.symbolic_execution.lifter import LiftedInstruction
+        from dragonslayer.analysis.symbolic_execution.state import SymbolicState
+
+        exe = SymbolicExecutor(arch="x86_64")
+        st = SymbolicState(arch="x86_64")
+        for reg in list(st.registers):
+            st.registers[reg] = 0
+        st.registers["rax"] = 10
+        st.flags["CF"] = True
+
+        insn = LiftedInstruction(
+            address=0, mnemonic="inc", operands="rax", size=3,
+            category="arithmetic", raw_bytes=b"\x48\xFF\xC0",
+        )
+        exe._apply_instruction(st, insn)
+        assert st.registers["rax"] == 11
+        assert st.flags["CF"] is True
