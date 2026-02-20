@@ -13,6 +13,15 @@ from .exceptions import (
     APIError,
     DevirtualizationError
 )
+from .disassembler import (
+    Disassembler,
+    DisassembledInstruction,
+    DisasmArchitecture,
+    create_disassembler,
+    from_pe,
+    disassemble_section,
+    CAPSTONE_AVAILABLE,
+)
 
 __all__ = [
     # Orchestrator
@@ -25,6 +34,15 @@ __all__ = [
     'get_config',
     'Config',
     
+    # Disassembler
+    'Disassembler',
+    'DisassembledInstruction',
+    'DisasmArchitecture',
+    'create_disassembler',
+    'from_pe',
+    'disassemble_section',
+    'CAPSTONE_AVAILABLE',
+
     # Exceptions
     'AnalysisError',
     'InvalidDataError',
