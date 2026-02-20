@@ -18,6 +18,8 @@ try:
         subreg_canonical,
         subreg_aliases,
         subreg_info,
+        is_eflags_producer,
+        is_eflags_consumer,
     )
 except (ImportError, AttributeError):
     TaintTracker = None  # type: ignore[assignment,misc]
@@ -28,6 +30,8 @@ except (ImportError, AttributeError):
     subreg_canonical = None  # type: ignore[assignment,misc]
     subreg_aliases = None  # type: ignore[assignment,misc]
     subreg_info = None  # type: ignore[assignment,misc]
+    is_eflags_producer = None  # type: ignore[assignment,misc]
+    is_eflags_consumer = None  # type: ignore[assignment,misc]
 
 try:
     from .analyzer import TaintAnalyzer

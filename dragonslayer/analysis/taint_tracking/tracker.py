@@ -95,6 +95,59 @@ def _build_family_tables() -> None:
 _build_family_tables()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# EFLAGS taint tables  (Batch 33)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Individual flag pseudo-registers tracked: eflags, cf, pf, af, zf, sf, of, df
+_INDIVIDUAL_FLAGS: Set[str] = {"eflags", "cf", "pf", "af", "zf", "sf", "of", "df"}
+
+# Mnemonics that write (produce) EFLAGS.
+_EFLAGS_PRODUCERS: Set[str] = {
+    # Arithmetic
+    "add", "adc", "sub", "sbb", "neg", "inc", "dec", "imul", "mul", "div", "idiv",
+    "cmp", "test",
+    # Bitwise
+    "and", "or", "xor", "not",
+    "shl", "sal", "shr", "sar", "rol", "ror", "rcl", "rcr",
+    "bt", "btc", "btr", "bts", "bsf", "bsr",
+    "shld", "shrd", "popcnt", "lzcnt", "tzcnt",
+    # Misc
+    "sahf", "popf", "popfd", "popfq",
+}
+
+# Mnemonics that read (consume) EFLAGS.
+_EFLAGS_CONSUMERS: Set[str] = {
+    # Conditional jumps
+    "ja", "jae", "jb", "jbe", "jc", "je", "jg", "jge", "jl", "jle",
+    "jna", "jnae", "jnb", "jnbe", "jnc", "jne", "jng", "jnge", "jnl",
+    "jnle", "jno", "jnp", "jns", "jnz", "jo", "jp", "jpe", "jpo", "js", "jz",
+    # Conditional moves
+    "cmova", "cmovae", "cmovb", "cmovbe", "cmovc", "cmove", "cmovg",
+    "cmovge", "cmovl", "cmovle", "cmovna", "cmovnae", "cmovnb", "cmovnbe",
+    "cmovnc", "cmovne", "cmovng", "cmovnge", "cmovnl", "cmovnle",
+    "cmovno", "cmovnp", "cmovns", "cmovnz", "cmovo", "cmovp", "cmovpe",
+    "cmovpo", "cmovs", "cmovz",
+    # SETcc
+    "seta", "setae", "setb", "setbe", "setc", "sete", "setg", "setge",
+    "setl", "setle", "setna", "setnae", "setnb", "setnbe", "setnc",
+    "setne", "setng", "setnge", "setnl", "setnle", "setno", "setnp",
+    "setns", "setnz", "seto", "setp", "setpe", "setpo", "sets", "setz",
+    # Misc
+    "adc", "sbb", "lahf", "pushf", "pushfd", "pushfq",
+    "salc",  # set al from carry
+}
+
+
+def is_eflags_producer(mnemonic: str) -> bool:
+    """Return True if *mnemonic* writes (produces) flags."""
+    return mnemonic.lower() in _EFLAGS_PRODUCERS
+
+
+def is_eflags_consumer(mnemonic: str) -> bool:
+    """Return True if *mnemonic* reads (consumes) flags."""
+    return mnemonic.lower() in _EFLAGS_CONSUMERS
+
+
 def subreg_canonical(reg: str) -> str:
     """Return the canonical 64-bit parent for *reg*, or *reg* itself."""
     info = _SUBREG_FAMILIES.get(reg.lower())
@@ -325,7 +378,7 @@ class TaintTracker:
             return TaintResult(success=False, error=str(exc))
 
     def _process_instruction(self, insn: Any) -> None:
-        """Propagate taint for a single instruction, including memory ops."""
+        """Propagate taint for a single instruction, including memory ops and EFLAGS."""
         reads = getattr(insn, "reads", [])
         writes = getattr(insn, "writes", [])
         address = getattr(insn, "address", 0)
@@ -335,11 +388,20 @@ class TaintTracker:
         # Concrete register values from an execution trace (if available)
         reg_values: Dict[str, int] = getattr(insn, "registers", {}) or {}
 
+        mnem_lower = mnemonic.lower()
+
+        # ── EFLAGS-aware reads ─────────────────────────────────────────────
+        # If this instruction consumes EFLAGS, add "eflags" to the read set
+        # so that tainted flags propagate forward automatically.
+        effective_reads = list(reads)
+        if is_eflags_consumer(mnem_lower):
+            effective_reads.append("eflags")
+
         # Collect taint from read operands (registers)
         combined_taint = TaintTag.CLEAN
         tainted_sources: List[str] = []
 
-        for reg in reads:
+        for reg in effective_reads:
             reg_lower = reg.lower()
             tag = self._collect_taint(reg_lower)
             if tag != TaintTag.CLEAN:
@@ -401,6 +463,23 @@ class TaintTracker:
                         ))
                         self._flow_graph.setdefault(src, set()).add(f"mem[{mem_addr:#x}]")
 
+            # ── EFLAGS taint: flag-producing instruction ────────────────
+            if is_eflags_producer(mnem_lower):
+                eflags_tag = combined_taint | TaintTag.COMPUTED
+                self._reg_taint["eflags"] = eflags_tag
+                for flag in _INDIVIDUAL_FLAGS:
+                    self._reg_taint[flag] = eflags_tag
+                for src in tainted_sources:
+                    self._events.append(TaintEvent(
+                        address=address,
+                        instruction=f"{mnemonic} {operands}",
+                        event_type="propagate",
+                        source=src,
+                        destination="eflags",
+                        tag=eflags_tag,
+                    ))
+                    self._flow_graph.setdefault(src, set()).add("eflags")
+
             # Implicit taint for conditional branches
             if category == "branch_conditional":
                 for src in tainted_sources:
@@ -426,6 +505,20 @@ class TaintTracker:
                         tag=TaintTag.CLEAN,
                     ))
                     self._clear_subreg_taint(reg_lower)
+
+            # ── EFLAGS: clean flag-producer → clear eflags taint ────────
+            if is_eflags_producer(mnem_lower):
+                for flag in _INDIVIDUAL_FLAGS:
+                    if self._reg_taint.get(flag, TaintTag.CLEAN) != TaintTag.CLEAN:
+                        self._reg_taint[flag] = TaintTag.CLEAN
+                        self._events.append(TaintEvent(
+                            address=address,
+                            instruction=f"{mnemonic} {operands}",
+                            event_type="untaint",
+                            source="clean_value",
+                            destination=flag,
+                            tag=TaintTag.CLEAN,
+                        ))
 
     @staticmethod
     def _extract_memory_address(
