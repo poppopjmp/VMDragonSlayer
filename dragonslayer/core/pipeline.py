@@ -240,7 +240,21 @@ class AnalysisPipeline:
                 continue
 
             try:
-                sr = handler()
+                # Enforce per-stage timeout via a thread-pool future.
+                stage_timeout = cfg.timeout if cfg.timeout > 0 else None
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(handler)
+                    try:
+                        sr = future.result(timeout=stage_timeout)
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(
+                            "Stage %s exceeded timeout of %.1fs", stage_name, cfg.timeout,
+                        )
+                        sr = StageResult(
+                            stage=stage_name,
+                            success=False,
+                            error=f"timeout after {cfg.timeout}s",
+                        )
                 stage_results.append(sr)
                 ctx.shared_data["pipeline_stages_completed"].append(stage_name)
 

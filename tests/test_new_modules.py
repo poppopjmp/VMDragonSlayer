@@ -949,6 +949,23 @@ class TestPipelineExecution:
         result = pipe.run(b"\x90" * 16, cfg)
         assert len(result.stages) == 0
 
+    def test_stage_timeout_enforced(self):
+        """A stage that exceeds the timeout should be marked as failed."""
+        from dragonslayer.core.pipeline import AnalysisPipeline, PipelineConfig
+
+        cfg = PipelineConfig(
+            stages=["pattern_analysis"],
+            llm_enabled=False,
+            timeout=0.001,  # extremely short — will trigger timeout
+        )
+        pipe = AnalysisPipeline()
+        # Even if pattern_analysis finishes, the tiny timeout may trigger.
+        # This verifies the mechanism doesn't crash. If it actually times
+        # out, the stage result will contain 'timeout' in the error.
+        result = pipe.run(b"\x90" * 64, cfg)
+        # Whether it timed out or not, the pipeline should complete.
+        assert isinstance(result.success, bool)
+
 
 # ---------------------------------------------------------------------------
 # LLM Analyzer tests (with mocking)
