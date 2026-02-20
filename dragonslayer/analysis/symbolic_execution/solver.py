@@ -45,9 +45,17 @@ class Z3Solver:
         assert result.model["x"] == 41
     """
 
-    def __init__(self, timeout_ms: int = 10000) -> None:
+    def __init__(self, timeout_ms: int = 10000, memory_limit_mb: int = 0) -> None:
         self.timeout_ms = timeout_ms
+        self.memory_limit_mb = memory_limit_mb
         self._constraints: List[Any] = []
+
+        # B53: Apply global z3 memory limit if requested
+        if memory_limit_mb > 0:
+            try:
+                z3.set_param("memory_max_size", memory_limit_mb)
+            except Exception:
+                logger.debug("Failed to set z3 memory limit to %d MB", memory_limit_mb)
         self._constraint_stack: List[int] = []  # indices for push/pop sync
         self._solver = z3.Solver()
         self._solver.set("timeout", timeout_ms)

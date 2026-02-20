@@ -34,6 +34,14 @@ vmprotect:
   confidence_threshold: 0.8
   max_handler_size: 10000
 
+# Symbolic execution engine limits (B53)
+symbolic_execution:
+  solver_timeout_ms: 10000   # Z3 per-query timeout
+  max_paths: 64              # Maximum concurrent paths
+  max_depth: 1000            # Max instructions per path
+  max_loop_iters: 3          # Loop iterations before widening
+  memory_limit_mb: 2048      # Z3 global memory cap
+
 data:
   patterns_db: data/patterns/pattern_database_dev.json
   models_dir: data/models/

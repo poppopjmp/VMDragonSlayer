@@ -97,3 +97,48 @@ class PluginError(AnalysisError):
 class GatewayError(NetworkError):
     """Raised when the Metroplex API gateway is unreachable or misbehaves."""
     error_code = "GATEWAY_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Resource / timeout errors  (B53)
+# ---------------------------------------------------------------------------
+
+class ResourceLimitError(AnalysisError):
+    """Raised when an analysis exceeds a configured resource limit.
+
+    This includes Z3 solver memory limits, path explosion bounds,
+    and wall-clock timeouts for individual analysis engines.
+    """
+    error_code = "RESOURCE_LIMIT"
+
+
+class AnalysisTimeoutError(AnalysisError):
+    """Raised when an analysis exceeds its configured time budget.
+
+    Distinct from :class:`NetworkError` — this covers local compute
+    time (Z3 solving, symbolic execution, pipeline stages) rather
+    than remote network calls.
+    """
+    error_code = "ANALYSIS_TIMEOUT"
+
+
+class ValidationError(ConfigurationError):
+    """Raised when a configuration or input fails schema validation.
+
+    Carries a ``field`` attribute indicating which config key was
+    invalid, and ``constraint`` describing the violated rule.
+    """
+    error_code = "VALIDATION_ERROR"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        field: str = "",
+        constraint: str = "",
+        error_code: str | None = None,
+        details: dict | None = None,
+    ):
+        super().__init__(message, error_code=error_code, details=details)
+        self.field = field
+        self.constraint = constraint

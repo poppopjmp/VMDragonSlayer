@@ -150,6 +150,8 @@ class SymbolicExecutor:
         max_depth: int = 1000,
         max_paths: int = 64,
         max_loop_iters: int = 3,
+        solver_timeout_ms: int = 10000,
+        memory_limit_mb: int = 0,
     ) -> None:
         self.arch = arch
         self.bit_width = 64 if "64" in arch else 32
@@ -157,11 +159,36 @@ class SymbolicExecutor:
         self.max_paths = max_paths
         self.max_loop_iters = max_loop_iters
         self._lifter = InstructionLifter(arch=arch)
-        self._solver = Z3Solver()
+        self._solver = Z3Solver(
+            timeout_ms=solver_timeout_ms,
+            memory_limit_mb=memory_limit_mb,
+        )
         # Path constraints gathered during _explore_paths for opaque detection.
         self._collected_path_constraints: List[Any] = []
         # Loop analysis results gathered during exploration.
         self._detected_loops: Dict[int, LoopInfo] = {}
+
+    @classmethod
+    def from_config(cls, config: Any = None) -> "SymbolicExecutor":
+        """Create an executor from the global or provided config (B53).
+
+        Reads ``symbolic_execution.*`` section for solver_timeout_ms,
+        max_paths, max_depth, max_loop_iters, memory_limit_mb.
+        """
+        if config is None:
+            try:
+                from dragonslayer.core.config import get_config
+                config = get_config()
+            except Exception:
+                return cls()
+
+        return cls(
+            max_depth=config.get("symbolic_execution.max_depth", 1000),
+            max_paths=config.get("symbolic_execution.max_paths", 64),
+            max_loop_iters=config.get("symbolic_execution.max_loop_iters", 3),
+            solver_timeout_ms=config.get("symbolic_execution.solver_timeout_ms", 10000),
+            memory_limit_mb=config.get("symbolic_execution.memory_limit_mb", 0),
+        )
 
     def analyze(
         self,

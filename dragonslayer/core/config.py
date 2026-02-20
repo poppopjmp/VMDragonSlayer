@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import yaml
 
-from .exceptions import ConfigurationError
+from .exceptions import ConfigurationError, ValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,14 @@ class Config:
             'llvm_opt_level': 'O3',
             'skip_optimization': False,
             'validation_threshold': 0.85
-        }
+        },
+        'symbolic_execution': {
+            'solver_timeout_ms': 10000,
+            'max_paths': 64,
+            'max_depth': 1000,
+            'max_loop_iters': 3,
+            'memory_limit_mb': 2048,
+        },
     }
     
     def __init__(self, config_dir: Optional[Path] = None, environment: str = 'development'):
@@ -184,20 +191,97 @@ class Config:
         return self._config.get(section, {})
     
     def validate(self):
-        """Validate configuration values."""
-        # Check required paths exist
+        """Validate configuration values (B53 — comprehensive).
+
+        Checks types, ranges, and consistency for all known sections.
+        Raises :class:`ValidationError` on the first invalid field
+        or :class:`ConfigurationError` for legacy compat.
+        Warns on unrecognised top-level keys.
+        """
+        errors: list[str] = []
+
+        # --- Known top-level sections ---
+        known_sections = set(self.DEFAULTS.keys()) | {
+            "data", "paths", "metroplex",
+        }
+        for key in self._config:
+            if key not in known_sections:
+                logger.warning("Unknown config section '%s' — typo?", key)
+
+        # -- pin path --
         pin_path = self.get('pin.path')
         if pin_path and not Path(pin_path).exists():
-            logger.warning(f"Pin binary not found at: {pin_path}")
-        
-        # Validate numeric ranges
+            logger.warning("Pin binary not found at: %s", pin_path)
+
+        # -- analysis.timeout --
         timeout = self.get('analysis.timeout')
         if not isinstance(timeout, int) or timeout <= 0:
-            raise ConfigurationError(f"Invalid analysis timeout: {timeout}")
-        
+            errors.append(f"analysis.timeout must be a positive int, got {timeout!r}")
+
+        # -- analysis.max_threads --
+        max_threads = self.get('analysis.max_threads')
+        if max_threads is not None:
+            if not isinstance(max_threads, int) or max_threads < 1:
+                errors.append(f"analysis.max_threads must be >= 1, got {max_threads!r}")
+
+        # -- api.port --
         port = self.get('api.port')
         if not isinstance(port, int) or port < 1 or port > 65535:
-            raise ConfigurationError(f"Invalid API port: {port}")
+            errors.append(f"api.port must be int in 1-65535, got {port!r}")
+
+        # -- api.workers --
+        workers = self.get('api.workers')
+        if workers is not None:
+            if not isinstance(workers, int) or workers < 1:
+                errors.append(f"api.workers must be >= 1, got {workers!r}")
+
+        # -- logging.level --
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        level = self.get('logging.level', 'INFO')
+        if isinstance(level, str) and level.upper() not in valid_levels:
+            errors.append(f"logging.level must be one of {valid_levels}, got {level!r}")
+
+        # -- symbolic_execution section (B53) --
+        solver_timeout = self.get('symbolic_execution.solver_timeout_ms')
+        if solver_timeout is not None:
+            if not isinstance(solver_timeout, int) or solver_timeout < 100:
+                errors.append(
+                    f"symbolic_execution.solver_timeout_ms must be >= 100, got {solver_timeout!r}"
+                )
+
+        max_paths = self.get('symbolic_execution.max_paths')
+        if max_paths is not None:
+            if not isinstance(max_paths, int) or max_paths < 1:
+                errors.append(f"symbolic_execution.max_paths must be >= 1, got {max_paths!r}")
+
+        max_depth = self.get('symbolic_execution.max_depth')
+        if max_depth is not None:
+            if not isinstance(max_depth, int) or max_depth < 1:
+                errors.append(f"symbolic_execution.max_depth must be >= 1, got {max_depth!r}")
+
+        mem_limit = self.get('symbolic_execution.memory_limit_mb')
+        if mem_limit is not None:
+            if not isinstance(mem_limit, int) or mem_limit < 64:
+                errors.append(
+                    f"symbolic_execution.memory_limit_mb must be >= 64, got {mem_limit!r}"
+                )
+
+        # -- vmprotect.validation_threshold --
+        vt = self.get('vmprotect.validation_threshold')
+        if vt is not None:
+            if not isinstance(vt, (int, float)) or not (0.0 <= vt <= 1.0):
+                errors.append(
+                    f"vmprotect.validation_threshold must be in [0,1], got {vt!r}"
+                )
+
+        # Raise first error for backwards compat (single-error contract)
+        if errors:
+            raise ValidationError(
+                errors[0],
+                field=errors[0].split(" ")[0],
+                constraint="range/type check",
+                details={"all_errors": errors},
+            )
     
     def __repr__(self) -> str:
         return f"Config(environment='{self.environment}', config_dir='{self.config_dir}')"

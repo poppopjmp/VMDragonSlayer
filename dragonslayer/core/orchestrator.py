@@ -415,6 +415,9 @@ class Orchestrator:
         """
         Route analysis to :class:`AnalysisPipeline` for sequential
         stage execution with a shared :class:`PluginContext`.
+
+        B53: Wraps pipeline execution with a timeout guard derived
+        from ``analysis.timeout`` to prevent unbounded runs.
         """
         from .pipeline import (
             AnalysisPipeline,
@@ -425,6 +428,7 @@ class Orchestrator:
         )
 
         t0 = time.monotonic()
+        pipeline_timeout = self.config.get("analysis.timeout", 1800)
 
         # Select pipeline configuration based on analysis type
         llm_enabled = self.config.get("llm.enabled", True)
@@ -442,12 +446,46 @@ class Orchestrator:
             pipe, cfg = create_full_pipeline(config=self.config)
             cfg.llm_enabled = llm_enabled
 
-        # Run the pipeline
-        pipe_result = pipe.run(
-            binary_data=request.binary_data,
-            pipeline_config=cfg,
-            metadata=request.metadata,
-        )
+        # B53: Run the pipeline with timeout guard
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    pipe.run,
+                    binary_data=request.binary_data,
+                    pipeline_config=cfg,
+                    metadata=request.metadata,
+                )
+                pipe_result = future.result(timeout=pipeline_timeout)
+        except (TimeoutError, concurrent.futures.TimeoutError):
+            elapsed = time.monotonic() - t0
+            logger.error(
+                "Pipeline timed out after %.1fs (limit=%ds)",
+                elapsed, pipeline_timeout,
+            )
+            return AnalysisResult(
+                success=False,
+                file_info=asdict(request.file_info) if request.file_info else {},
+                analysis_type=request.analysis_type.value,
+                results={},
+                engine_results=[],
+                execution_time=elapsed,
+                errors=[f"Pipeline timed out after {pipeline_timeout}s"],
+                confidence_scores={},
+            )
+        except Exception as exc:
+            elapsed = time.monotonic() - t0
+            logger.exception("Pipeline failed")
+            return AnalysisResult(
+                success=False,
+                file_info=asdict(request.file_info) if request.file_info else {},
+                analysis_type=request.analysis_type.value,
+                results={},
+                engine_results=[],
+                execution_time=elapsed,
+                errors=[str(exc)],
+                confidence_scores={},
+            )
 
         # Convert PipelineResult → AnalysisResult for API compatibility
         engine_results: List[EngineResult] = []
