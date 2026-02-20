@@ -4,6 +4,97 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Phase 8 — Deep Integration & Real Analysis Engines (14 commits)
+
+Phase 8 transforms VMDragonSlayer from a framework with data-starved scaffolding
+into a tool where **dynamic plugins produce per-instruction execution traces** that
+flow through trace ingestion, handler classification, symbolic execution, and
+pseudocode emission.
+
+#### Bug Fixes
+- **`_run_devirtualize` type bugs** — Fixed 4 type errors: passes `ExecutionTrace` (not lifted list); uses `vip_candidate.name` (not `.register`) (`3510ff2`)
+- **`label_from_heuristics` empty-string match** — Partial-match loop now skips empty `op_lower` to avoid false positives (`f394ced`)
+
+#### Dependency Changes
+- **z3-solver is now non-optional** — Hard `import z3` everywhere; removed all conditional guards and skip markers (`7b49397`)
+- **Python ≥ 3.10 required** — Code uses `X | Y` union syntax; pyproject.toml updated with 3.10–3.14 classifiers (`7b49397`)
+- **Core deps added** — `lief>=0.14.0`, `networkx>=3.0`, `click>=8.0` moved to hard requirements (`7b49397`)
+
+#### Enhanced — Triton Plugin (`plugins.dynamic.triton_analyzer`)
+- Per-instruction register snapshots (rax–r15, eax–eip) after every `processing()` call
+- Memory hooks: `GET_CONCRETE_MEMORY_VALUE` / `SET_CONCRETE_MEMORY_VALUE` capture reads/writes
+- Emits `instruction_trace[]` with address, size, raw_bytes, disassembly, registers, memory_accesses, is_tainted
+- Published to `ctx.shared_data['triton']` for downstream ingestion (`e5c9e13`)
+
+#### Enhanced — Qiling Plugin (`plugins.dynamic.qiling_analyzer`)
+- `ql.hook_code` for per-instruction tracing with Capstone disassembly
+- `ql.hook_mem_read` / `ql.hook_mem_write` for memory access tracking
+- Configurable `max_instructions` cap (default 200K)
+- Publishes `instruction_trace` + `memory_accesses` to `shared_data['qiling']` (`fcf94f5`)
+
+#### Enhanced — angr Plugin (`plugins.dynamic.angr_analyzer`)
+- `_extract_handler_traces`: per-handler symbolic execution with per-instruction data
+- Architecture-aware register lists via `_get_reg_names`
+- Publishes enriched `handler_traces` in `shared_data['angr']` (`445df7e`)
+
+#### Enhanced — BinExport & Blackfyre Plugins
+- **BinExport**: Walks basic blocks → instructions extracting mnemonics, operands, addresses; builds call_graph_edges and per-function mnemonic lists (`ad0959e`)
+- **Blackfyre**: Per-function mnemonics list, per-instruction address/operand extraction, callee/caller cross-reference lists (`ad0959e`)
+- Both feed downstream vector generation (vector_share, function_similarity)
+
+#### Rewritten — Trace Ingestion Adapters (`analysis.trace_ingestion`)
+- `_ingest_triton`: reads enriched `instruction_trace[]` with registers, raw_bytes, memory_accesses
+- `_ingest_angr`: reads `handler_traces[].instructions` with register snapshots
+- `_ingest_qiling`: reads `instruction_trace[]` with register snapshots and memory accesses
+- All adapters produce `TraceInstruction` with populated size, raw_bytes, registers (`827bb60`)
+
+#### Enhanced — Handler Semantics (`analysis.handler_semantics`)
+- Added mov/movzx/movsx/movsxd/lea/cmov\*/set\*/xchg/bswap to `_MNEMONIC_MAP` (`858597f`)
+- Context-aware mov: LOAD (memory source) vs STORE (memory destination) via `_mnemonic_to_vm_op()`
+- `_JUNK_MNEMONICS` + `_filter_junk`: removes opaque predicates, nop-equivalents, dead code
+- Intel `[...]` and AT&T `(...)` memory syntax support
+- **Taint-based semantic slicing**: `_taint_slice` uses TaintTracker to identify VM context data-flow (`2dac08a`)
+
+#### Enhanced — Pseudocode Emission (`analysis.pseudocode`)
+- **SSA def-use chains**: `_DefUseNamer` tracks VM stack operations with semantic variable names (sum_0, ld_1, stk_2, arg_0) (`d66da6b`)
+- `_format_instruction_ssa` formats pseudocode using def-use chains
+- `_OP_PREFIX` maps: ADD→"sum", SUB→"diff", LOAD→"ld", POP→"stk", etc.
+- Fixed back-edge detection to handle both index-based and address-based graph nodes
+
+#### New — MBA Simplification (`analysis.mba_simplifier`)
+- 11 z3-proven rewrite rules: and_or→add, xor_and→add, XNOR, complement_sub, double_not, etc.
+- `verify_equivalence`: z3 proof that two expressions are bit-accurate equivalent
+- `simplify_expr`: pattern-match known rules, fall back to `z3.simplify(som=True)`
+- `simplify_mba`: text interface with recursive-descent C-style expression parser
+- `simplify_batch`: batch processing with `MBAStats`
+- `simplify_handler_operands`: regex-driven in-place MBA rewrite on disassembly strings
+- 15 tests (`a0c7145`)
+
+#### New — Handler-Local Symbolic Execution (`analysis.symbolic_execution.executor`)
+- `execute_handler(handler_bytes, handler_address)`: fresh symbolic state with symbolic input registers; steps through handler; MBA simplification of final register expressions
+- `execute_handler_from_trace(trace_instructions)`: consumes trace instruction dicts
+- `HandlerSymbolicSummary` dataclass: address, final_registers, simplified_registers, memory_writes, constraints, input_symbols
+- Integrates with `mba_simplifier.simplify_expr` for expression reduction (`443f205`)
+
+#### New — ML Handler Classifier & Training Pipeline (`ml/`)
+- `extract_handler_features()`: 15-D feature vector (instruction_count, mnemonic ratios, memory flags, operand width, block count) (`c2b7ba5`)
+- `VMHandlerModel`: weighted-rule heuristic scoring + optional sklearn RandomForest
+- `label_from_heuristics()`: derives labels from handler semantic operations via `_OP_TO_LABEL`
+- `prepare_training_data()`: handler dicts → (features, labels) pairs
+- `ModelTrainer.train()`: sklearn RF when available, heuristic validation fallback
+- 7 handler categories: arithmetic, logic, stack, load_store, branch, nop, unknown
+
+#### New — Integration Tests (`tests/test_integration.py`)
+- 16 end-to-end integration tests exercising the full devirtualisation pipeline
+- Tests: trace→vIP→boundaries→semantics→pseudocode, Triton ingestion, MBA round-trip, handler symbolic execution, Z3 opaque predicates, ML classifier pipeline, cross-module data structures (`f394ced`)
+
+#### Test Suite
+- **362 tests** (362 pass, 7 skip — all yara-python)
+- z3-solver skip eliminated (now a hard dependency)
+- New test files: `test_integration`, `test_mba_simplifier`
+
+---
+
 ### Phase 7 — Devirtualisation Pipeline (15 commits)
 
 The central achievement of Phase 7 is a **complete devirtualisation data path**:

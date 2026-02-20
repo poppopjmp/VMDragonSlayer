@@ -24,20 +24,21 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | Dispatcher Analysis | `analysis.vm_discovery.dispatcher` | Jump-table scanning, push/ret trampoline detection, handler table reconstruction, opcode→address mapping |
 | Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection), regex entry-point matching, optional YARA backend |
 | Taint Tracking | `analysis.taint_tracking` | Register + memory taint propagation, virtual register mapping (VMProtect/Themida presets), handler boundary detection |
-| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), z3 branch constraints, opaque predicate detection |
+| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), z3 branch constraints, opaque predicate detection, handler-local symbolic execution with MBA simplification |
 | Anti-Evasion | `analysis.anti_evasion` | Section-aware instruction scanning (PE/ELF), anti-debug/VM/sandbox detection, binary patching |
 | Binary Parsing | `analysis.binary_format` | Shared LIEF-based PE/ELF parser used across all analysis modules |
 | Trace Ingestion | `analysis.trace_ingestion` | Unified `ExecutionTrace` model; ingestion from text files, angr, Triton, Qiling, and shared plugin data |
 | Handler Boundaries | `analysis.vm_discovery.handler_boundaries` | vIP register identification (monotonic + alignment scoring), trace segmentation into per-handler slices |
 | CFG Reconstruction | `analysis.cfg` | Instruction-level and handler-level CFGs via networkx, basic-block extraction, dominator analysis |
 | Bytecode Extraction | `analysis.bytecode_extract` | Correlates memory reads with handler boundaries to extract the VM bytecode stream |
-| Handler Semantics | `analysis.handler_semantics` | Mnemonic histogram analysis → VMOperation classification (add, xor, load, store, jcc, …), opcode table construction |
-| Pseudocode Emission | `analysis.pseudocode` | Linear listing, structured (if/while/goto), and C-like function output from devirtualised VM programs |
+| Handler Semantics | `analysis.handler_semantics` | Mnemonic histogram analysis → VMOperation classification (add, xor, load, store, jcc, …), opcode table construction, taint-based semantic slicing, junk-code filtering |
+| Pseudocode Emission | `analysis.pseudocode` | Linear listing, structured (if/while/goto), and C-like function output with SSA def-use variable naming |
+| MBA Simplification | `analysis.mba_simplifier` | 11 z3-proven rewrite rules, `verify_equivalence`, recursive-descent expression parser, batch simplification |
 | Devirtualise Stage | `core.pipeline` (devirtualize) | End-to-end pipeline stage: trace → vIP → boundaries → semantics → pseudocode |
 | LLM-Assisted | `llm.analyzer` | Few-shot handler classification, deobfuscation hints, code recovery, pattern explanation (via litellm) |
-| ML Pipeline | `ml.handler_classifier` | scikit-learn handler classifier with heuristic fallback; `VMClassifier`, `EnsembleClassifier` |
+| ML Pipeline | `ml.handler_classifier`, `ml.pipeline`, `ml.model`, `ml.trainer` | 15-D feature extraction, handler classifier (heuristic + sklearn RF), training pipeline, label derivation, `VMClassifier`, `EnsembleClassifier` |
 | Plugin Pipeline | `core.pipeline` | Multi-stage pipeline with ThreadPoolExecutor, per-plugin timeout, thread-safe shared data |
-| Plugin Ecosystem | `plugins/` | 16 plugins across 4 stages (static/dynamic/enrichment/reporting) with angr, Triton, Qiling, etc. |
+| Plugin Ecosystem | `plugins/` | 16 plugins across 4 stages (static/dynamic/enrichment/reporting) with angr, Triton, Qiling; enriched per-instruction trace output |
 | CLI | `dragonslayer.cli` | `vmdragonslayer analyze`, `serve`, `info` — Click-based command-line interface |
 | Reporting | `plugins.reporting.reporter` | VM deobfuscation analysis sections (handler table, taint flow, symbolic results, virtual register map) |
 
@@ -122,9 +123,17 @@ graph TD
 #### 4. **Symbolic Execution** (`dragonslayer.analysis.symbolic_execution`)
 - **Purpose**: Explore VM execution paths symbolically
 - **Instruction Semantics**: mov, add/sub, and/or/xor, shl/shr/sar/rol/ror, push/pop, lea, cmp/test, inc/dec, neg/not, xchg, movzx/movsx — all produce z3 BitVec expressions
+- **Handler-Local Execution**: `execute_handler()` runs isolated symbolic analysis on individual handler bodies, producing `HandlerSymbolicSummary` (final registers, constraints, memory writes)
+- **MBA Simplification**: Final register expressions simplified via `mba_simplifier.simplify_expr` (11 proven rewrite rules + z3 fallback)
 - **Branch Analysis**: Maps jcc mnemonics to z3 constraints, forks state on conditional branches
 - **Opaque Predicate Detection**: Trivial (`cmp reg,reg`) + z3-proven constant predicates
 - **Integration**: Uses dispatcher addresses from vm_discovery for focused exploration
+
+#### 4b. **MBA Simplifier** (`dragonslayer.analysis.mba_simplifier`)
+- **Purpose**: Reduce Mixed Boolean-Arithmetic obfuscation in VM handler operands
+- **Rewrite Rules**: 11 z3-proven rules (and_or→add, xor_and→add, XNOR, complement_sub, double_not, etc.)
+- **Verification**: `verify_equivalence()` proves bit-accurate equivalence of original and simplified forms
+- **Interfaces**: `simplify_mba()` (text), `simplify_expr()` (z3), `simplify_batch()` (bulk), `simplify_handler_operands()` (in-place disassembly rewrite)
 
 #### 5. **Anti-Evasion** (`dragonslayer.analysis.anti_evasion`)
 - **Purpose**: Detect and neutralise anti-analysis techniques
@@ -134,9 +143,11 @@ graph TD
 - **Tuning**: Per-pattern confidence overrides via `_ANTI_DISASM_CONFIDENCE`; reduced `call_next` false positives
 
 #### 6. **Machine Learning Pipeline** (`dragonslayer.ml`)
-- **Purpose**: Automated classification and analysis assistance
-- **Models**: Basic proof-of-concept models for research and education
-- **Components**: `VMClassifier` (high-level entry point), `FeatureExtractor`/`FeatureVector`, `ModelTrainer` with metric collection, `EnsembleClassifier` with majority-vote and weighted strategies
+- **Purpose**: Automated handler classification and analysis assistance
+- **Feature Extraction**: 15-dimension feature vector (instruction_count, mnemonic ratios for arith/logic/stack/mem/branch/nop, read/write counts, memory flags, operand width, block count)
+- **Handler Classification**: `VMHandlerModel` with weighted-rule heuristic scoring + optional sklearn RandomForest; 7 categories (arithmetic, logic, stack, load_store, branch, nop, unknown)
+- **Training Pipeline**: `ModelTrainer` with `prepare_training_data()`, `label_from_heuristics()`, held-out evaluation
+- **Components**: `VMClassifier` (high-level entry point), `FeatureExtractor`/`FeatureVector`, `EnsembleClassifier` with majority-vote and weighted strategies
 - **Architecture**: Abstract `BaseModel` / `VMHandlerModel` base with `train()`/`predict()`/`save()`/`load()` contract
 
 #### 7. **GPU Acceleration** (`dragonslayer.gpu`)
@@ -160,7 +171,8 @@ VMDragonSlayer/
 │   │   ├── cfg.py                 # CFG reconstruction (instruction + handler level)
 │   │   ├── bytecode_extract.py    # VM bytecode stream extraction
 │   │   ├── handler_semantics.py   # Handler-to-VMOperation classification
-│   │   └── pseudocode.py          # Pseudocode emission (linear/structured/C-like)
+│   │   ├── mba_simplifier.py      # z3-based Mixed Boolean-Arithmetic simplification
+│   │   └── pseudocode.py          # Pseudocode emission (linear/structured/C-like with SSA)
 │   ├── api/                       # REST API server and client
 │   ├── cli.py                     # Click CLI: analyze, serve, info
 │   ├── core/                      # Pipeline, orchestrator, config
@@ -179,7 +191,7 @@ VMDragonSlayer/
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # 335 tests (327 pass, 8 skip)
+├── tests/                         # 362 tests (362 pass, 7 skip)
 ├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
@@ -238,10 +250,10 @@ VMDragonSlayer integrates with major reverse engineering tools:
 ## Current Status
 
 ### Test Suite
-- **335 tests** across 20+ test files
-- **327 passed**, 8 skipped (1 z3-solver, 7 yara-python optional)
-- All Phase 7 commits verified green before merge
-- Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules, CLI, trace ingestion, handler boundaries, CFG, bytecode extraction, handler semantics, pseudocode, handler classifier, pipeline devirt
+- **362 tests** across 22+ test files
+- **362 passed**, 7 skipped (7 yara-python optional; z3 skip eliminated)
+- All Phase 8 commits verified green before merge
+- Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules, CLI, trace ingestion, handler boundaries, CFG, bytecode extraction, handler semantics, pseudocode, handler classifier, pipeline devirt, MBA simplifier, integration tests
 
 ### What's Implemented and Working
 
@@ -271,6 +283,17 @@ seg = segment_trace(lifted, vip, dispatchers)    # Slice into handlers
 table = analyse_handler_semantics(lifted, seg.boundaries)
 pseudo = emit_pseudocode(table, seg.boundaries, style="c_like")
 print(pseudo.text)
+
+# MBA simplification — reduce obfuscated expressions
+from dragonslayer.analysis.mba_simplifier import simplify_mba, verify_equivalence
+result = simplify_mba("(x & y) + (x | y)", bit_width=64)
+print(result.simplified)  # "x + y"  (z3-proven equivalent)
+
+# Handler-local symbolic execution
+from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+exe = SymbolicExecutor(arch="x86_64")
+summary = exe.execute_handler(handler_bytes=b"\x53\x58\xc3", handler_address=0x1000)
+print(summary.simplified_registers)  # MBA-simplified final register expressions
 
 # Orchestrator-based analysis
 from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
