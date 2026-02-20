@@ -334,6 +334,12 @@ def _classify_handler(
     filtered = _filter_junk(instructions)
     effective = filtered if filtered else instructions
 
+    # Apply taint-based semantic slicing: keep only instructions that
+    # contribute to the handler's output (data-flow from VM context).
+    taint_sliced = _taint_slice(effective)
+    if taint_sliced and len(taint_sliced) >= 2:
+        effective = taint_sliced
+
     # Build mnemonic histogram.
     mnemonics: List[str] = []
     for ti in effective:
@@ -596,6 +602,105 @@ def _accesses_memory(disasm: str, mode: str) -> bool:
         if mode == "read" and len(parts) > 1:
             return "[" in parts[-1]
         return "[" in disasm
+
+
+def _taint_slice(
+    instructions: List[TraceInstruction],
+) -> List[TraceInstruction]:
+    """Taint-based semantic slicing of a handler's instructions.
+
+    Taints likely VM context registers (rsi/rbp/rdi/esi/ebp/edi) and
+    propagates through the instruction sequence.  Returns only those
+    instructions that are in the taint-flow graph — i.e. instructions
+    that read or write tainted data, which are the handler's *semantic
+    core*.  This eliminates junk code that doesn't interact with the VM
+    context.
+    """
+    if not instructions:
+        return instructions
+
+    try:
+        from dragonslayer.analysis.taint_tracking.tracker import (
+            TaintTracker,
+            TaintTag,
+        )
+    except ImportError:
+        return instructions
+
+    # Convert TraceInstructions to duck-typed objects for the tracker
+    lifted = []
+    for ti in instructions:
+        parts = ti.disassembly.strip().split(None, 1) if ti.disassembly else []
+        mnem = parts[0].lower() if parts else "nop"
+        operands = parts[1] if len(parts) > 1 else ""
+
+        reads: List[str] = []
+        writes: List[str] = []
+        for reg in _COMMON_TAINT_REGS:
+            if reg in operands.lower():
+                if not writes:
+                    writes.append(reg)
+                else:
+                    reads.append(reg)
+
+        lifted.append(_TaintableInstruction(
+            address=ti.address,
+            mnemonic=mnem,
+            operands=operands,
+            category=_guess_taint_category(mnem),
+            reads=reads,
+            writes=writes,
+        ))
+
+    tracker = TaintTracker()
+    # Taint VM context registers
+    for reg in ("rsi", "rbp", "rdi", "r12", "esi", "ebp", "edi"):
+        tracker.taint_register(reg, TaintTag.VM_CONTEXT)
+
+    result = tracker.analyze(lifted)
+
+    # Collect addresses of tainted instructions
+    tainted_addrs: Set[int] = set()
+    for event in result.events:
+        addr = event.get("address", 0) if isinstance(event, dict) else getattr(event, "address", 0)
+        if addr:
+            tainted_addrs.add(addr)
+
+    if not tainted_addrs:
+        return instructions
+
+    return [ti for ti in instructions if ti.address in tainted_addrs]
+
+
+# Registers to track for taint slicing
+_COMMON_TAINT_REGS = {
+    "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+    "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+}
+
+
+def _guess_taint_category(mnemonic: str) -> str:
+    """Map mnemonic to a taint-tracker category string."""
+    _CATS = {
+        "mov": "memory_read", "movzx": "memory_read", "movsx": "memory_read",
+        "push": "stack_push", "pop": "stack_pop",
+        "add": "arithmetic", "sub": "arithmetic", "xor": "logic",
+        "and": "logic", "or": "logic", "cmp": "logic", "test": "logic",
+        "jmp": "branch_unconditional", "call": "call", "ret": "return",
+    }
+    return _CATS.get(mnemonic, "unknown")
+
+
+@dataclass
+class _TaintableInstruction:
+    """Minimal duck-typed instruction for TaintTracker.analyze()."""
+    address: int
+    mnemonic: str
+    operands: str
+    category: str
+    reads: List[str] = field(default_factory=list)
+    writes: List[str] = field(default_factory=list)
 
 
 def _estimate_operands(hist: Dict[str, int]) -> int:
