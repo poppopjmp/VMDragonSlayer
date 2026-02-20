@@ -102,10 +102,11 @@ def label_from_heuristics(handler: Dict[str, Any]) -> str:
     if op_lower in _OP_TO_LABEL:
         return _OP_TO_LABEL[op_lower]
 
-    # Partial match
-    for key, label in _OP_TO_LABEL.items():
-        if key in op_lower or op_lower in key:
-            return label
+    # Partial match (skip empty op)
+    if op_lower:
+        for key, label in _OP_TO_LABEL.items():
+            if key in op_lower or op_lower in key:
+                return label
 
     return "unknown"
 
