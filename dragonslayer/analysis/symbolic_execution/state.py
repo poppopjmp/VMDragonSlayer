@@ -84,6 +84,49 @@ class MemoryWrite:
 
 
 # ---------------------------------------------------------------------------
+# Symbolic memory region
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SymbolicMemoryRegion:
+    """A named region of symbolic memory with a base symbol.
+
+    Regions allow the memory model to reason about accesses like
+    ``vm_context[vip]`` or ``stack[rsp-8]`` symbolically.  When a
+    load/store falls within a mapped region the model can use the
+    region's base symbol to build structured z3 expressions rather than
+    creating disconnected fresh variables.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable label (``"stack"``, ``"vm_context"``, …).
+    base : Any
+        z3 BitVec symbol OR concrete int for the region start.
+    size : int
+        Region size in bytes (0 = unbounded).
+    """
+    name: str
+    base: Any          # z3 BitVecRef | int
+    size: int = 0      # 0 = unbounded
+
+
+@dataclass
+class MemoryAccessRecord:
+    """High-level record of a symbolic memory operation (read **or** write).
+
+    Used by :meth:`SymbolicState.summarize_memory_effects` to produce
+    structured LOAD/STORE summaries for handler clustering.
+    """
+    kind: str              # "load" or "store"
+    address_expr: str      # z3 s-expression or hex string
+    value_expr: str        # z3 s-expression or hex string / concrete
+    size: int              # bytes
+    region: Optional[str] = None  # region name if resolved
+    timestamp: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Alias query results
 # ---------------------------------------------------------------------------
 
@@ -142,8 +185,15 @@ class SymbolicState:
         self.constraints: List[Any] = []
         self._memory_log: List[MemoryWrite] = []
         self._symbolic_store: List[MemoryWrite] = []  # writes with symbolic addresses
+        self._read_log: List[MemoryAccessRecord] = []   # symbolic reads
+        self._write_log: List[MemoryAccessRecord] = []  # symbolic writes
         self._visited_pcs: Set[int] = set()
         self._last_cmp: Any = None  # legacy compat — kept for callers
+
+        # Named memory regions (e.g. "stack", "vm_context")
+        self._regions: Dict[str, SymbolicMemoryRegion] = {}
+        # Counter for generating unique symbolic memory read names
+        self._sym_read_counter: int = 0
 
         # Explicit EFLAGS: ZF (zero), CF (carry/borrow), SF (sign), OF (overflow)
         self.flags: Dict[str, Any] = {
@@ -297,6 +347,117 @@ class SymbolicState:
         """Return ``(parent, bit_lo, width, zero_ext)`` or *None*."""
         table = _SUBREG_MAP_64 if self.bit_width == 64 else _SUBREG_MAP_32
         return table.get(name)
+
+    # -- Named memory regions ------------------------------------------------
+
+    def map_region(self, name: str, base: Any, size: int = 0) -> None:
+        """Register a named memory region.
+
+        Parameters
+        ----------
+        name : str
+            Region label (``"stack"``, ``"vm_context"``, ``"heap"``).
+        base : z3.BitVecRef | int
+            Base address of the region.
+        size : int
+            Region size in bytes (0 = unbounded).
+        """
+        self._regions[name] = SymbolicMemoryRegion(name=name, base=base, size=size)
+
+    def get_region(self, name: str) -> Optional[SymbolicMemoryRegion]:
+        """Look up a named region."""
+        return self._regions.get(name)
+
+    def resolve_region(self, address: Any) -> Optional[SymbolicMemoryRegion]:
+        """Identify which region *address* belongs to, if any.
+
+        For concrete addresses, checks if the address falls within a
+        concrete region's ``[base, base+size)`` range.  For symbolic
+        addresses, checks if the address can be expressed as
+        ``region.base + offset`` under the current path constraints.
+        """
+        if isinstance(address, int):
+            for region in self._regions.values():
+                if isinstance(region.base, int):
+                    if region.size > 0:
+                        if region.base <= address < region.base + region.size:
+                            return region
+                    elif address >= region.base:
+                        return region
+            return None
+
+        if not _Z3_AVAILABLE or not hasattr(address, "sort"):
+            return None
+
+        # For symbolic addresses: try to prove address == base + offset
+        # for each region using the solver.
+        for region in self._regions.values():
+            base = region.base
+            if not hasattr(base, "sort"):
+                base = z3.BitVecVal(base, self.bit_width)
+            offset = z3.simplify(address - base)
+            # If the offset simplifies to a concrete non-negative value
+            # (or any value for unbounded regions), the address is in the region.
+            if z3.is_bv_value(offset):
+                off_val = offset.as_long()
+                if region.size == 0 or off_val < region.size:
+                    return region
+        return None
+
+    def _log_read(self, address: Any, value: Any, size: int,
+                  region: Optional[SymbolicMemoryRegion] = None) -> None:
+        """Record a read access for the memory effects summary."""
+        addr_str = str(address) if hasattr(address, "sexpr") else f"{address:#x}" if isinstance(address, int) else str(address)
+        val_str = str(value) if hasattr(value, "sexpr") else f"{value:#x}" if isinstance(value, int) else str(value)
+        self._read_log.append(MemoryAccessRecord(
+            kind="load",
+            address_expr=addr_str,
+            value_expr=val_str,
+            size=size,
+            region=region.name if region else None,
+            timestamp=self.depth,
+        ))
+
+    def _log_write(self, address: Any, value: Any, size: int,
+                   region: Optional[SymbolicMemoryRegion] = None) -> None:
+        """Record a write access for the memory effects summary."""
+        addr_str = str(address) if hasattr(address, "sexpr") else f"{address:#x}" if isinstance(address, int) else str(address)
+        val_str = str(value) if hasattr(value, "sexpr") else f"{value:#x}" if isinstance(value, int) else str(value)
+        self._write_log.append(MemoryAccessRecord(
+            kind="store",
+            address_expr=addr_str,
+            value_expr=val_str,
+            size=size,
+            region=region.name if region else None,
+            timestamp=self.depth,
+        ))
+
+    def summarize_memory_effects(self) -> Dict[str, Any]:
+        """Produce a structured summary of all memory reads and writes.
+
+        Returns a dict with ``loads`` (list of load records) and
+        ``stores`` (list of store records), each annotated with region
+        names where resolved.  This is used for handler classification
+        and clustering.
+        """
+        def _rec_to_dict(rec: MemoryAccessRecord) -> Dict[str, Any]:
+            d: Dict[str, Any] = {
+                "kind": rec.kind,
+                "address": rec.address_expr,
+                "value": rec.value_expr,
+                "size": rec.size,
+                "timestamp": rec.timestamp,
+            }
+            if rec.region:
+                d["region"] = rec.region
+            return d
+
+        return {
+            "loads": [_rec_to_dict(r) for r in self._read_log],
+            "stores": [_rec_to_dict(r) for r in self._write_log],
+            "regions": {n: {"base": str(r.base), "size": r.size}
+                        for n, r in self._regions.items()},
+        }
 
     def get_register(self, name: str) -> Any:
         """Get the current value (symbolic or concrete) of a register.
@@ -474,12 +635,27 @@ class SymbolicState:
                 return write.value
         return None
 
+    def _make_symbolic_read_name(self, address: Any, size: int) -> str:
+        """Build a meaningful name for a fresh symbolic memory read.
+
+        If the address falls within a known region, the name encodes
+        the region and offset: ``vm_context_load_0``, ``stack_load_1``.
+        Otherwise falls back to ``mem_load_<counter>``.
+        """
+        self._sym_read_counter += 1
+        region = self.resolve_region(address) if hasattr(address, "sort") or isinstance(address, int) else None
+        if region is not None:
+            return f"{region.name}_load_{self._sym_read_counter}"
+        return f"mem_load_{self._sym_read_counter}"
+
     def read_memory(self, address: Any, size: int = 0) -> Any:
         """Read *size* bytes from memory at *address* (little-endian).
 
         Supports both concrete and symbolic addresses.  For symbolic
         addresses, attempts concretisation then falls back to store
-        forwarding from prior symbolic writes.
+        forwarding from prior symbolic writes.  Fresh symbolic values
+        are named by region when possible (e.g.
+        ``vm_context_load_1``).
 
         The internal store is byte-granular.  If the requested region
         contains only concrete bytes they are assembled into a Python int.
@@ -498,10 +674,16 @@ class SymbolicState:
                 # Try store forwarding from symbolic writes
                 forwarded = self._forward_from_symbolic_store(address, size)
                 if forwarded is not None:
+                    region = self.resolve_region(address)
+                    self._log_read(address, forwarded, size, region)
                     return forwarded
-                # Last resort: return a fresh symbolic value
+                # Create a region-aware fresh symbolic value
                 if _Z3_AVAILABLE:
-                    return z3.BitVec(f"mem_sym_{id(address):#x}", size * 8)
+                    name = self._make_symbolic_read_name(address, size)
+                    val = z3.BitVec(name, size * 8)
+                    region = self.resolve_region(address)
+                    self._log_read(address, val, size, region)
+                    return val
                 return 0
 
         # Concrete address path (original logic)
@@ -579,6 +761,8 @@ class SymbolicState:
                     address=address, value=value, size=size,
                     timestamp=self.depth,
                 ))
+                region = self.resolve_region(address)
+                self._log_write(address, value, size, region)
                 return
 
         # Concrete address path (original logic)
@@ -627,9 +811,13 @@ class SymbolicState:
         new.constraints = list(self.constraints)
         new._memory_log = list(self._memory_log)
         new._symbolic_store = list(self._symbolic_store)
+        new._read_log = list(self._read_log)
+        new._write_log = list(self._write_log)
         new._visited_pcs = set(self._visited_pcs)
         new._last_cmp = self._last_cmp
         new.flags = dict(self.flags)
+        new._regions = dict(self._regions)
+        new._sym_read_counter = self._sym_read_counter
         return new
 
     def visit(self, pc: int) -> None:

@@ -6,11 +6,16 @@ modules have not been implemented yet.
 """
 
 try:
-    from .state import SymbolicState, AliasResult, MemoryWrite
+    from .state import (
+        SymbolicState, AliasResult, MemoryWrite,
+        SymbolicMemoryRegion, MemoryAccessRecord,
+    )
 except (ImportError, AttributeError):
     SymbolicState = None  # type: ignore[assignment,misc]
     AliasResult = None  # type: ignore[assignment,misc]
     MemoryWrite = None  # type: ignore[assignment,misc]
+    SymbolicMemoryRegion = None  # type: ignore[assignment,misc]
+    MemoryAccessRecord = None  # type: ignore[assignment,misc]
 
 try:
     from .solver import Z3Solver, SolverResult
@@ -33,6 +38,8 @@ except (ImportError, AttributeError):
 
 __all__ = [
     'SymbolicState',
+    'SymbolicMemoryRegion',
+    'MemoryAccessRecord',
     'Z3Solver',
     'SolverResult',
     'InstructionLifter',

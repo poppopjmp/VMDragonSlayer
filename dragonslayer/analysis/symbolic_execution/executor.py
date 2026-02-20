@@ -89,6 +89,7 @@ class HandlerSymbolicSummary:
     memory_writes: List[Dict[str, Any]] = field(default_factory=list)
     constraints: List[str] = field(default_factory=list)
     input_symbols: Dict[str, str] = field(default_factory=dict)
+    memory_effects: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -101,6 +102,7 @@ class HandlerSymbolicSummary:
             "memory_writes": self.memory_writes,
             "constraint_count": len(self.constraints),
             "constraints": self.constraints,
+            "memory_effects": self.memory_effects,
             "error": self.error,
         }
 
@@ -1479,13 +1481,10 @@ class SymbolicExecutor:
         # Memory dereference like [rax], [rsp+0x8], [rax+rbx*4+0x10], etc.
         if operand.startswith("[") and operand.endswith("]"):
             addr = self._resolve_sib_address(state, operand[1:-1].strip())
-            if isinstance(addr, int):
-                return state.read_memory(addr)
-            # Symbolic address — create fresh symbolic read
-            if Z3Solver.available():
-                import z3 as _z3
-                return _z3.BitVec(f"mem_sym_{state.depth}", state.bit_width)
-            return 0
+            # Use state.read_memory for BOTH concrete and symbolic
+            # addresses — it handles store-forwarding, region naming,
+            # and access logging internally.
+            return state.read_memory(addr)
 
         return 0  # fallback
 
@@ -1504,12 +1503,9 @@ class SymbolicExecutor:
             pass
         if operand.startswith("[") and operand.endswith("]"):
             addr = self._resolve_sib_address(state, operand[1:-1].strip())
-            if isinstance(addr, int):
-                return state.read_memory(addr, size)
-            if Z3Solver.available():
-                import z3 as _z3
-                return _z3.BitVec(f"mem_sym_{state.depth}", size * 8)
-            return 0
+            # Route ALL addresses (concrete + symbolic) through
+            # state.read_memory which handles forwarding and logging.
+            return state.read_memory(addr, size)
         return self._resolve_operand(state, operand)
 
     def _write_operand(self, state: SymbolicState, operand: str, value: Any) -> None:
@@ -1527,11 +1523,12 @@ class SymbolicExecutor:
             state.set_register(reg, value)
             return
 
-        # Memory dereference
+        # Memory dereference — route through state.write_memory for
+        # both concrete and symbolic addresses (symbolic writes go
+        # into the symbolic store for forwarding).
         if operand.startswith("[") and operand.endswith("]"):
             addr = self._resolve_sib_address(state, operand[1:-1].strip())
-            if isinstance(addr, int):
-                state.write_memory(addr, value)
+            state.write_memory(addr, value)
             return
 
     @staticmethod
@@ -1559,6 +1556,14 @@ class SymbolicExecutor:
         Returns a :class:`HandlerSymbolicSummary` with the register map
         (symbolic expressions), memory writes, path constraints, and
         any MBA-simplified sub-expressions.
+
+        The state is configured with named memory regions:
+
+        * **stack** — rooted at a concrete SP so push/pop work correctly.
+        * **vm_context** — a symbolic region for the VM's virtual
+          register file, enabling loads/stores like ``[rbp+rcx*8]`` to
+          produce structured symbolic names (e.g. ``vm_context_load_1``)
+          rather than disconnected fresh variables.
         """
         instructions = self._lifter.lift(handler_bytes, base_address=handler_address)
         if not instructions:
@@ -1575,16 +1580,24 @@ class SymbolicExecutor:
         sym_regs: Dict[str, _z3.BitVecRef] = {}
 
         # Initialise the stack pointer to a concrete address so that
-        # push / pop can actually read / write concrete memory locations
-        # instead of producing a symbolic address (which falls back to
-        # writing at address 0, losing all stack content).
+        # push / pop can actually read / write concrete memory locations.
         _STACK_BASE = 0x7FFF_0000 if self.bit_width == 64 else 0x00FF_0000
         sp_reg = "rsp" if self.bit_width == 64 else "esp"
         state.set_register(sp_reg, _STACK_BASE)
 
+        # Map named memory regions for structured symbolic summaries.
+        # Stack region: concrete base, 64 KiB size.
+        state.map_region("stack", _STACK_BASE - 0x10000, size=0x10000)
+
+        # VM context region: symbolic base — VMProtect (and similar)
+        # use a register like RBP/RSI as vm_context pointer.  We
+        # create a symbolic base so that accesses like [rbp+rcx*8]
+        # are attributed to the vm_context region.
+        _ctx_base = _z3.BitVec("vm_context_base", self.bit_width)
+        state.map_region("vm_context", _ctx_base, size=0)
+
         for rname in state.registers:
             if rname == sp_reg:
-                # Leave SP concrete (set above)
                 continue
             sym = _z3.BitVec(f"in_{rname}", self.bit_width)
             state.set_register(rname, sym)
@@ -1633,7 +1646,10 @@ class SymbolicExecutor:
         # Collect path constraints.
         constraints = [str(c) for c in state.constraints]
 
-        return HandlerSymbolicSummary(
+        # Collect structured memory effects (read/write with region annotations).
+        memory_effects = state.summarize_memory_effects()
+
+        summary = HandlerSymbolicSummary(
             address=handler_address,
             instruction_count=stepped,
             final_registers=final_regs,
@@ -1642,6 +1658,9 @@ class SymbolicExecutor:
             constraints=constraints,
             input_symbols={rname: str(sym) for rname, sym in sym_regs.items()},
         )
+        # Attach memory effects as extra attribute for downstream consumers.
+        summary.memory_effects = memory_effects  # type: ignore[attr-defined]
+        return summary
 
     def execute_handler_from_trace(
         self,
