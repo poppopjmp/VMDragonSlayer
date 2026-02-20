@@ -158,7 +158,7 @@ class WeightedEnsemble(EnsembleClassifier):
             meta["failures"] = failures
         return PredictionResult(
             label=winner,
-            confidence=label_scores[winner] / total_w,
+            confidence=min(1.0, max(0.0, label_scores[winner] / total_w)),
             metadata=meta,
         )
 

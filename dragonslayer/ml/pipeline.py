@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 import logging
+import re as _re
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +153,9 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
             # Indirect if the operand is a register name or memory dereference,
             # NOT an immediate hex/decimal address.
             if ops and not ops.lstrip().startswith("0") and not ops.lstrip().startswith("-"):
-                import re
+                # B67: use module-level _re instead of inline import
                 # Matches register names like rax, eax, r12, etc.
-                if re.match(r"^[a-z][a-z0-9]*$", ops.strip().lower()):
+                if _re.match(r"^[a-z][a-z0-9]*$", ops.strip().lower()):
                     has_indirect = 1.0
                     break
                 # Matches memory dereference [rax], [rax+8], etc.
@@ -194,7 +195,6 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
 # Extended features — n-grams, register effects, operand patterns
 # ═══════════════════════════════════════════════════════════════════════════
 
-import re as _re
 from collections import Counter as _Counter
 
 # -- Mnemonic bigrams -------------------------------------------------------

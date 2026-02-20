@@ -59,5 +59,21 @@ class VMClassifier:
         self,
         handlers: List[Dict[str, Any]],
     ) -> List[PredictionResult]:
-        """Classify a list of handlers."""
-        return [self.classify(h) for h in handlers]
+        """Classify a list of handlers, tolerating individual failures.
+
+        Returns one :class:`PredictionResult` per handler.  If an
+        individual classification raises, a placeholder ``unknown``
+        result is returned so the batch still produces output for
+        every element.
+        """
+        results: List[PredictionResult] = []
+        for i, h in enumerate(handlers):
+            try:
+                results.append(self.classify(h))
+            except Exception as exc:
+                logger.debug("classify_batch: item %d failed: %s", i, exc)
+                results.append(PredictionResult(
+                    label="unknown", confidence=0.0,
+                    metadata={"error": str(exc), "batch_index": i},
+                ))
+        return results

@@ -199,6 +199,21 @@ class ModelTrainer:
             ``"auto"`` (GradientBoosting if available, else RandomForest),
             ``"rf"`` (RandomForest), ``"gb"`` (GradientBoosting).
         """
+        # B67: Input validation — fail fast on mis-shaped data
+        if len(features) != len(labels):
+            raise ValueError(
+                f"features/labels length mismatch: {len(features)} vs {len(labels)}"
+            )
+        if not features:
+            raise ValueError("Cannot train on empty dataset")
+        dim0 = features[0].dimension
+        bad = [i for i, fv in enumerate(features) if fv.dimension != dim0]
+        if bad:
+            raise ValueError(
+                f"Inconsistent feature dimensions: expected {dim0}, "
+                f"got mismatches at indices {bad[:5]}"
+            )
+
         if _HAS_SKLEARN:
             return self._train_sklearn(
                 features, labels, n_estimators=n_estimators, algorithm=algorithm,
@@ -235,10 +250,35 @@ class ModelTrainer:
 
         clf.fit(X, y)
 
-        # Cross-validation accuracy (if enough data).
+        # B67: Confidence calibration — raw predict_proba from RF/GB can be
+        # poorly calibrated.  Wrap with isotonic calibration when we have
+        # enough data for meaningful cross-validation.
+        if len(y) >= 20:
+            try:
+                from sklearn.calibration import CalibratedClassifierCV
+                from collections import Counter as _Counter
+                min_class = min(_Counter(y).values(), default=0)
+                cal_cv = min(3, min_class) if min_class >= 2 else 2
+                if cal_cv >= 2:
+                    cal_clf = CalibratedClassifierCV(clf, cv=cal_cv, method="isotonic")
+                    cal_clf.fit(X, y)
+                    clf = cal_clf
+                    logger.info("Applied isotonic confidence calibration (cv=%d)", cal_cv)
+            except Exception as exc:
+                logger.debug("Calibration failed, using raw probabilities: %s", exc)
+
+        # B67: Stratified cross-validation — preserves class distribution.
         accuracy = 0.0
         if len(y) >= 10:
-            scores = cross_val_score(clf, X, y, cv=min(5, len(y)), scoring="accuracy")
+            from collections import Counter as _Counter2
+            from sklearn.model_selection import StratifiedKFold
+            min_class_count = min(_Counter2(y).values(), default=0)
+            n_splits = min(5, min_class_count) if min_class_count >= 2 else 2
+            if n_splits >= 2:
+                skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+                scores = cross_val_score(clf, X, y, cv=skf, scoring="accuracy")
+            else:
+                scores = cross_val_score(clf, X, y, cv=2, scoring="accuracy")
             accuracy = float(scores.mean())
         else:
             accuracy = float((clf.predict(X) == y).mean())
@@ -677,10 +717,21 @@ def feature_importance(
     descending.  Returns empty list if no sklearn model is loaded.
     """
     clf = getattr(model, "_sklearn_model", None)
-    if clf is None or not hasattr(clf, "feature_importances_"):
+    # B67: CalibratedClassifierCV wraps the real estimator.  Walk through
+    # known wrappers to find the underlying model with feature_importances_.
+    real_clf = clf
+    if real_clf is not None and not hasattr(real_clf, "feature_importances_"):
+        # sklearn.calibration.CalibratedClassifierCV stores underlying as
+        # estimator (>=1.2) or base_estimator (legacy).
+        for attr in ("estimator", "base_estimator"):
+            inner = getattr(real_clf, attr, None)
+            if inner is not None and hasattr(inner, "feature_importances_"):
+                real_clf = inner
+                break
+    if real_clf is None or not hasattr(real_clf, "feature_importances_"):
         return []
 
-    importances = clf.feature_importances_
+    importances = real_clf.feature_importances_
     names = list(feature_names) if feature_names else [f"f{i}" for i in range(len(importances))]
     if len(names) != len(importances):
         names = [f"f{i}" for i in range(len(importances))]

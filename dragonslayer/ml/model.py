@@ -181,30 +181,34 @@ class SymbolicClassifierModel(BaseModel):
     name: str = "symbolic_classifier"
 
     # Symbolic expression → (vm_op_label, confidence)
+    # B67: compiled at class-definition time to avoid per-predict overhead.
     _EXPR_RULES: List[tuple] = [
         # Arithmetic
-        (r"init_\w+\s*\+\s*init_\w+", "arithmetic", 0.93),
-        (r"init_\w+\s*-\s*init_\w+", "arithmetic", 0.93),
-        (r"init_\w+\s*\*\s*init_\w+", "arithmetic", 0.91),
-        (r"UDiv|SDiv|udiv|sdiv", "arithmetic", 0.91),
+        (re.compile(r"init_\w+\s*\+\s*init_\w+"), "arithmetic", 0.93),
+        (re.compile(r"init_\w+\s*-\s*init_\w+"), "arithmetic", 0.93),
+        (re.compile(r"init_\w+\s*\*\s*init_\w+"), "arithmetic", 0.91),
+        (re.compile(r"UDiv|SDiv|udiv|sdiv"), "arithmetic", 0.91),
         # Bitwise
-        (r"init_\w+\s*&\s*init_\w+", "bitwise", 0.93),
-        (r"init_\w+\s*\|\s*init_\w+", "bitwise", 0.93),
-        (r"init_\w+\s*\^\s*init_\w+|Xor\(", "bitwise", 0.92),
-        (r"~init_\w+", "bitwise", 0.90),
-        (r"-init_\w+", "arithmetic", 0.90),  # neg
+        (re.compile(r"init_\w+\s*&\s*init_\w+"), "bitwise", 0.93),
+        (re.compile(r"init_\w+\s*\|\s*init_\w+"), "bitwise", 0.93),
+        (re.compile(r"init_\w+\s*\^\s*init_\w+|Xor\("), "bitwise", 0.92),
+        (re.compile(r"~init_\w+"), "bitwise", 0.90),
+        (re.compile(r"-init_\w+"), "arithmetic", 0.90),  # neg
         # Shifts
-        (r"init_\w+\s*<<|LShR\(|init_\w+\s*>>", "bitwise", 0.90),
-        (r"RotateLeft\(|RotateRight\(", "crypto", 0.88),
+        (re.compile(r"init_\w+\s*<<|LShR\(|init_\w+\s*>>"), "bitwise", 0.90),
+        (re.compile(r"RotateLeft\(|RotateRight\("), "crypto", 0.88),
         # Memory
-        (r"mem_", "memory", 0.82),
+        (re.compile(r"mem_"), "memory", 0.82),
         # Stack (rsp/esp write)
-        (r"init_rsp|init_esp", "stack", 0.85),
+        (re.compile(r"init_rsp|init_esp"), "stack", 0.85),
         # Control flow (rip modified / indirect target)
-        (r"init_rip|init_rflags", "control_flow", 0.87),
+        (re.compile(r"init_rip|init_rflags"), "control_flow", 0.87),
         # Type conversion
-        (r"SignExt\(|ZeroExt\(|Extract\(", "conversion", 0.88),
+        (re.compile(r"SignExt\(|ZeroExt\(|Extract\("), "conversion", 0.88),
     ]
+
+    # B67: hoisted to class level — was recreated on every predict() call
+    _RSP_RE = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
         summary = features.get("symbolic_summary")
@@ -235,9 +239,8 @@ class SymbolicClassifierModel(BaseModel):
         combined = " ".join(interesting)
 
         # --- Check for memory writes -----------------------------------
-        _rsp_re = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
         has_stack_write = any(
-            _rsp_re.search(str(w.get("address", ""))) for w in mem_writes
+            self._RSP_RE.search(str(w.get("address", ""))) for w in mem_writes
         )
         has_mem_write = len(mem_writes) > 0
 
@@ -293,8 +296,8 @@ class SymbolicClassifierModel(BaseModel):
 
         # --- Pattern match expressions ---------------------------------
         label_scores: Dict[str, float] = {}
-        for pattern, label, conf in self._EXPR_RULES:
-            if re.search(pattern, combined):
+        for compiled_re, label, conf in self._EXPR_RULES:
+            if compiled_re.search(combined):
                 label_scores[label] = max(label_scores.get(label, 0.0), conf)
 
         if not label_scores:
@@ -327,36 +330,67 @@ class VMHandlerModel(BaseModel):
         self._sklearn_model: Any = None
 
     def load(self, path: str) -> None:
-        """Load a scikit-learn model from *path* (joblib or pickle)."""
+        """Load a scikit-learn model from *path* (joblib or pickle).
+
+        Supports both versioned envelopes (schema_version >= 2) and
+        legacy raw models for backward compatibility.
+        """
         try:
             import joblib  # type: ignore[import-untyped]
-            self._sklearn_model = joblib.load(path)
-            logger.info("Loaded sklearn model from %s", path)
+            obj = joblib.load(path)
         except ImportError:
             import pickle
             with open(path, "rb") as f:
-                self._sklearn_model = pickle.load(f)
-            logger.info("Loaded pickled model from %s", path)
+                obj = pickle.load(f)
 
-    def save(self, path: str) -> None:
+        if isinstance(obj, dict) and "schema_version" in obj:
+            version = obj["schema_version"]
+            if version > self._MODEL_SCHEMA_VERSION:
+                raise ValueError(
+                    f"Model schema version {version} > supported "
+                    f"{self._MODEL_SCHEMA_VERSION}; upgrade VMDragonSlayer"
+                )
+            self._sklearn_model = obj["model"]
+            self._feature_names: list[str] = obj.get("feature_names", [])
+            logger.info("Loaded sklearn model v%d from %s", version, path)
+        else:
+            # Legacy: raw sklearn object
+            self._sklearn_model = obj
+            self._feature_names = []
+            logger.info("Loaded legacy sklearn model from %s", path)
+
+    # B67: Model versioning — versioned envelope prevents silent feature drift.
+    _MODEL_SCHEMA_VERSION: int = 2
+
+    def save(self, path: str, *, feature_names: list[str] | None = None) -> None:
         """Save the trained scikit-learn model to *path*.
 
         Uses joblib (preferred) or pickle as fallback.
+        Wraps the model in a versioned envelope containing training
+        metadata so incompatible models are detected on load.
         Raises RuntimeError if no trained model is loaded.
         """
         if self._sklearn_model is None:
             raise RuntimeError("No trained model to save")
+        import time as _time
         from pathlib import Path as _Path
         _Path(path).parent.mkdir(parents=True, exist_ok=True)
+        envelope = {
+            "schema_version": self._MODEL_SCHEMA_VERSION,
+            "model": self._sklearn_model,
+            "feature_names": feature_names or [],
+            "categories": list(getattr(self._sklearn_model, "classes_", [])),
+            "created_utc": _time.time(),
+        }
         try:
             import joblib  # type: ignore[import-untyped]
-            joblib.dump(self._sklearn_model, path)
-            logger.info("Saved sklearn model to %s (joblib)", path)
+            joblib.dump(envelope, path)
+            logger.info("Saved sklearn model v%d to %s (joblib)", self._MODEL_SCHEMA_VERSION, path)
         except ImportError:
             import pickle
             with open(path, "wb") as f:
-                pickle.dump(self._sklearn_model, f)
-            logger.info("Saved sklearn model to %s (pickle)", path)
+                pickle.dump(envelope, f)
+            logger.info("Saved sklearn model v%d to %s (pickle)", self._MODEL_SCHEMA_VERSION, path)
 
     @property
     def is_trained(self) -> bool:
@@ -371,6 +405,21 @@ class VMHandlerModel(BaseModel):
         """
         values: List[float] = features.get("values", [])
         names: List[str] = features.get("names", [])
+
+        # B67: Input validation
+        if not values:
+            return PredictionResult(
+                label="unknown", confidence=0.0,
+                metadata={"error": "empty_features"},
+            )
+        if names and len(values) != len(names):
+            raise ValueError(
+                f"values/names length mismatch: {len(values)} vs {len(names)}"
+            )
+        # NaN/Inf guard
+        if any(v != v or abs(v) == float("inf") for v in values):
+            logger.warning("NaN/Inf in feature values, replacing with 0.0")
+            values = [0.0 if (v != v or abs(v) == float("inf")) else v for v in values]
 
         # If a trained sklearn model is loaded, use it.
         if self._sklearn_model is not None:
