@@ -156,6 +156,7 @@ class _DispatchCandidate:
     target_reg: str
     table_base_expr: str
     uses_memory: bool
+    dispatch_style: str = "jmp"  # "jmp" | "push_ret" | "call" | "computed_goto"
 
 
 @dataclass
@@ -192,6 +193,7 @@ class VMProtectDispatcherMatch:
     vm_entry_address: int = 0
     context_registers: Dict[str, str] = field(default_factory=dict)
     decode_transforms: List[str] = field(default_factory=list)
+    dispatch_style: str = "jmp"  # "jmp" | "push_ret" | "call" | "computed_goto"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -208,6 +210,7 @@ class VMProtectDispatcherMatch:
             "vm_entry_address": self.vm_entry_address,
             "context_registers": self.context_registers,
             "decode_transforms": self.decode_transforms,
+            "dispatch_style": self.dispatch_style,
         }
 
 
@@ -488,36 +491,131 @@ def _find_advance_candidates(instructions: list, gp_regs: set) -> List[_AdvanceC
 
 
 def _find_dispatch_candidates(instructions: list, gp_regs: set) -> List[_DispatchCandidate]:
-    """Find indirect jumps that could be the dispatch instruction."""
+    """Find indirect control-flow transfers that could be the dispatch instruction.
+
+    Recognises four dispatch styles used by VMProtect and similar VMs:
+
+    1. **jmp reg / jmp [mem]** — classic indirect jump (most common).
+    2. **push reg; ret** — push the handler address then retn to it.
+       VMProtect v2 and some Themida variants use this to avoid ``jmp``
+       pattern signatures.
+    3. **call reg / call [mem]** — indirect call used as dispatch when
+       the handler itself returns back to the dispatcher.
+    4. **Computed goto via stack** — patterns like ``xchg [rsp], reg; ret``
+       or ``mov [rsp], reg; ret`` that load a handler address onto the
+       stack and then use ``ret`` to transfer control.
+    """
     candidates: List[_DispatchCandidate] = []
     for idx, insn in enumerate(instructions):
         mnem = _get_mnemonic(insn).lower()
-        if mnem != "jmp":
+
+        # -- Style 1: jmp reg / jmp [mem] ------------------------------------
+        if mnem == "jmp":
+            ops_raw = _get_operands_raw(insn)
+            if not ops_raw:
+                continue
+            operand = ops_raw.strip().lower()
+            reg_target = _normalize_reg(operand)
+            if reg_target in gp_regs:
+                candidates.append(_DispatchCandidate(
+                    address=_get_address(insn), insn_index=idx,
+                    target_reg=reg_target, table_base_expr=operand,
+                    uses_memory=False, dispatch_style="jmp"))
+                continue
+            mem_match = _MEM_DEREF_RE.search(operand)
+            if mem_match:
+                inner = mem_match.group(1).strip()
+                used_regs = [r for r in re.findall(r'\b([a-z][a-z0-9]*)\b', inner) if r in gp_regs]
+                target_reg = used_regs[0] if used_regs else ""
+                candidates.append(_DispatchCandidate(
+                    address=_get_address(insn), insn_index=idx,
+                    target_reg=target_reg, table_base_expr=inner,
+                    uses_memory=True, dispatch_style="jmp"))
+                continue
+            branch_target = getattr(insn, "branch_target", None)
+            if branch_target is None:
+                candidates.append(_DispatchCandidate(
+                    address=_get_address(insn), insn_index=idx,
+                    target_reg="", table_base_expr=operand,
+                    uses_memory="[" in operand, dispatch_style="jmp"))
             continue
-        ops_raw = _get_operands_raw(insn)
-        if not ops_raw:
-            continue
-        operand = ops_raw.strip().lower()
-        reg_target = _normalize_reg(operand)
-        if reg_target in gp_regs:
-            candidates.append(_DispatchCandidate(
-                address=_get_address(insn), insn_index=idx,
-                target_reg=reg_target, table_base_expr=operand, uses_memory=False))
-            continue
-        mem_match = _MEM_DEREF_RE.search(operand)
-        if mem_match:
-            inner = mem_match.group(1).strip()
-            used_regs = [r for r in re.findall(r'\b([a-z][a-z0-9]*)\b', inner) if r in gp_regs]
-            target_reg = used_regs[0] if used_regs else ""
-            candidates.append(_DispatchCandidate(
-                address=_get_address(insn), insn_index=idx,
-                target_reg=target_reg, table_base_expr=inner, uses_memory=True))
-            continue
-        branch_target = getattr(insn, "branch_target", None)
-        if branch_target is None:
-            candidates.append(_DispatchCandidate(
-                address=_get_address(insn), insn_index=idx,
-                target_reg="", table_base_expr=operand, uses_memory="[" in operand))
+
+        # -- Style 2: push reg; ret ------------------------------------------
+        # Look for a ``ret``; the preceding instruction should be ``push reg``
+        # (possibly with one or two nops/padding in between).
+        if mnem in ("ret", "retn"):
+            # Scan back up to 3 instructions looking for push reg
+            for back in range(1, min(4, idx + 1)):
+                prev_insn = instructions[idx - back]
+                prev_mnem = _get_mnemonic(prev_insn).lower()
+                if prev_mnem in ("nop", "endbr64", "endbr32"):
+                    continue  # skip padding
+                if prev_mnem == "push":
+                    prev_ops = _get_operands(prev_insn)
+                    if prev_ops:
+                        push_op = prev_ops[0].strip().lower()
+                        push_reg = _normalize_reg(push_op)
+                        if push_reg in gp_regs:
+                            candidates.append(_DispatchCandidate(
+                                address=_get_address(prev_insn),
+                                insn_index=idx - back,
+                                target_reg=push_reg,
+                                table_base_expr=push_op,
+                                uses_memory=False,
+                                dispatch_style="push_ret"))
+                break  # stop scanning after first non-nop
+
+        # -- Style 3: call reg / call [mem] ----------------------------------
+        if mnem == "call":
+            ops_raw = _get_operands_raw(insn)
+            if not ops_raw:
+                continue
+            operand = ops_raw.strip().lower()
+            reg_target = _normalize_reg(operand)
+            if reg_target in gp_regs:
+                candidates.append(_DispatchCandidate(
+                    address=_get_address(insn), insn_index=idx,
+                    target_reg=reg_target, table_base_expr=operand,
+                    uses_memory=False, dispatch_style="call"))
+                continue
+            mem_match = _MEM_DEREF_RE.search(operand)
+            if mem_match:
+                inner = mem_match.group(1).strip()
+                used_regs = [r for r in re.findall(r'\b([a-z][a-z0-9]*)\b', inner) if r in gp_regs]
+                target_reg = used_regs[0] if used_regs else ""
+                candidates.append(_DispatchCandidate(
+                    address=_get_address(insn), insn_index=idx,
+                    target_reg=target_reg, table_base_expr=inner,
+                    uses_memory=True, dispatch_style="call"))
+
+        # -- Style 4: computed goto via stack --------------------------------
+        # Patterns: ``xchg [rsp], reg; ret``  or  ``mov [rsp], reg; ret``
+        # The address is placed at [rsp] and control transfers via ret.
+        if mnem in ("ret", "retn"):
+            for back in range(1, min(4, idx + 1)):
+                prev_insn = instructions[idx - back]
+                prev_mnem = _get_mnemonic(prev_insn).lower()
+                if prev_mnem in ("nop", "endbr64", "endbr32"):
+                    continue
+                if prev_mnem in ("xchg", "mov"):
+                    prev_ops = _get_operands(prev_insn)
+                    if len(prev_ops) >= 2:
+                        dst = prev_ops[0].strip().lower()
+                        src = prev_ops[1].strip().lower()
+                        # Check for [rsp]/[esp] as destination
+                        sp_deref = "[rsp]" if "rsp" in dst else ("[esp]" if "esp" in dst else "")
+                        if sp_deref and dst.replace(" ", "") in ("[rsp]", "[esp]"):
+                            src_reg = _normalize_reg(src)
+                            if src_reg in gp_regs:
+                                candidates.append(_DispatchCandidate(
+                                    address=_get_address(prev_insn),
+                                    insn_index=idx - back,
+                                    target_reg=src_reg,
+                                    table_base_expr=src,
+                                    uses_memory=False,
+                                    dispatch_style="computed_goto"))
+                break
+
     return candidates
 
 
@@ -667,6 +765,15 @@ def _score_dispatcher_candidate(
     vip_delta = matching_advance.delta if matching_advance else fetch.width
     ctx_regs: Dict[str, str] = {fetch.vip_reg: "vIP"}
 
+    # Obfuscated dispatch styles get a small bonus — they signal that
+    # the binary deliberately avoids plain ``jmp`` patterns, which is
+    # strong evidence of a VM dispatcher (rather than regular code).
+    _style = dispatch.dispatch_style
+    if _style in ("push_ret", "computed_goto"):
+        confidence = min(confidence + 0.05, 1.0)
+    elif _style == "call":
+        confidence = min(confidence + 0.02, 1.0)
+
     info = VMProtectDispatcherMatch(
         entry_address=fetch_addr,
         indirect_jump_address=dispatch_addr,
@@ -679,6 +786,7 @@ def _score_dispatcher_candidate(
         confidence=confidence,
         context_registers=ctx_regs,
         decode_transforms=decode_detail,
+        dispatch_style=_style,
     )
     return confidence, info
 
