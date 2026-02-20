@@ -772,6 +772,24 @@ def make_decryptor_from_dispatcher(
         if detected is not None:
             initial_key = detected
 
+    # Fallback: symbolic key recovery from VM entry stub
+    if initial_key == 0:
+        try:
+            from dragonslayer.analysis.key_recovery import recover_key_from_entry
+            entry_insns = _get_attr_or_key(dispatcher_match, "entry_instructions", [])
+            if entry_insns:
+                recovered = recover_key_from_entry(
+                    entry_insns, dispatcher_match, bit_width=key_width,
+                )
+                if recovered is not None:
+                    initial_key = recovered.key_value
+                    logger.info(
+                        "Recovered initial key 0x%x from entry stub (%s)",
+                        initial_key, recovered.source,
+                    )
+        except Exception as exc:
+            logger.debug("Symbolic key recovery fallback failed: %s", exc)
+
     return BytecodeDecryptor(
         transforms=transforms,
         initial_key=initial_key,

@@ -124,3 +124,14 @@ except (ImportError, AttributeError):
     fold_self_cancel = None  # type: ignore[assignment,misc]
     fold_redundant_casts = None  # type: ignore[assignment,misc]
     propagate_types = None  # type: ignore[assignment,misc]
+
+try:
+    from .key_recovery import (  # noqa: F401
+        RecoveredKey,
+        recover_key_from_entry,
+        recover_key_from_bytes,
+    )
+except (ImportError, AttributeError):
+    RecoveredKey = None  # type: ignore[assignment,misc]
+    recover_key_from_entry = None  # type: ignore[assignment,misc]
+    recover_key_from_bytes = None  # type: ignore[assignment,misc]
