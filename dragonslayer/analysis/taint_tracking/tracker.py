@@ -232,14 +232,30 @@ class TaintTracker:
         tracker = TaintTracker()
         tracker.taint_register("rdi", TaintTag.INPUT)
         result = tracker.analyze(lifted_instructions)
+
+    For memory-sensitive taint propagation, supply an *alias_oracle*
+    callable that resolves whether two memory addresses may alias::
+
+        from dragonslayer.analysis.symbolic_execution.state import (
+            SymbolicState, AliasResult,
+        )
+        state = SymbolicState()
+        tracker = TaintTracker(alias_oracle=state.query_alias)
     """
 
-    def __init__(self, *, sub_register_aware: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        sub_register_aware: bool = True,
+        alias_oracle: Any = None,
+    ) -> None:
         self._reg_taint: Dict[str, TaintTag] = {}
         self._mem_taint: Dict[int, TaintTag] = {}
+        self._symbolic_mem_taint: Dict[Any, TaintTag] = {}
         self._events: List[TaintEvent] = []
         self._flow_graph: Dict[str, Set[str]] = {}
         self._subreg_aware = sub_register_aware
+        self._alias_oracle = alias_oracle
 
     # ── Sub-register helpers (Batch 31) ─────────────────────────────────────
 
@@ -286,6 +302,55 @@ class TaintTracker:
                 if at != TaintTag.CLEAN:
                     return at
         return TaintTag.CLEAN
+
+    # ── Alias-oracle memory taint (B51) ─────────────────────────────────
+
+    def _query_memory_taint_via_oracle(self, addr: Any) -> TaintTag:
+        """Check all tainted memory addresses for aliasing with *addr*.
+
+        Uses the alias oracle (e.g. ``SymbolicState.query_alias``) to
+        determine whether a symbolic memory address may overlap with
+        previously tainted addresses.  Returns the union of all tags
+        from addresses that MUST or MAY alias.
+        """
+        if self._alias_oracle is None:
+            return TaintTag.CLEAN
+
+        combined = TaintTag.CLEAN
+
+        # Check concrete tainted addresses
+        for tainted_addr, tag in list(self._mem_taint.items()):
+            if tag == TaintTag.CLEAN:
+                continue
+            try:
+                result = self._alias_oracle(addr, tainted_addr)
+            except Exception:
+                continue
+            if result in ("must", "may"):
+                combined |= tag
+
+        # Check symbolic tainted addresses
+        for tainted_addr, tag in list(self._symbolic_mem_taint.items()):
+            if tag == TaintTag.CLEAN:
+                continue
+            try:
+                result = self._alias_oracle(addr, tainted_addr)
+            except Exception:
+                continue
+            if result in ("must", "may"):
+                combined |= tag
+
+        return combined
+
+    def taint_symbolic_memory(self, addr: Any, tag: TaintTag = TaintTag.MEMORY) -> None:
+        """Mark a symbolic (non-concrete) memory address as tainted.
+
+        This is used when the store address is a symbolic expression
+        that cannot be resolved to a concrete integer.  The alias oracle
+        will be consulted on future loads to determine whether they
+        overlap with this address.
+        """
+        self._symbolic_mem_taint[addr] = tag
 
     def taint_register(self, reg: str, tag: TaintTag = TaintTag.INPUT) -> None:
         """Mark a register as tainted with the given tag.
@@ -419,6 +484,27 @@ class TaintTracker:
                     combined_taint |= mem_tag
                     tainted_sources.append(f"mem[{mem_addr:#x}]")
 
+            # ── B51: Alias-oracle fallback for symbolic addresses ───────
+            # When concrete resolution succeeds but the address is not in
+            # _mem_taint, OR when concrete resolution fails entirely, fall
+            # back to the alias oracle to check against all known tainted
+            # memory locations (both concrete and symbolic).
+            if combined_taint == TaintTag.CLEAN and self._alias_oracle is not None:
+                # Use the concrete address if available, else try a symbolic
+                # representation from the instruction.
+                query_addr = mem_addr
+                if query_addr is None:
+                    query_addr = getattr(insn, "symbolic_address", None)
+                if query_addr is not None:
+                    oracle_tag = self._query_memory_taint_via_oracle(query_addr)
+                    if oracle_tag != TaintTag.CLEAN:
+                        combined_taint |= oracle_tag
+                        tainted_sources.append(
+                            f"mem_alias[{query_addr:#x}]"
+                            if isinstance(query_addr, int)
+                            else f"mem_alias[sym]"
+                        )
+
         # Taint from base register used as memory pointer
         for reg in reads:
             reg_lower = reg.lower()
@@ -462,6 +548,21 @@ class TaintTracker:
                             tag=output_tag,
                         ))
                         self._flow_graph.setdefault(src, set()).add(f"mem[{mem_addr:#x}]")
+                elif self._alias_oracle is not None:
+                    # B51: store to symbolic address — record for future oracle queries
+                    sym_addr = getattr(insn, "symbolic_address", None)
+                    if sym_addr is not None:
+                        self._symbolic_mem_taint[sym_addr] = output_tag
+                        for src in tainted_sources:
+                            self._events.append(TaintEvent(
+                                address=address,
+                                instruction=f"{mnemonic} {operands}",
+                                event_type="propagate",
+                                source=src,
+                                destination="mem[sym]",
+                                tag=output_tag,
+                            ))
+                            self._flow_graph.setdefault(src, set()).add("mem[sym]")
 
             # ── EFLAGS taint: flag-producing instruction ────────────────
             if is_eflags_producer(mnem_lower):
@@ -646,5 +747,6 @@ class TaintTracker:
         """Clear all taint state."""
         self._reg_taint.clear()
         self._mem_taint.clear()
+        self._symbolic_mem_taint.clear()
         self._events.clear()
         self._flow_graph.clear()

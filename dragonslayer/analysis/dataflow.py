@@ -338,6 +338,125 @@ def compute_data_flow(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Standalone helpers (B51)
+# ---------------------------------------------------------------------------
+
+def compute_live_ranges(result: DataFlowResult) -> List[LiveRange]:
+    """Compute live ranges from an existing :class:`DataFlowResult`.
+
+    Builds an index of uses per variable name and returns a
+    :class:`LiveRange` for every definition.  If a variable is
+    never used, ``last_use_index`` is ``-1`` (dead).
+
+    This deliberately mirrors the inline computation inside
+    :func:`compute_data_flow` but is available as a reusable export.
+    """
+    use_map: Dict[str, int] = {}  # var_name → max handler index
+    for u in result.uses:
+        cur = use_map.get(u.name, -1)
+        if u.handler_index > cur:
+            use_map[u.name] = u.handler_index
+
+    ranges: List[LiveRange] = []
+    for d in result.definitions:
+        ranges.append(LiveRange(
+            name=d.name,
+            def_index=d.handler_index,
+            last_use_index=use_map.get(d.name, -1),
+        ))
+    return ranges
+
+
+def backward_slice(
+    result: DataFlowResult,
+    target_var: str,
+    *,
+    boundary_index: Optional[int] = None,
+) -> "BackwardSliceResult":
+    """Backward slice on the fine-grained def-use graph.
+
+    Starting from *target_var*, walks ``result.def_use_edges`` in
+    reverse, collecting every variable (and its defining handler)
+    that transitively contributes to *target_var*.
+
+    Parameters
+    ----------
+    result : DataFlowResult
+        The data-flow result containing ``def_use_edges`` and ``reaching_defs``.
+    target_var : str
+        Variable name to slice backward from.
+    boundary_index : int, optional
+        If provided, only consider edges whose use-handler index is
+        ``<= boundary_index`` (restricts the slice to a region).
+
+    Returns
+    -------
+    BackwardSliceResult
+        The slice result with contributing variables, handler indices,
+        and the subgraph edges.
+    """
+    # Build reverse adjacency: produced_var → [(consumed_var, def_idx, use_idx), ...]
+    rev_adj: Dict[str, List[Tuple[str, int, int]]] = {}
+    for consumed, produced, def_idx, use_idx in result.def_use_edges:
+        if boundary_index is not None and use_idx > boundary_index:
+            continue
+        rev_adj.setdefault(produced, []).append((consumed, def_idx, use_idx))
+
+    visited: Set[str] = set()
+    handler_indices: Set[int] = set()
+    slice_edges: List[Tuple[str, str, int, int]] = []
+    worklist: List[str] = [target_var]
+
+    while worklist:
+        var = worklist.pop()
+        if var in visited:
+            continue
+        visited.add(var)
+
+        # Record the defining handler
+        vdef = result.reaching_defs.get(var)
+        if vdef is not None:
+            handler_indices.add(vdef.handler_index)
+
+        for consumed, def_idx, use_idx in rev_adj.get(var, []):
+            slice_edges.append((consumed, var, def_idx, use_idx))
+            if consumed not in visited:
+                worklist.append(consumed)
+
+    return BackwardSliceResult(
+        target=target_var,
+        contributing_vars=sorted(visited),
+        handler_indices=sorted(handler_indices),
+        edges=slice_edges,
+    )
+
+
+@dataclass
+class BackwardSliceResult:
+    """Result of a backward slice on the def-use graph."""
+
+    target: str
+    """Variable that was sliced on."""
+
+    contributing_vars: List[str]
+    """All variable names in the slice (including the target)."""
+
+    handler_indices: List[int]
+    """Handler indices that participate in the slice."""
+
+    edges: List[Tuple[str, str, int, int]]
+    """Subset of def-use edges in the slice."""
+
+    def summary(self) -> Dict[str, Any]:
+        return {
+            "target": self.target,
+            "contributing_count": len(self.contributing_vars),
+            "handler_count": len(self.handler_indices),
+            "edge_count": len(self.edges),
+        }
+
+
 def _compute_phi_nodes(
     cfg: Any,
     boundaries: List[HandlerBoundary],

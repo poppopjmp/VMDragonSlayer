@@ -135,3 +135,14 @@ except (ImportError, AttributeError):
     RecoveredKey = None  # type: ignore[assignment,misc]
     recover_key_from_entry = None  # type: ignore[assignment,misc]
     recover_key_from_bytes = None  # type: ignore[assignment,misc]
+
+try:
+    from .dataflow import (  # noqa: F401
+        backward_slice,
+        compute_live_ranges,
+        BackwardSliceResult,
+    )
+except (ImportError, AttributeError):
+    backward_slice = None  # type: ignore[assignment,misc]
+    compute_live_ranges = None  # type: ignore[assignment,misc]
+    BackwardSliceResult = None  # type: ignore[assignment,misc]
