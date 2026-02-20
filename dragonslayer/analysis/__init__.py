@@ -56,6 +56,11 @@ from .pseudocode import (  # noqa: F401
     emit_linear,
     emit_structured,
     emit_c_like,
+    emit_cifuentes,
+    emit_region,
+    structure_cfg,
+    StructuredRegion,
+    StructuredBlock,
     PseudocodeResult,
 )
 

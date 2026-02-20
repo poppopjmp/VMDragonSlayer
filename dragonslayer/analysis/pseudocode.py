@@ -492,6 +492,520 @@ def emit_structured(
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Cifuentes-style structural analysis  (Batch 30)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The algorithm:
+#  1. Walk blocks in reverse post-order (topological on the acyclic part).
+#  2. Classify each block's outgoing edges → region type:
+#     - Two conditional edges → if-then or if-then-else
+#     - Single jump to a loop header → while / do-while
+#     - Fallthrough only → sequence
+#     - Multiple targets from a handler table → switch/case
+#  3. Emit nested pseudocode via recursive region expansion.
+#
+# Key references:
+#  - C. Cifuentes, "Reverse Compilation Techniques", Diss. QUT, 1994
+#  - Van Emmerik & Cifuentes, "A Decompilation Framework", IR'2004
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class StructuredBlock:
+    """A block within a structured region tree."""
+    block_id: int = 0
+    lines: List[str] = field(default_factory=list)
+    is_loop_header: bool = False
+    is_exit: bool = False
+
+
+@dataclass
+class StructuredRegion:
+    """A structured control-flow region.
+
+    ``kind`` is one of: ``"sequence"``, ``"if_then"``, ``"if_then_else"``,
+    ``"while_loop"``, ``"do_while"``, ``"switch"``, ``"block"``.
+    """
+    kind: str = "block"
+    condition: str = ""
+    children: List[Any] = field(default_factory=list)   # StructuredRegion | StructuredBlock
+    case_labels: List[str] = field(default_factory=list)  # switch/case
+
+
+def _block_lines(
+    block: Any,
+    opcode_table: SemanticOpcodeTable,
+    boundaries: List[HandlerBoundary],
+    namer: _DefUseNamer,
+    boundary_map: Dict[int, int],
+) -> List[str]:
+    """Emit pseudocode lines for a single basic block.
+
+    *boundary_map* maps ``handler_address → boundary index``.
+    """
+    lines: List[str] = []
+    instructions = getattr(block, "instructions", [])
+    for vm_insn in instructions:
+        handler_addr = getattr(vm_insn, "handler_address", 0)
+        bnd_idx = boundary_map.get(handler_addr)
+        entry = opcode_table.lookup_handler(handler_addr)
+        if entry is None:
+            vip = getattr(vm_insn, "vip", 0)
+            lines.append(f"/* vIP={vip:#x}  handler=0x{handler_addr:x} unknown */")
+            continue
+        op = entry.semantic.operation
+        # Skip terminators — they'll be expressed structurally
+        if op in (VMOperation.JMP, VMOperation.JCC, VMOperation.RET):
+            continue
+        if bnd_idx is not None:
+            bnd = boundaries[bnd_idx]
+            line = _format_instruction_ssa(entry, bnd, bnd_idx, namer)
+        else:
+            # Synthesise a boundary-like object
+            vip = getattr(vm_insn, "vip", 0)
+            fake_bnd = HandlerBoundary(
+                handler_address=handler_addr,
+                vip_value=vip,
+                trace_index=0,
+            )
+            line = _format_instruction_ssa(entry, fake_bnd, 0, namer)
+        lines.append(line)
+    return lines
+
+
+def _classify_block_outedges(
+    block_id: int,
+    cfg: Any,
+) -> Dict[str, Any]:
+    """Classify the outgoing edges of *block_id*.
+
+    Returns a dict with keys:
+      ``edge_type`` → one of "unconditional", "conditional", "multi", "none"
+      ``targets``   → list of (target_block_id, edge_type_string)
+    """
+    edges = []
+    for e in getattr(cfg, "edges", []):
+        src = getattr(e, "source_block", None)
+        if src == block_id:
+            tgt = getattr(e, "target_block", None)
+            etype = getattr(e, "edge_type", "fallthrough")
+            edges.append((tgt, etype))
+
+    if not edges:
+        return {"edge_type": "none", "targets": []}
+    if len(edges) == 1:
+        return {"edge_type": "unconditional", "targets": edges}
+
+    # Two edges: one taken, one not-taken → conditional
+    taken = [t for t in edges if t[1] in ("branch_taken", "jump")]
+    not_taken = [t for t in edges if t[1] in ("branch_not_taken", "fallthrough")]
+    if taken and not_taken:
+        return {"edge_type": "conditional", "targets": edges,
+                "taken": taken[0][0], "not_taken": not_taken[0][0]}
+
+    # Multi-way → switch
+    if len(edges) > 2:
+        return {"edge_type": "multi", "targets": edges}
+
+    # Default: conditional between any 2
+    return {"edge_type": "conditional", "targets": edges,
+            "taken": edges[0][0], "not_taken": edges[1][0]}
+
+
+def _compute_immediate_postdominator(
+    cfg_graph: Any,
+    block_id: int,
+    exit_ids: set,
+) -> Optional[int]:
+    """Find the immediate post-dominator of *block_id*.
+
+    Uses reverse-graph BFS convergence: if both branches of a conditional
+    reach a common block, that is the immediate post-dominator (join point).
+    Returns ``None`` if we cannot determine one.
+    """
+    if not NX_AVAILABLE or cfg_graph is None:
+        return None
+
+    # Build the reverse graph
+    try:
+        rgraph = cfg_graph.reverse()
+    except Exception:
+        return None
+
+    # Find all exits (sinks in the forward graph)
+    if not exit_ids:
+        exit_ids = {n for n in cfg_graph.nodes() if cfg_graph.out_degree(n) == 0}
+    if not exit_ids:
+        return None
+
+    # Compute dominators on the reverse graph from a virtual exit
+    # Simpler approach: BFS from block_id on the forward graph, find
+    # the first node where all paths converge.
+    successors = list(cfg_graph.successors(block_id))
+    if len(successors) < 2:
+        return successors[0] if successors else None
+
+    # BFS reachability from each successor
+    from collections import deque
+
+    def _reachable(start: int) -> set:
+        visited: set[int] = set()
+        q: deque[int] = deque([start])
+        while q:
+            n = q.popleft()
+            if n in visited:
+                continue
+            visited.add(n)
+            for s in cfg_graph.successors(n):
+                if s != block_id:  # skip back to loop header
+                    q.append(s)
+        return visited
+
+    reach_sets = [_reachable(s) | {s} for s in successors]
+    # Intersection of reachable sets → common nodes
+    common = reach_sets[0]
+    for rs in reach_sets[1:]:
+        common = common & rs
+    if not common:
+        return None
+
+    # Among common nodes, pick the one closest to the block (shortest path)
+    try:
+        lengths = nx.single_source_shortest_path_length(cfg_graph, block_id)
+        best = min(common, key=lambda n: lengths.get(n, 10**9))
+        return best
+    except Exception:
+        return min(common) if common else None
+
+
+def structure_cfg(
+    cfg: Any,
+    opcode_table: SemanticOpcodeTable,
+    boundaries: List[HandlerBoundary],
+) -> StructuredRegion:
+    """Perform Cifuentes-style structural analysis on a HandlerCFG.
+
+    Returns a :class:`StructuredRegion` tree that can be emitted as
+    nested pseudocode by :func:`emit_region`.
+    """
+    namer = _DefUseNamer()
+
+    # Build boundary lookup
+    boundary_map: Dict[int, int] = {}
+    for idx, bnd in enumerate(boundaries):
+        boundary_map[bnd.handler_address] = idx
+
+    # Get blocks and topo order
+    blocks_by_id: Dict[int, Any] = {}
+    for b in getattr(cfg, "blocks", []):
+        bid = getattr(b, "block_id", id(b))
+        blocks_by_id[bid] = b
+
+    topo: List[int] = []
+    try:
+        topo = cfg.topological_order()
+    except Exception:
+        topo = sorted(blocks_by_id.keys())
+
+    # Loop headers
+    loop_headers: set[int] = set()
+    try:
+        loop_headers = set(cfg.loop_headers())
+    except Exception:
+        pass
+
+    # Natural loops: header → body set
+    loop_bodies: Dict[int, set[int]] = {}
+    try:
+        from dragonslayer.analysis.bytecode_cfg import detect_natural_loops
+        loops = detect_natural_loops(cfg)
+        for lp in loops:
+            hdr = lp.get("header") if isinstance(lp, dict) else getattr(lp, "header", None)
+            body = lp.get("body") if isinstance(lp, dict) else getattr(lp, "body", set())
+            if hdr is not None:
+                loop_bodies[hdr] = set(body)
+    except Exception:
+        pass
+
+    # Exit blocks
+    exit_ids: set[int] = set()
+    try:
+        exit_ids = {b for b in cfg.exit_blocks()}
+    except Exception:
+        for bid, blk in blocks_by_id.items():
+            if getattr(blk, "is_exit", False):
+                exit_ids.add(bid)
+
+    cfg_graph = getattr(cfg, "graph", None)
+
+    # Track which blocks have been emitted
+    emitted: set[int] = set()
+
+    def _structure_block(bid: int) -> StructuredRegion:
+        """Recursively structure from block *bid*."""
+        if bid in emitted or bid not in blocks_by_id:
+            return StructuredRegion(kind="block", children=[
+                StructuredBlock(block_id=bid, lines=[f"goto block_{bid};"])
+            ])
+        emitted.add(bid)
+
+        blk = blocks_by_id[bid]
+        blk_lines = _block_lines(blk, opcode_table, boundaries, namer, boundary_map)
+        sblk = StructuredBlock(
+            block_id=bid,
+            lines=blk_lines,
+            is_loop_header=bid in loop_headers,
+            is_exit=bid in exit_ids,
+        )
+
+        # Check if block is a loop header
+        if bid in loop_headers and bid in loop_bodies:
+            body_ids = loop_bodies[bid] - {bid}
+            # Build loop body by structuring body blocks in topo order
+            body_children = []
+            body_topo = [b for b in topo if b in body_ids and b not in emitted]
+
+            # Get loop condition from the terminator
+            term = getattr(blk, "terminator", lambda: None)()
+            cond = "true"
+            if term is not None:
+                top = getattr(term, "operation", None)
+                if top is not None and str(top) in ("VMOperation.JCC", "JCC"):
+                    cond = "flags"
+
+            for child_bid in body_topo:
+                body_children.append(_structure_block(child_bid))
+
+            loop_region = StructuredRegion(
+                kind="while_loop",
+                condition=cond,
+                children=[
+                    StructuredRegion(kind="block", children=[sblk]),
+                ] + body_children,
+            )
+            return loop_region
+
+        # Classify outgoing edges
+        out_info = _classify_block_outedges(bid, cfg)
+        edge_type = out_info["edge_type"]
+
+        if edge_type == "none":
+            # Exit block (ret)
+            term = getattr(blk, "terminator", lambda: None)()
+            if term is not None:
+                top = getattr(term, "operation", None)
+                if top is not None and "RET" in str(top):
+                    blk_lines.append("return;")
+            return StructuredRegion(kind="block", children=[sblk])
+
+        if edge_type == "unconditional":
+            tgt = out_info["targets"][0][0]
+            child = _structure_block(tgt)
+            return StructuredRegion(kind="sequence", children=[
+                StructuredRegion(kind="block", children=[sblk]),
+                child,
+            ])
+
+        if edge_type == "conditional":
+            taken_id = out_info.get("taken")
+            not_taken_id = out_info.get("not_taken")
+
+            # Find immediate post-dominator (join point)
+            ipdom = _compute_immediate_postdominator(cfg_graph, bid, exit_ids)
+
+            # Determine if this is if-then or if-then-else
+            if taken_id == ipdom:
+                # if (!cond) { not_taken_body } -- "if-then" on not-taken side
+                not_taken_region = _structure_block(not_taken_id) if not_taken_id and not_taken_id not in emitted else None
+                children = [StructuredRegion(kind="block", children=[sblk])]
+                if not_taken_region:
+                    children.append(StructuredRegion(
+                        kind="if_then",
+                        condition="!flags",
+                        children=[not_taken_region],
+                    ))
+                if ipdom and ipdom not in emitted:
+                    children.append(_structure_block(ipdom))
+                return StructuredRegion(kind="sequence", children=children)
+
+            elif not_taken_id == ipdom:
+                # if (cond) { taken_body }
+                taken_region = _structure_block(taken_id) if taken_id and taken_id not in emitted else None
+                children = [StructuredRegion(kind="block", children=[sblk])]
+                if taken_region:
+                    children.append(StructuredRegion(
+                        kind="if_then",
+                        condition="flags",
+                        children=[taken_region],
+                    ))
+                if ipdom and ipdom not in emitted:
+                    children.append(_structure_block(ipdom))
+                return StructuredRegion(kind="sequence", children=children)
+
+            else:
+                # if-then-else: both branches before the join
+                taken_region = _structure_block(taken_id) if taken_id and taken_id not in emitted else None
+                not_taken_region = _structure_block(not_taken_id) if not_taken_id and not_taken_id not in emitted else None
+                children = [StructuredRegion(kind="block", children=[sblk])]
+                if_else = StructuredRegion(
+                    kind="if_then_else",
+                    condition="flags",
+                    children=[
+                        taken_region or StructuredRegion(kind="block"),
+                        not_taken_region or StructuredRegion(kind="block"),
+                    ],
+                )
+                children.append(if_else)
+                if ipdom and ipdom not in emitted:
+                    children.append(_structure_block(ipdom))
+                return StructuredRegion(kind="sequence", children=children)
+
+        if edge_type == "multi":
+            # Switch/case
+            cases = []
+            case_labels = []
+            for tgt, etype in out_info["targets"]:
+                case_labels.append(f"case_{tgt}")
+                cases.append(_structure_block(tgt) if tgt not in emitted else
+                             StructuredRegion(kind="block", children=[
+                                 StructuredBlock(block_id=tgt, lines=[f"goto block_{tgt};"])
+                             ]))
+            return StructuredRegion(
+                kind="switch",
+                condition="opcode",
+                children=[StructuredRegion(kind="block", children=[sblk])] + cases,
+                case_labels=case_labels,
+            )
+
+        # Fallback
+        return StructuredRegion(kind="block", children=[sblk])
+
+    # Start structuring from the entry block
+    entry_bid = getattr(cfg, "entry_block_id", None)
+    if entry_bid is None and topo:
+        entry_bid = topo[0]
+
+    if entry_bid is None:
+        return StructuredRegion(kind="block")
+
+    root = _structure_block(entry_bid)
+
+    # Append any un-emitted blocks (disconnected or complex)
+    leftover = [b for b in topo if b not in emitted]
+    if leftover:
+        extra = [_structure_block(b) for b in leftover]
+        if root.kind == "sequence":
+            root.children.extend(extra)
+        else:
+            root = StructuredRegion(kind="sequence", children=[root] + extra)
+
+    return root
+
+
+def emit_region(
+    region: StructuredRegion,
+    indent: int = 0,
+) -> List[str]:
+    """Recursively emit pseudocode lines from a :class:`StructuredRegion` tree."""
+    pad = "    " * indent
+    lines: List[str] = []
+
+    if region.kind == "block":
+        for child in region.children:
+            if isinstance(child, StructuredBlock):
+                for ln in child.lines:
+                    lines.append(pad + ln)
+            elif isinstance(child, StructuredRegion):
+                lines.extend(emit_region(child, indent))
+
+    elif region.kind == "sequence":
+        for child in region.children:
+            if isinstance(child, StructuredRegion):
+                lines.extend(emit_region(child, indent))
+            elif isinstance(child, StructuredBlock):
+                for ln in child.lines:
+                    lines.append(pad + ln)
+
+    elif region.kind == "if_then":
+        lines.append(f"{pad}if ({region.condition}) {{")
+        for child in region.children:
+            lines.extend(emit_region(child, indent + 1)
+                         if isinstance(child, StructuredRegion)
+                         else [f"{'    ' * (indent + 1)}{ln}" for ln in child.lines])
+        lines.append(f"{pad}}}")
+
+    elif region.kind == "if_then_else":
+        lines.append(f"{pad}if ({region.condition}) {{")
+        if len(region.children) >= 1:
+            lines.extend(emit_region(region.children[0], indent + 1)
+                         if isinstance(region.children[0], StructuredRegion)
+                         else [])
+        lines.append(f"{pad}}} else {{")
+        if len(region.children) >= 2:
+            lines.extend(emit_region(region.children[1], indent + 1)
+                         if isinstance(region.children[1], StructuredRegion)
+                         else [])
+        lines.append(f"{pad}}}")
+
+    elif region.kind == "while_loop":
+        lines.append(f"{pad}while ({region.condition}) {{")
+        for child in region.children:
+            lines.extend(emit_region(child, indent + 1)
+                         if isinstance(child, StructuredRegion)
+                         else [f"{'    ' * (indent + 1)}{ln}" for ln in child.lines])
+        lines.append(f"{pad}}}")
+
+    elif region.kind == "switch":
+        lines.append(f"{pad}switch ({region.condition}) {{")
+        # First child is the block with the switch expression
+        if region.children:
+            lines.extend(emit_region(region.children[0], indent + 1)
+                         if isinstance(region.children[0], StructuredRegion)
+                         else [])
+        # Subsequent children are cases
+        for i, child in enumerate(region.children[1:]):
+            label = region.case_labels[i] if i < len(region.case_labels) else f"case_{i}"
+            lines.append(f"{pad}    {label}:")
+            lines.extend(emit_region(child, indent + 2)
+                         if isinstance(child, StructuredRegion)
+                         else [])
+            lines.append(f"{pad}        break;")
+        lines.append(f"{pad}}}")
+
+    return lines
+
+
+def emit_cifuentes(
+    opcode_table: SemanticOpcodeTable,
+    boundaries: List[HandlerBoundary],
+    handler_cfg: Any = None,
+) -> PseudocodeResult:
+    """Emit structured pseudocode using Cifuentes-style analysis.
+
+    This is the recommended emission mode when a :class:`HandlerCFG`
+    is available.  Falls back to :func:`emit_structured` (goto-based)
+    if the CFG is missing.
+    """
+    if handler_cfg is None or not NX_AVAILABLE:
+        return emit_structured(opcode_table, boundaries, handler_cfg)
+
+    try:
+        region = structure_cfg(handler_cfg, opcode_table, boundaries)
+        lines = emit_region(region)
+    except Exception as exc:
+        logger.warning("Cifuentes structuring failed (%s), falling back", exc)
+        return emit_structured(opcode_table, boundaries, handler_cfg)
+
+    text = "\n".join(lines)
+    return PseudocodeResult(
+        text=text,
+        line_count=len(lines),
+        style="cifuentes",
+        warnings=[],
+        var_widths={},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Context / Clustering annotation helpers (Batch 20)
 # ---------------------------------------------------------------------------
