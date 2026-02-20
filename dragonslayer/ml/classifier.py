@@ -184,15 +184,18 @@ class FeatureExplainer:
         *,
         n_perturbations: int = 20,
     ) -> Dict[str, float]:
-        """Explain a single prediction by zeroing each feature.
+        """Explain a single prediction by perturbing each feature.
 
-        For each feature, set it to zero and measure the confidence
-        change.  A large drop means the feature is important for
-        this particular prediction.
+        For each feature, perform *n_perturbations* random perturbations
+        (scaling the feature towards zero) and measure the average
+        confidence change.  A large drop means the feature is important
+        for this particular prediction.
 
         Returns ``{feature_name: contribution}`` where positive
         values mean the feature *supports* the prediction.
         """
+        import random
+
         features = extract_handler_features(sample)
         base_pred = self._predict_from_values(features.values, features.feature_names)
         base_conf = base_pred.confidence
@@ -201,15 +204,25 @@ class FeatureExplainer:
         contributions: Dict[str, float] = {}
 
         for fi, fname in enumerate(features.feature_names):
-            perturbed_vals = list(features.values)
-            perturbed_vals[fi] = 0.0  # zero the feature
-            try:
-                pert_pred = self._predict_from_values(perturbed_vals, features.feature_names)
-                if pert_pred.label == base_label:
-                    contributions[fname] = base_conf - pert_pred.confidence
+            drops: list[float] = []
+            original_val = features.values[fi]
+            for pi in range(n_perturbations):
+                perturbed_vals = list(features.values)
+                # Scale the feature: pi==0 → zero it; others → random scale
+                if pi == 0:
+                    perturbed_vals[fi] = 0.0
                 else:
-                    contributions[fname] = base_conf  # label changed → full contribution
-            except Exception:
-                contributions[fname] = 0.0
+                    perturbed_vals[fi] = original_val * random.uniform(0.0, 0.5)
+                try:
+                    pert_pred = self._predict_from_values(
+                        perturbed_vals, features.feature_names
+                    )
+                    if pert_pred.label == base_label:
+                        drops.append(base_conf - pert_pred.confidence)
+                    else:
+                        drops.append(base_conf)  # label changed → full contribution
+                except Exception:
+                    drops.append(0.0)
+            contributions[fname] = sum(drops) / len(drops) if drops else 0.0
 
         return contributions

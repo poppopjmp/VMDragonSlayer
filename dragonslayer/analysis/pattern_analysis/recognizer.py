@@ -427,14 +427,34 @@ class PatternRecognizer:
         "8d4000", "8d642400",  # lea same, [same+0]
     })
 
-    # B71: Extended semantic equivalence — mnemonic→opcode byte mappings.
-    # Maps obfuscator-favoured mnemonics to their canonical opcode byte
-    # so byte-level patterns match regardless of which alias was assembled.
+    # B71/B73: Extended opcode-byte equivalences — maps obfuscator-favoured
+    # byte sequences to their canonical forms.  Used for byte-level pattern
+    # normalisation AFTER hex-string NOP stripping.
     _OPCODE_EQUIV: Dict[str, str] = {
-        # SAL and SHL share the same opcode; normalise SAL→SHL bytes
-        # In ModR/M encoding, SAL reg uses /4, SHL reg uses /4 — identical.
-        # TEST r/m, r  (0x85) ≡ AND r/m, r (0x21) for flag-only comparison.
-        # We don't rewrite opcodes (risky), but we expose the map for callers.
+        # SUB reg, 0  →  NOP (no effect)
+        "83E800": "90",      # sub eax, 0
+        "83E900": "90",      # sub ecx, 0
+        "83EA00": "90",      # sub edx, 0
+        "83EB00": "90",      # sub ebx, 0
+        # ADD reg, 0  →  NOP
+        "83C000": "90",      # add eax, 0
+        "83C100": "90",      # add ecx, 0
+        "83C200": "90",      # add edx, 0
+        "83C300": "90",      # add ebx, 0
+        # XOR reg, 0  → NOP
+        "83F000": "90",      # xor eax, 0
+        "83F100": "90",      # xor ecx, 0
+        # OR reg, 0   → NOP
+        "83C800": "90",      # or eax, 0
+        "83C900": "90",      # or ecx, 0
+        # MOV reg, reg (same) → NOP
+        "89C0": "90",        # mov eax, eax
+        "89C9": "90",        # mov ecx, ecx
+        "89D2": "90",        # mov edx, edx
+        "89DB": "90",        # mov ebx, ebx
+        # LEA reg, [reg+0] → NOP (already partially in _NOP_OPCODES)
+        "8D4000": "90",      # lea eax, [eax+0]
+        "8D4900": "90",      # lea ecx, [ecx+0]
     }
 
     @classmethod
@@ -454,6 +474,12 @@ class PatternRecognizer:
         normalised = hex_bytes.replace(" ", "").upper()
         for nop in sorted(cls._NOP_OPCODES, key=len, reverse=True):
             normalised = normalised.replace(nop.upper(), "")
+
+        # B73: Apply byte-level opcode equivalences (e.g. sub reg,0 → NOP)
+        for old_bytes, new_bytes in sorted(
+            cls._OPCODE_EQUIV.items(), key=lambda x: len(x[0]), reverse=True
+        ):
+            normalised = normalised.replace(old_bytes.upper(), new_bytes.upper())
 
         # B71: Apply mnemonic-level semantic equivalences when the input
         # contains textual mnemonics (heuristic: presence of alpha runs

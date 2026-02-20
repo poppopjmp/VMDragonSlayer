@@ -408,21 +408,25 @@ class TaintTracker:
 
         # B72: Interprocedural taint context — tracks register taint at
         # call boundaries so cross-function analysis is possible.
-        self._context_stack: List[Dict[str, TaintTag]] = []
+        self._context_stack: List[tuple[Dict[str, TaintTag], Dict[str, List[TaintTag]]]] = []
         self._call_depth: int = 0
 
     # ── B72: Interprocedural context management ─────────────────────────────
 
     def push_call_context(self) -> None:
-        """Save current register taint state for interprocedural analysis.
+        """Save current register + byte-level taint for interprocedural analysis.
 
         Call this when entering a callee to preserve the caller's
-        register-taint snapshot.  On return, :meth:`pop_call_context`
-        restores it while merging any new taint from the callee's
-        return registers.
+        register-taint snapshot (both ``_reg_taint`` and ``_byte_taint``).
+        On return, :meth:`pop_call_context` restores it while merging any
+        new taint from the callee's return registers.
         """
-        snapshot = dict(self._reg_taint)
-        self._context_stack.append(snapshot)
+        reg_snapshot = dict(self._reg_taint)
+        # B73: Also snapshot the byte-level taint map to prevent desync
+        byte_snapshot = {
+            k: list(v) for k, v in self._byte_taint._map.items()
+        }
+        self._context_stack.append((reg_snapshot, byte_snapshot))
         self._call_depth += 1
         logger.debug("push_call_context: depth=%d", self._call_depth)
 
@@ -445,18 +449,39 @@ class TaintTracker:
             r: self._reg_taint.get(r.lower(), TaintTag.CLEAN)
             for r in return_regs
         }
+        # B73: Also capture callee byte-taint for return regs
+        return_byte_taint: Dict[str, List[TaintTag]] = {}
+        for r in return_regs:
+            info = subreg_info(r.lower())
+            canonical = info[0] if info else r.lower()
+            arr = self._byte_taint._map.get(canonical)
+            if arr is not None:
+                return_byte_taint[canonical] = list(arr)
 
-        caller_state = self._context_stack.pop()
+        caller_reg, caller_bytes = self._context_stack.pop()
         self._call_depth = max(0, self._call_depth - 1)
 
         # Restore caller register taint
-        self._reg_taint = caller_state
+        self._reg_taint = caller_reg
+
+        # B73: Restore caller byte-level taint map
+        self._byte_taint._map = caller_bytes
 
         # Merge callee return-register taint
         for r, tag in return_taint.items():
             if tag != TaintTag.CLEAN:
                 existing = self._reg_taint.get(r.lower(), TaintTag.CLEAN)
                 self._reg_taint[r.lower()] = existing | tag
+
+        # B73: Merge callee return-register byte taint
+        for canonical, callee_arr in return_byte_taint.items():
+            caller_arr = self._byte_taint._map.get(canonical)
+            if caller_arr is None:
+                caller_arr = [TaintTag.CLEAN] * 8
+                self._byte_taint._map[canonical] = caller_arr
+            for i in range(8):
+                if callee_arr[i] != TaintTag.CLEAN:
+                    caller_arr[i] = caller_arr[i] | callee_arr[i]
 
         logger.debug("pop_call_context: depth=%d, merged %s", self._call_depth, return_taint)
 

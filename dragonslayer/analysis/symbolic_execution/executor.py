@@ -660,24 +660,93 @@ class SymbolicExecutor:
         """Attempt to resolve an indirect branch's possible targets.
 
         Uses the instruction's *registers* snapshot (populated from
-        dynamic traces) to compute concrete target addresses.
+        dynamic traces) to compute concrete target addresses.  Supports
+        both direct register targets (``jmp rax``) and memory operand
+        expressions (``jmp qword ptr [base+index*scale+disp]``).
 
         Returns a (possibly empty) list of resolved addresses that
         belong to *block_addrs*.
         """
+        import re as _re
+
         targets: List[int] = []
         if not insn.registers:
             return targets
 
-        # Heuristic: the operand string often names the target register
-        # e.g. "jmp rax", "jmp qword ptr [rax+rcx*8]"
         ops = (insn.operands or "").strip().lower()
-        # Direct register target: "jmp rax"
+
+        # B73: Try to evaluate a full memory operand expression
+        # Pattern: [base+index*scale+disp] or [reg]
+        mem_match = _re.search(r"\[([^\]]+)\]", ops)
+        if mem_match:
+            expr = mem_match.group(1).strip()
+            addr = SymbolicExecutor._eval_addr_expr(expr, insn.registers)
+            if addr is not None and addr in block_addrs:
+                targets.append(addr)
+                return targets[:max_targets]
+
+        # Fallback: direct register target (e.g. "jmp rax")
         for reg, val in insn.registers.items():
-            if reg.lower() in ops and isinstance(val, int):
+            if reg.lower() == ops and isinstance(val, int):
                 if val in block_addrs:
                     targets.append(val)
         return targets[:max_targets]
+
+    @staticmethod
+    def _eval_addr_expr(expr: str, regs: Dict[str, Any]) -> Optional[int]:
+        """Evaluate a simple x86 address expression using register values.
+
+        Supports: ``base``, ``base+disp``, ``base+index*scale``,
+        ``base+index*scale+disp``, and variations with subtraction.
+        """
+        import re as _re
+
+        expr = expr.strip().lower()
+        total = 0
+        resolved = True
+
+        # Split on + / - while keeping the sign
+        tokens = _re.split(r"(?=[+\-])", expr)
+        for tok in tokens:
+            tok = tok.strip()
+            if not tok:
+                continue
+
+            sign = 1
+            if tok.startswith("+"):
+                tok = tok[1:].strip()
+            elif tok.startswith("-"):
+                sign = -1
+                tok = tok[1:].strip()
+
+            # index*scale form (e.g. "rcx*8")
+            m_mul = _re.fullmatch(r"(\w+)\s*\*\s*(\d+)", tok)
+            if m_mul:
+                reg_name = m_mul.group(1)
+                scale = int(m_mul.group(2))
+                reg_val = regs.get(reg_name)
+                if isinstance(reg_val, int):
+                    total += sign * reg_val * scale
+                else:
+                    resolved = False
+                continue
+
+            # Numeric literal
+            try:
+                val = int(tok, 0)
+                total += sign * val
+                continue
+            except (ValueError, TypeError):
+                pass
+
+            # Register name
+            reg_val = regs.get(tok)
+            if isinstance(reg_val, int):
+                total += sign * reg_val
+            else:
+                resolved = False
+
+        return total if resolved else None
 
     # -- Dispatcher identification -------------------------------------------
 
