@@ -479,6 +479,61 @@ class TestTaintAnalyzer:
 # Symbolic Execution tests
 # ---------------------------------------------------------------------------
 
+class TestDispatcherBackEdgeScoring:
+    """Tests for _find_dispatcher back-edge heuristic."""
+
+    def test_single_indirect_jump_returned(self):
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        from dragonslayer.analysis.symbolic_execution.lifter import LiftedInstruction, InstructionCategory
+
+        insns = [
+            LiftedInstruction(address=0x100, size=2, mnemonic="jmp", operands="rax",
+                              raw_bytes=b"\xff\xe0", category=InstructionCategory.BRANCH_UNCOND,
+                              branch_target=None),
+        ]
+        assert SymbolicExecutor._find_dispatcher(insns) == 0x100
+
+    def test_no_indirect_jumps_returns_none(self):
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        from dragonslayer.analysis.symbolic_execution.lifter import LiftedInstruction, InstructionCategory
+
+        insns = [
+            LiftedInstruction(address=0x100, size=2, mnemonic="jne", operands="0x200",
+                              raw_bytes=b"\x75\x0a", category=InstructionCategory.BRANCH_COND,
+                              branch_target=0x200),
+        ]
+        assert SymbolicExecutor._find_dispatcher(insns) is None
+
+    def test_back_edge_scoring_picks_looped_jump(self):
+        """Given two indirect jumps, the one with back-edges should win."""
+        from dragonslayer.analysis.symbolic_execution.executor import SymbolicExecutor
+        from dragonslayer.analysis.symbolic_execution.lifter import LiftedInstruction, InstructionCategory
+
+        # First indirect jump at 0x200 — no back-edges point near it
+        ij1 = LiftedInstruction(address=0x200, size=2, mnemonic="jmp", operands="rax",
+                                raw_bytes=b"\xff\xe0", category=InstructionCategory.BRANCH_UNCOND,
+                                branch_target=None)
+        # Second indirect jump at 0x400 — multiple branches target 0x3F0..0x400
+        ij2 = LiftedInstruction(address=0x400, size=2, mnemonic="jmp", operands="rbx",
+                                raw_bytes=b"\xff\xe3", category=InstructionCategory.BRANCH_UNCOND,
+                                branch_target=None)
+        # Some branches targeting near 0x400 (back-edges)
+        br1 = LiftedInstruction(address=0x350, size=2, mnemonic="jne", operands="0x3F0",
+                                raw_bytes=b"\x75\x0a", category=InstructionCategory.BRANCH_COND,
+                                branch_target=0x3F0)
+        br2 = LiftedInstruction(address=0x450, size=2, mnemonic="jmp", operands="0x3E0",
+                                raw_bytes=b"\xEB\x0a", category=InstructionCategory.BRANCH_UNCOND,
+                                branch_target=0x3E0)
+        # One branch targeting 0x500 (not near either indirect jump)
+        br3 = LiftedInstruction(address=0x500, size=2, mnemonic="je", operands="0x600",
+                                raw_bytes=b"\x74\x0a", category=InstructionCategory.BRANCH_COND,
+                                branch_target=0x600)
+
+        insns = [ij1, br1, br2, ij2, br3]
+        # ij2 (0x400) has 2 back-edges targeting ≤0x400 within ±64, ij1 has 0
+        assert SymbolicExecutor._find_dispatcher(insns) == 0x400
+
+
 class TestSymbolicState:
     """Tests for dragonslayer.analysis.symbolic_execution.state."""
 

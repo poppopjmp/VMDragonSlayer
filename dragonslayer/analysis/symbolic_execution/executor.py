@@ -217,21 +217,51 @@ class SymbolicExecutor:
         """
         Find the likely VM dispatcher address.
 
-        Heuristic: the indirect jump instruction that is targetted by the
-        most back-edges (or the first ``jmp reg`` if few instructions).
+        Heuristic: score each indirect jump by how many *back-edges* (branches
+        whose target is at or before the jump itself) exist in the instruction
+        stream.  The indirect jump with the highest back-edge count is the most
+        likely dispatcher loop head.  Falls back to the first indirect jump if
+        no back-edge information is available.
         """
         indirect_jumps: List[int] = []
         for insn in instructions:
             if insn.category == InstructionCategory.BRANCH_UNCOND and insn.branch_target is None:
-                # Indirect jump (target is a register, not immediate)
                 indirect_jumps.append(insn.address)
 
         if not indirect_jumps:
             return None
 
-        # Score by how many branches target the block containing the jump
-        # Simple heuristic: return the first one (often the dispatcher)
-        return indirect_jumps[0]
+        if len(indirect_jumps) == 1:
+            return indirect_jumps[0]
+
+        # Build a set of indirect-jump addresses for fast lookup
+        ij_set = set(indirect_jumps)
+
+        # Collect all branch targets in the instruction stream
+        branch_targets: Dict[int, int] = {}  # target_addr -> count
+        for insn in instructions:
+            cat = insn.category
+            if cat in (InstructionCategory.BRANCH_UNCOND, InstructionCategory.BRANCH_COND):
+                tgt = insn.branch_target
+                if tgt is not None:
+                    branch_targets[tgt] = branch_targets.get(tgt, 0) + 1
+
+        # Score each indirect jump by the number of back-edges that land in
+        # the same basic-block neighbourhood (within ±64 bytes of the jump).
+        best_addr = indirect_jumps[0]
+        best_score = 0
+
+        for ij_addr in indirect_jumps:
+            score = 0
+            for tgt, cnt in branch_targets.items():
+                # A "back-edge" targets at or before the indirect jump
+                if tgt <= ij_addr and abs(tgt - ij_addr) <= 64:
+                    score += cnt
+            if score > best_score:
+                best_score = score
+                best_addr = ij_addr
+
+        return best_addr
 
     # -- Handler classification -----------------------------------------------
 
