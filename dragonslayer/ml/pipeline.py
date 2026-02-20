@@ -262,6 +262,80 @@ def extract_bigram_features(mnemonics: List[str]) -> List[float]:
     return [c / n_pairs for c in counts]
 
 
+# -- B56: Mnemonic trigrams --------------------------------------------------
+
+VMPROTECT_TRIGRAMS: List[tuple[str, str, str]] = [
+    # Arithmetic handler patterns
+    ("mov", "add", "mov"),
+    ("mov", "sub", "mov"),
+    ("mov", "imul", "mov"),
+    ("mov", "neg", "add"),
+    # Logic handler patterns
+    ("mov", "xor", "mov"),
+    ("mov", "and", "mov"),
+    ("mov", "or", "mov"),
+    ("mov", "shl", "or"),
+    ("xor", "shr", "mov"),
+    ("mov", "not", "mov"),
+    # Stack manipulation
+    ("push", "push", "mov"),
+    ("mov", "pop", "pop"),
+    ("push", "mov", "mov"),
+    # Load-store chains
+    ("mov", "mov", "mov"),
+    ("movzx", "mov", "mov"),
+    # Dispatch patterns
+    ("cmp", "jne", "mov"),
+    ("add", "jmp", "mov"),
+    ("test", "je", "jmp"),
+    # Key-transform patterns
+    ("xor", "rol", "xor"),
+    ("xor", "add", "xor"),
+]
+
+_TRIGRAM_INDEX: Dict[tuple[str, str, str], int] = {
+    tg: i for i, tg in enumerate(VMPROTECT_TRIGRAMS)
+}
+
+
+def extract_trigram_features(mnemonics: List[str]) -> List[float]:
+    """Compute normalised trigram frequency vector for *mnemonics*.
+
+    Returns a float list of length ``len(VMPROTECT_TRIGRAMS)``.
+    """
+    n_triples = max(len(mnemonics) - 2, 1)
+    counts = [0] * len(VMPROTECT_TRIGRAMS)
+    for i in range(len(mnemonics) - 2):
+        triple = (mnemonics[i], mnemonics[i + 1], mnemonics[i + 2])
+        idx = _TRIGRAM_INDEX.get(triple)
+        if idx is not None:
+            counts[idx] += 1
+    return [c / n_triples for c in counts]
+
+
+# -- B56: Opcode frequency histogram ----------------------------------------
+
+OPCODE_VOCAB: List[str] = [
+    "mov", "push", "pop", "add", "sub", "xor", "and", "or",
+    "shl", "shr", "sar", "not", "neg", "imul", "lea", "test",
+    "cmp", "jmp", "jne", "je", "jz", "jnz", "call", "ret",
+    "movzx", "movsx", "nop", "rol", "ror", "bswap", "inc", "dec",
+]
+
+
+def extract_opcode_histogram(mnemonics: List[str]) -> List[float]:
+    """Compute normalised per-opcode frequency histogram.
+
+    Returns a float list of length ``len(OPCODE_VOCAB)`` — each element
+    is the fraction of instructions that use that opcode.
+    """
+    total = max(len(mnemonics), 1)
+    freq: Dict[str, int] = {}
+    for m in mnemonics:
+        freq[m] = freq.get(m, 0) + 1
+    return [freq.get(op, 0) / total for op in OPCODE_VOCAB]
+
+
 def extract_register_effects(handler: Dict[str, Any]) -> List[float]:
     """Extract per-register read/write indicators (32 floats).
 
@@ -378,11 +452,21 @@ OPERAND_PATTERN_NAMES: List[str] = [
     "avg_operand_count", "has_scale_index", "has_rip_relative",
 ]
 
+# B56: Trigram and opcode histogram feature names
+TRIGRAM_FEATURE_NAMES: List[str] = [
+    f"tg_{a}_{b}_{c}" for a, b, c in VMPROTECT_TRIGRAMS
+]
+OPCODE_HIST_NAMES: List[str] = [
+    f"freq_{op}" for op in OPCODE_VOCAB
+]
+
 EXTENDED_FEATURE_NAMES: List[str] = (
     list(HANDLER_FEATURE_NAMES)
     + BIGRAM_FEATURE_NAMES
     + REGISTER_FEATURE_NAMES
     + OPERAND_PATTERN_NAMES
+    + TRIGRAM_FEATURE_NAMES
+    + OPCODE_HIST_NAMES
 )
 
 
@@ -390,12 +474,12 @@ def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
     """Extract a rich feature vector for ML training.
 
     Combines the base 15 handler features with mnemonic bigrams (25),
-    register effects (32), and operand patterns (6) for a total of
-    **78 features**.
+    register effects (32), operand patterns (6), trigrams (20), and
+    opcode histogram (32) for a total of **130 features** (B56).
     """
     base = extract_handler_features(handler)
 
-    # Recover mnemonics for bigram extraction
+    # Recover mnemonics for n-gram extraction
     mnemonics: List[str] = handler.get("mnemonics", [])
     if not mnemonics:
         for insn in handler.get("instructions", []):
@@ -406,8 +490,13 @@ def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
     bigram_vals = extract_bigram_features(mnemonics)
     reg_vals = extract_register_effects(handler)
     op_vals = extract_operand_pattern_features(handler)
+    trigram_vals = extract_trigram_features(mnemonics)
+    histogram_vals = extract_opcode_histogram(mnemonics)
 
-    all_values = base.values + bigram_vals + reg_vals + op_vals
+    all_values = (
+        base.values + bigram_vals + reg_vals + op_vals
+        + trigram_vals + histogram_vals
+    )
     return FeatureVector(
         values=all_values,
         feature_names=list(EXTENDED_FEATURE_NAMES),

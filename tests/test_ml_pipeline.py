@@ -102,12 +102,12 @@ class TestFeatureDimensions:
         assert len(OPERAND_PATTERN_NAMES) == 6
 
     def test_extended_total(self):
-        assert len(EXTENDED_FEATURE_NAMES) == 15 + 25 + 32 + 6  # 78
+        assert len(EXTENDED_FEATURE_NAMES) == 15 + 25 + 32 + 6 + 20 + 32  # 130
 
     def test_extended_extraction_dimension(self):
         fv = extract_extended_features(_arith_handler())
-        assert fv.dimension == 78
-        assert len(fv.feature_names) == 78
+        assert fv.dimension == 130
+        assert len(fv.feature_names) == 130
 
 
 # ===================================================================
@@ -226,12 +226,12 @@ class TestOperandPatterns:
 class TestExtendedFeatures:
     def test_arith_handler_features(self):
         fv = extract_extended_features(_arith_handler())
-        assert fv.dimension == 78
+        assert fv.dimension == 130
         assert fv.metadata["source"] == "handler_extended"
 
     def test_logic_handler_features(self):
         fv = extract_extended_features(_logic_handler())
-        assert fv.dimension == 78
+        assert fv.dimension == 130
         # The xor->shr bigram should be non-zero
         idx = fv.feature_names.index("bg_xor_shr")
         assert fv.values[idx] > 0.0
@@ -301,7 +301,7 @@ class TestTrainingDataPrep:
         handlers = generate_synthetic_handlers(n_per_category=5, seed=11)
         features, labels = prepare_extended_training_data(handlers, label_key="category")
         assert len(features) == len(labels)
-        assert all(fv.dimension == 78 for fv in features)
+        assert all(fv.dimension == 130 for fv in features)
 
     def test_heuristic_labelling(self):
         h = {"operation": "vm_add"}

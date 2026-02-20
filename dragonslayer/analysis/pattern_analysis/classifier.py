@@ -120,6 +120,69 @@ _BYTE_RULES: List[tuple[bytes, HandlerType, str]] = [
     (bytes([0x85]), HandlerType.COMPARISON, "TEST r/m"),
 ]
 
+# B56: Instruction-sequence signatures for handler body matching.
+# Each entry: (mnemonic_sequence, handler_type, sub_category, base_confidence)
+# Wildcards: \"*\" matches any single mnemonic, \"...\" matches 0+ mnemonics.
+_INSTRUCTION_SEQ_SIGNATURES: List[tuple[List[str], HandlerType, str, float]] = [
+    # VM enter: push context, set up VM frame
+    (["push", "mov", "sub"], HandlerType.CONTROL_FLOW, "vm_enter", 0.8),
+    (["push", "push", "push", "mov"], HandlerType.STACK, "context_save", 0.75),
+    # VM exit: restore context, return
+    (["pop", "pop", "pop", "ret"], HandlerType.CONTROL_FLOW, "vm_exit", 0.8),
+    (["mov", "pop", "ret"], HandlerType.CONTROL_FLOW, "vm_exit", 0.75),
+    # Arithmetic handlers
+    (["mov", "add", "mov", "mov"], HandlerType.ARITHMETIC, "vm_add", 0.7),
+    (["mov", "sub", "mov", "mov"], HandlerType.ARITHMETIC, "vm_sub", 0.7),
+    (["mov", "imul", "mov"], HandlerType.ARITHMETIC, "vm_mul", 0.7),
+    (["mov", "neg", "add"], HandlerType.ARITHMETIC, "vm_neg_add", 0.65),
+    # Logic handlers
+    (["mov", "xor", "mov", "mov"], HandlerType.BITWISE, "vm_xor", 0.7),
+    (["mov", "and", "mov", "mov"], HandlerType.BITWISE, "vm_and", 0.7),
+    (["mov", "or", "mov", "mov"], HandlerType.BITWISE, "vm_or", 0.7),
+    (["mov", "shl", "or", "mov"], HandlerType.BITWISE, "vm_shl_or", 0.7),
+    (["mov", "not", "mov"], HandlerType.BITWISE, "vm_not", 0.7),
+    # Stack handlers
+    (["mov", "sub", "mov"], HandlerType.STACK, "vm_push", 0.6),
+    (["mov", "mov", "add"], HandlerType.STACK, "vm_pop", 0.6),
+    # Key transform patterns
+    (["xor", "rol", "xor"], HandlerType.CRYPTO, "key_transform_rol", 0.75),
+    (["xor", "add", "xor"], HandlerType.CRYPTO, "key_transform_add", 0.75),
+    (["xor", "bswap", "xor"], HandlerType.CRYPTO, "key_transform_bswap", 0.8),
+    # Load/store
+    (["movzx", "mov"], HandlerType.MEMORY, "vm_load_byte", 0.65),
+    (["mov", "mov", "mov"], HandlerType.MEMORY, "vm_mov_chain", 0.5),
+    # Compare / flags
+    (["cmp", "*", "mov"], HandlerType.COMPARISON, "vm_cmp", 0.6),
+    (["test", "*", "mov"], HandlerType.COMPARISON, "vm_test", 0.6),
+]
+
+
+def _match_instruction_sequence(
+    mnemonics: List[str],
+    pattern: List[str],
+) -> bool:
+    """Check if *mnemonics* contains *pattern* as a subsequence.
+
+    ``\"*\"`` matches any single mnemonic.  Plain strings match exactly.
+    """
+    if not pattern:
+        return True
+    if len(pattern) > len(mnemonics):
+        return False
+    # Sliding window match
+    plen = len(pattern)
+    for start in range(len(mnemonics) - plen + 1):
+        matched = True
+        for j, p in enumerate(pattern):
+            if p == "*":
+                continue
+            if mnemonics[start + j] != p:
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Classifier
@@ -197,9 +260,19 @@ class PatternClassifier:
         raw_bytes: bytes,
         *,
         handler_name: str = "",
+        mnemonics: Optional[List[str]] = None,
     ) -> ClassificationResult:
         """
         Classify a raw handler byte sequence directly (no Match object).
+
+        Parameters
+        ----------
+        raw_bytes : bytes
+            Raw handler bytes.
+        handler_name : str
+            Optional handler name for keyword matching.
+        mnemonics : list of str or None
+            B56: Optional mnemonic sequence for instruction-sequence matching.
         """
         match_dict = {
             "pattern_id": f"raw_{handler_name or 'unknown'}",
@@ -209,6 +282,8 @@ class PatternClassifier:
             "matched_bytes": raw_bytes.hex().upper(),
             "confidence": 0.5,
         }
+        if mnemonics is not None:
+            match_dict["_mnemonics"] = mnemonics
         return self._classify_single(match_dict)
 
     # -- internal -----------------------------------------------------------
@@ -262,7 +337,19 @@ class PatternClassifier:
                     reasoning_parts.append(f"keyword match: {label}")
                     break
 
-        # 3) If still unknown, try byte-level heuristics
+        # 3) B56: Instruction-sequence signature matching
+        seq_sub_cat = ""
+        if ht == HandlerType.UNKNOWN:
+            mnems = d.get("_mnemonics", [])
+            if mnems:
+                for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
+                    if _match_instruction_sequence(mnems, sig_pattern):
+                        ht = sig_type
+                        seq_sub_cat = sig_sub
+                        reasoning_parts.append(f"instruction-seq match: {sig_sub}")
+                        break
+
+        # 4) If still unknown, try byte-level heuristics
         if ht == HandlerType.UNKNOWN:
             matched_hex = d.get("matched_bytes", "")
             try:
@@ -282,8 +369,8 @@ class PatternClassifier:
         boost = 0.05 * len(reasoning_parts)
         confidence = min(base_conf + boost, 1.0)
 
-        # Determine sub-category from operation field
-        sub_cat = d.get("operation", "") or ""
+        # Determine sub-category from operation field or instruction-seq match
+        sub_cat = seq_sub_cat or d.get("operation", "") or ""
 
         return ClassificationResult(
             pattern_id=d.get("pattern_id", ""),
