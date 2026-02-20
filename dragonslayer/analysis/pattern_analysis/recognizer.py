@@ -481,6 +481,11 @@ class PatternRecognizer:
         ):
             normalised = normalised.replace(old_bytes.upper(), new_bytes.upper())
 
+        # B74: Second NOP stripping pass — opcode equivalences may have
+        # produced new "90" (NOP) sequences that need removal.
+        for nop in sorted(cls._NOP_OPCODES, key=len, reverse=True):
+            normalised = normalised.replace(nop.upper(), "")
+
         # B71: Apply mnemonic-level semantic equivalences when the input
         # contains textual mnemonics (heuristic: presence of alpha runs
         # longer than 2 that aren't pure hex).

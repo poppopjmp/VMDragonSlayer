@@ -719,11 +719,18 @@ class SymbolicExecutor:
                 sign = -1
                 tok = tok[1:].strip()
 
-            # index*scale form (e.g. "rcx*8")
-            m_mul = _re.fullmatch(r"(\w+)\s*\*\s*(\d+)", tok)
+            # index*scale or scale*index form (e.g. "rcx*8" or "8*rcx")
+            m_mul = _re.fullmatch(r"(\w+)\s*\*\s*(\w+)", tok)
             if m_mul:
-                reg_name = m_mul.group(1)
-                scale = int(m_mul.group(2))
+                g1, g2 = m_mul.group(1), m_mul.group(2)
+                # Determine which is the register and which is the scale
+                if g1.isdigit():
+                    scale, reg_name = int(g1), g2
+                elif g2.isdigit():
+                    reg_name, scale = g1, int(g2)
+                else:
+                    resolved = False
+                    continue
                 reg_val = regs.get(reg_name)
                 if isinstance(reg_val, int):
                     total += sign * reg_val * scale

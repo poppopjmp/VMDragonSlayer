@@ -206,21 +206,39 @@ class TaintTag(IntFlag):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ByteTaintMap:
-    """Per-byte taint storage for a set of 64-bit canonical registers.
+    """Per-byte taint storage for registers of varying width.
 
-    Each canonical register (rax, rbx, …, r15) is tracked as an 8-element
-    list of :class:`TaintTag` values, one per byte.  Sub-register writes/
-    reads map to the appropriate byte range via :func:`subreg_info`.
+    GP registers (rax, rbx, …, r15) are tracked as 8-byte arrays.
+    SIMD registers (zmm0–zmm15) are tracked as 64-byte arrays so that
+    xmm (16 B), ymm (32 B), and zmm (64 B) sub-ranges are all represented.
     """
 
+    # B74: canonical register → byte count
+    _CANONICAL_SIZES: Dict[str, int] = {}
+
+    @classmethod
+    def _init_sizes(cls) -> None:
+        if cls._CANONICAL_SIZES:
+            return
+        # GP: 8 bytes
+        for name in ("rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp"):
+            cls._CANONICAL_SIZES[name] = 8
+        for n in range(8, 16):
+            cls._CANONICAL_SIZES[f"r{n}"] = 8
+        # SIMD: zmm canonical → 64 bytes
+        for n in range(16):
+            cls._CANONICAL_SIZES[f"zmm{n}"] = 64
+
     def __init__(self) -> None:
+        ByteTaintMap._init_sizes()
         self._map: Dict[str, List[TaintTag]] = {}
 
     def _ensure(self, canonical: str) -> List[TaintTag]:
-        """Lazily create an 8-byte array for *canonical*."""
+        """Lazily create a correctly-sized array for *canonical*."""
         arr = self._map.get(canonical)
         if arr is None:
-            arr = [TaintTag.CLEAN] * 8
+            nbytes = self._CANONICAL_SIZES.get(canonical, 8)
+            arr = [TaintTag.CLEAN] * nbytes
             self._map[canonical] = arr
         return arr
 
@@ -231,20 +249,20 @@ class ByteTaintMap:
         """
         info = subreg_info(reg.lower())
         if info is None:
-            # Unknown register — treat as full 8-byte register by name.
+            # Unknown register — treat as full register by name.
             arr = self._ensure(reg.lower())
-            for i in range(8):
+            for i in range(len(arr)):
                 arr[i] = tag
             return
         canonical, bit_lo, width, zext = info
         arr = self._ensure(canonical)
         byte_lo = bit_lo // 8
         byte_hi = byte_lo + width // 8
-        for i in range(byte_lo, min(byte_hi, 8)):
+        for i in range(byte_lo, min(byte_hi, len(arr))):
             arr[i] = tag
         if zext:
             # 32-bit write zero-extends upper 32 bits → clear bytes 4–7
-            for i in range(4, 8):
+            for i in range(4, min(8, len(arr))):
                 arr[i] = TaintTag.CLEAN
 
     def get_bytes(self, reg: str) -> TaintTag:
@@ -265,7 +283,7 @@ class ByteTaintMap:
         byte_lo = bit_lo // 8
         byte_hi = byte_lo + width // 8
         combined = TaintTag.CLEAN
-        for i in range(byte_lo, min(byte_hi, 8)):
+        for i in range(byte_lo, min(byte_hi, len(arr))):
             combined |= arr[i]
         return combined
 
@@ -273,13 +291,13 @@ class ByteTaintMap:
         """Clear taint for the byte range of *reg*.
 
         32-bit writes clear the entire register (zero-extend semantics).
-        64-bit writes clear all 8 bytes.
+        Full-width writes clear all bytes.
         """
         info = subreg_info(reg.lower())
         if info is None:
             arr = self._map.get(reg.lower())
             if arr is not None:
-                for i in range(8):
+                for i in range(len(arr)):
                     arr[i] = TaintTag.CLEAN
             return
         canonical, bit_lo, width, zext = info
@@ -288,14 +306,14 @@ class ByteTaintMap:
             return
         byte_lo = bit_lo // 8
         byte_hi = byte_lo + width // 8
-        for i in range(byte_lo, min(byte_hi, 8)):
+        for i in range(byte_lo, min(byte_hi, len(arr))):
             arr[i] = TaintTag.CLEAN
         if zext or width == 64:
-            for i in range(8):
+            for i in range(len(arr)):
                 arr[i] = TaintTag.CLEAN
 
     def get_full(self, canonical: str) -> TaintTag:
-        """Return the OR of all 8 bytes for a canonical register."""
+        """Return the OR of all bytes for a canonical register."""
         arr = self._map.get(canonical)
         if arr is None:
             return TaintTag.CLEAN
