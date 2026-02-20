@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from dragonslayer.ml.model import BaseModel, PredictionResult, VMHandlerModel
 from dragonslayer.ml.pipeline import FeatureExtractor, FeatureVector
 from dragonslayer.ml.classifier import VMClassifier
+from dragonslayer.ml.taxonomy import CANONICAL_CATEGORIES, canonicalize as _canonicalize
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
     HandlerBoundary,
 )
@@ -50,19 +51,8 @@ except ImportError:
 # Feature specification
 # ---------------------------------------------------------------------------
 
-# Handler categories we classify into.
-HANDLER_CATEGORIES = [
-    "arithmetic",
-    "bitwise",
-    "memory",
-    "branch",
-    "call",
-    "compare",
-    "stack",
-    "system",
-    "nop",
-    "unknown",
-]
+# Handler categories we classify into  (canonical taxonomy).
+HANDLER_CATEGORIES = list(CANONICAL_CATEGORIES)
 
 def _safe_int(v: Any) -> int:
     """Parse an int that may be hex string or int."""
@@ -172,7 +162,7 @@ class TrainedHandlerModel(VMHandlerModel):
         conf = float(proba[best_idx])
         prob_dict = {str(c): float(p) for c, p in zip(classes, proba)}
         return PredictionResult(
-            label=label,
+            label=_canonicalize(label),
             confidence=conf,
             probabilities=prob_dict,
             metadata={"method": "sklearn", "feature_names": names},
@@ -189,19 +179,19 @@ class TrainedHandlerModel(VMHandlerModel):
         abs_delta = feat.get("abs_vip_delta", abs(vip_delta))
         density = feat.get("insn_density", 0)
 
-        # Simple heuristic decision tree.
+        # Simple heuristic decision tree (canonical labels).
         if insn_count <= 3:
             label, conf = "nop", 0.7
         elif abs_delta == 0:
-            label, conf = "branch", 0.5
+            label, conf = "control_flow", 0.5
         elif abs_delta <= 2 and insn_count <= 8:
             label, conf = "arithmetic", 0.6
         elif abs_delta <= 2 and insn_count > 8:
-            label, conf = "compare", 0.5
+            label, conf = "comparison", 0.5
         elif 3 <= abs_delta <= 5 and insn_count <= 12:
             label, conf = "memory", 0.55
         elif abs_delta > 5 and insn_count > 15:
-            label, conf = "call", 0.5
+            label, conf = "control_flow", 0.5
         elif density > 0.8:
             label, conf = "bitwise", 0.45
         elif insn_count > 20:

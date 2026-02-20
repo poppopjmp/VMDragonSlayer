@@ -65,35 +65,35 @@ _OP_TO_LABEL: Dict[str, str] = {
     "vm_neg": "arithmetic",
     "vm_inc": "arithmetic",
     "vm_dec": "arithmetic",
-    "vm_and": "logic",
-    "vm_or": "logic",
-    "vm_xor": "logic",
-    "vm_not": "logic",
-    "vm_shl": "logic",
-    "vm_shr": "logic",
-    "vm_sar": "logic",
-    "vm_rol": "logic",
-    "vm_ror": "logic",
-    "vm_nand": "logic",
-    "vm_nor": "logic",
+    "vm_and": "bitwise",
+    "vm_or": "bitwise",
+    "vm_xor": "bitwise",
+    "vm_not": "bitwise",
+    "vm_shl": "bitwise",
+    "vm_shr": "bitwise",
+    "vm_sar": "bitwise",
+    "vm_rol": "bitwise",
+    "vm_ror": "bitwise",
+    "vm_nand": "bitwise",
+    "vm_nor": "bitwise",
     "vm_push": "stack",
     "vm_pop": "stack",
-    "vm_load": "load_store",
-    "vm_store": "load_store",
-    "vm_mov": "load_store",
-    "vm_jmp": "branch",
-    "vm_jcc": "branch",
-    "vm_call": "branch",
-    "vm_ret": "branch",
-    # VM entry/exit (Batch 34)
-    "vm_enter": "vm_entry_exit",
-    "vm_exit": "vm_entry_exit",
-    # Context / dispatch (Batch 34)
-    "vm_ctx_save": "context",
-    "vm_ctx_restore": "context",
-    "vm_fetch_opcode": "context",
-    "vm_dispatch": "context",
-    # Crypto / anti-debug (Batch 34)
+    "vm_load": "memory",
+    "vm_store": "memory",
+    "vm_mov": "memory",
+    "vm_jmp": "control_flow",
+    "vm_jcc": "control_flow",
+    "vm_call": "control_flow",
+    "vm_ret": "control_flow",
+    # VM entry/exit (canonical: vm_control)
+    "vm_enter": "vm_control",
+    "vm_exit": "vm_control",
+    # Context / dispatch (canonical: vm_control)
+    "vm_ctx_save": "vm_control",
+    "vm_ctx_restore": "vm_control",
+    "vm_fetch_opcode": "vm_control",
+    "vm_dispatch": "vm_control",
+    # Crypto / anti-debug
     "vm_decrypt": "crypto",
     "vm_key_update": "crypto",
     "vm_cpuid": "crypto",
@@ -293,7 +293,7 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("mov", "[rbp+8], rax"),
         ],
     ],
-    "logic": [
+    "bitwise": [
         [
             ("mov", "rax, [rbp]"),
             ("mov", "rcx, [rbp+8]"),
@@ -344,7 +344,7 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("mov", "[rbp], rax"),
         ],
     ],
-    "load_store": [
+    "memory": [
         [
             ("mov", "rax, [rbp]"),
             ("mov", "rcx, [rax]"),
@@ -362,7 +362,7 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("mov", "[rcx], al"),
         ],
     ],
-    "branch": [
+    "control_flow": [
         [
             ("mov", "rax, [rbp]"),
             ("mov", "rsi, rax"),
@@ -387,8 +387,8 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("nop", ""),
         ],
     ],
-    # ── Batch 34 new categories ─────────────────────────────────────────
-    "vm_entry_exit": [
+    # ── VM control (canonical: vm_control) ───────────────────────────────────
+    "vm_control": [
         # VM entry: push all registers (x64 style)
         [
             ("push", "rax"),
@@ -447,8 +447,6 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("mov", "rbp, [rdi+0x28]"),
             ("ret", ""),
         ],
-    ],
-    "context": [
         # Fetch opcode: read byte from vIP, increment vIP
         [
             ("movzx", "eax, byte ptr [rsi]"),

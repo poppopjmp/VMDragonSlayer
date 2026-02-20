@@ -54,6 +54,34 @@ except (ImportError, AttributeError):
     SymbolicClassifierModel = None  # type: ignore[assignment,misc]
 
 try:
+    from .taxonomy import (
+        CANONICAL_CATEGORIES,
+        CANONICAL_SET,
+        canonicalize,
+        is_canonical,
+    )
+except (ImportError, AttributeError):
+    CANONICAL_CATEGORIES = None  # type: ignore[assignment,misc]
+    CANONICAL_SET = None  # type: ignore[assignment,misc]
+    canonicalize = None  # type: ignore[assignment,misc]
+    is_canonical = None  # type: ignore[assignment,misc]
+
+try:
+    from .evaluate import (
+        EvaluationReport,
+        GroundTruthEntry,
+        ClassMetrics,
+        evaluate_model,
+        load_ground_truth,
+    )
+except (ImportError, AttributeError):
+    EvaluationReport = None  # type: ignore[assignment,misc]
+    GroundTruthEntry = None  # type: ignore[assignment,misc]
+    ClassMetrics = None  # type: ignore[assignment,misc]
+    evaluate_model = None  # type: ignore[assignment,misc]
+    load_ground_truth = None  # type: ignore[assignment,misc]
+
+try:
     from .ensemble import EnsembleClassifier, WeightedEnsemble
 except (ImportError, AttributeError):
     EnsembleClassifier = None  # type: ignore[assignment,misc]
@@ -97,6 +125,15 @@ __all__ = [
     'VMHandlerModel',
     'PredictionResult',
     'SymbolicClassifierModel',
+    'CANONICAL_CATEGORIES',
+    'CANONICAL_SET',
+    'canonicalize',
+    'is_canonical',
+    'EvaluationReport',
+    'GroundTruthEntry',
+    'ClassMetrics',
+    'evaluate_model',
+    'load_ground_truth',
     'EnsembleClassifier',
     'WeightedEnsemble',
     'VMClassifier',

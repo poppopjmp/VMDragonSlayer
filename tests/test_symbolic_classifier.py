@@ -254,7 +254,7 @@ class TestSymbolicEdgeCases:
             input_symbols={},
         )
         result = model.predict({"symbolic_summary": summary})
-        assert result.label == "unknown"
+        assert result.label == "nop"  # no effects → nop
 
     def test_identity_register_ignored(self):
         """Registers whose output == input should not generate matches."""
@@ -264,8 +264,8 @@ class TestSymbolicEdgeCases:
             input_symbols={"rax": "init_rax", "rbx": "init_rbx"},
         )
         result = model.predict({"symbolic_summary": summary})
-        # No interesting expressions → unknown
-        assert result.label == "unknown"
+        # No interesting expressions, no mem writes → nop
+        assert result.label == "nop"
 
     def test_summary_as_object_with_to_dict(self):
         """Accept objects with to_dict() method."""

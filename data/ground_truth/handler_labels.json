@@ -1,0 +1,683 @@
+{
+  "_meta": {
+    "description": "Ground-truth labelled VMProtect handler samples for evaluation",
+    "version": "1.0",
+    "label_taxonomy": "canonical (dragonslayer.ml.taxonomy)",
+    "fields": {
+      "id": "unique handler identifier",
+      "label": "canonical handler category",
+      "handler_bytes_hex": "representative x86-64 bytes (hex-encoded)",
+      "symbolic_summary": "simplified symbolic execution output",
+      "description": "human-readable handler semantics"
+    }
+  },
+  "handlers": [
+    {
+      "id": "vmp_add_dw_001",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d7604030424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax + init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP add dword: pops two, pushes sum"
+    },
+    {
+      "id": "vmp_add_qw_002",
+      "label": "arithmetic",
+      "handler_bytes_hex": "488b06488d7608480304244889c0488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax + init_rcx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP add qword variant"
+    },
+    {
+      "id": "vmp_sub_dw_003",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d76042b0424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax - init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP sub dword"
+    },
+    {
+      "id": "vmp_mul_dw_004",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d7604f72424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax * init_rbx", "rdx": "0"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP mul dword"
+    },
+    {
+      "id": "vmp_div_dw_005",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d760433d2f73424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "UDiv(init_rax, init_rbx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP unsigned div dword"
+    },
+    {
+      "id": "vmp_neg_dw_006",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d7604f71c24488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "-init_rax"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP neg dword"
+    },
+    {
+      "id": "vmp_inc_007",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d7604ff0424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax + 1"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP inc (add 1 pattern)"
+    },
+    {
+      "id": "vmp_and_dw_008",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d7604230424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax & init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP and dword"
+    },
+    {
+      "id": "vmp_or_dw_009",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d76040b0424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax | init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP or dword"
+    },
+    {
+      "id": "vmp_xor_dw_010",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d7604330424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax ^ init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP xor dword"
+    },
+    {
+      "id": "vmp_not_dw_011",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d7604f71424488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "~init_rax"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP not dword"
+    },
+    {
+      "id": "vmp_shl_dw_012",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d76048a0c24d3e0488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax << init_rcx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP shl dword"
+    },
+    {
+      "id": "vmp_shr_dw_013",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d76048a0c24d3e8488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "LShR(init_rax, init_rcx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP shr dword (logical)"
+    },
+    {
+      "id": "vmp_xor_qw_014",
+      "label": "bitwise",
+      "handler_bytes_hex": "488b06488d76084833042489c0488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "Xor(init_rax, init_rbx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP xor qword (z3 Xor form)"
+    },
+    {
+      "id": "vmp_ror_015",
+      "label": "crypto",
+      "handler_bytes_hex": "8b06488d76048a0c24d3c8488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "RotateRight(init_rax, init_rcx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP ror — rotate right (crypto-related)"
+    },
+    {
+      "id": "vmp_rol_016",
+      "label": "crypto",
+      "handler_bytes_hex": "8b06488d76048a0c24d3c0488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "RotateLeft(init_rax, init_rcx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP rol — rotate left (crypto-related)"
+    },
+    {
+      "id": "vmp_decrypt_key_017",
+      "label": "crypto",
+      "handler_bytes_hex": "8b06488d7604330689064889c0",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax ^ init_rbx", "rbx": "RotateLeft(init_rbx, 13)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP key-mix decrypt: xor + rotate key update"
+    },
+    {
+      "id": "vmp_push_imm_018",
+      "label": "stack",
+      "handler_bytes_hex": "8b06488d7604488d6424fc890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp - 4"},
+        "memory_writes": [{"address": "init_rsp - 4", "value": "0x42"}],
+        "input_symbols": {"rsp": "init_rsp"}
+      },
+      "description": "VMP push immediate dword"
+    },
+    {
+      "id": "vmp_push_reg_019",
+      "label": "stack",
+      "handler_bytes_hex": "0fb606488d76018b04878b0424488d6424fc890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp - 4"},
+        "memory_writes": [{"address": "init_rsp - 4", "value": "init_rax"}],
+        "input_symbols": {"rsp": "init_rsp", "rax": "init_rax"}
+      },
+      "description": "VMP push register (context index → stack)"
+    },
+    {
+      "id": "vmp_pop_reg_020",
+      "label": "stack",
+      "handler_bytes_hex": "0fb606488d76018b04248904878b0424488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp + 4", "rax": "mem_init_rsp_0"},
+        "memory_writes": [],
+        "input_symbols": {"rsp": "init_rsp"}
+      },
+      "description": "VMP pop register"
+    },
+    {
+      "id": "vmp_push_qw_021",
+      "label": "stack",
+      "handler_bytes_hex": "488b06488d7608488d6424f848890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp - 8"},
+        "memory_writes": [{"address": "init_rsp - 8", "value": "init_rax"}],
+        "input_symbols": {"rsp": "init_rsp", "rax": "init_rax"}
+      },
+      "description": "VMP push qword"
+    },
+    {
+      "id": "vmp_pop_qw_022",
+      "label": "stack",
+      "handler_bytes_hex": "488b0424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp + 8", "rax": "mem_init_rsp_0"},
+        "memory_writes": [],
+        "input_symbols": {"rsp": "init_rsp"}
+      },
+      "description": "VMP pop qword"
+    },
+    {
+      "id": "vmp_load_dw_023",
+      "label": "memory",
+      "handler_bytes_hex": "8b04248b00890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "mem_init_rbx_0"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP load dword from address on stack"
+    },
+    {
+      "id": "vmp_store_dw_024",
+      "label": "memory",
+      "handler_bytes_hex": "8b0424488d6424048b0c24488d642404890148",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [{"address": "init_rbx", "value": "init_rax"}],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP store dword to address on stack"
+    },
+    {
+      "id": "vmp_load_qw_025",
+      "label": "memory",
+      "handler_bytes_hex": "488b0424488b0048890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "mem_init_rbx_0"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP load qword"
+    },
+    {
+      "id": "vmp_store_qw_026",
+      "label": "memory",
+      "handler_bytes_hex": "488b0424488d6424084889014889c0",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [{"address": "init_rbx", "value": "init_rax"}],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP store qword"
+    },
+    {
+      "id": "vmp_load_byte_027",
+      "label": "memory",
+      "handler_bytes_hex": "8b04240fb600890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "mem_init_rbx_0"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP load byte (zero-extend)"
+    },
+    {
+      "id": "vmp_store_byte_028",
+      "label": "memory",
+      "handler_bytes_hex": "8b0424488d6424048a0c24488d642404880148",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [{"address": "init_rbx", "value": "init_al"}],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP store byte"
+    },
+    {
+      "id": "vmp_jmp_029",
+      "label": "control_flow",
+      "handler_bytes_hex": "8b06488d76048b0424488d64240489c6",
+      "symbolic_summary": {
+        "simplified_registers": {"rip": "init_rax"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP unconditional jump (set VIP)"
+    },
+    {
+      "id": "vmp_jcc_030",
+      "label": "control_flow",
+      "handler_bytes_hex": "8b06488d76048b0424488d642404890424750289c6",
+      "symbolic_summary": {
+        "simplified_registers": {"rip": "init_rax"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rflags": "init_rflags"}
+      },
+      "description": "VMP conditional jump (checks eflags)"
+    },
+    {
+      "id": "vmp_call_031",
+      "label": "control_flow",
+      "handler_bytes_hex": "8b0424488d642404488d6424f889342489c6",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp - 4", "rip": "init_rax"},
+        "memory_writes": [{"address": "init_rsp - 4", "value": "init_rip + 5"}],
+        "input_symbols": {"rsp": "init_rsp", "rax": "init_rax", "rip": "init_rip"}
+      },
+      "description": "VMP call (push return addr, set VIP)"
+    },
+    {
+      "id": "vmp_ret_032",
+      "label": "control_flow",
+      "handler_bytes_hex": "8b0424488d642404c3",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp + 4", "rip": "mem_init_rsp_0"},
+        "memory_writes": [],
+        "input_symbols": {"rsp": "init_rsp"}
+      },
+      "description": "VMP ret (pop return addr)"
+    },
+    {
+      "id": "vmp_jmp_delta_033",
+      "label": "control_flow",
+      "handler_bytes_hex": "0fb706488d760201c6",
+      "symbolic_summary": {
+        "simplified_registers": {"rip": "init_rip + init_rax"},
+        "memory_writes": [],
+        "input_symbols": {"rip": "init_rip", "rax": "init_rax"}
+      },
+      "description": "VMP relative jump (VIP += delta)"
+    },
+    {
+      "id": "vmp_vm_enter_034",
+      "label": "vm_control",
+      "handler_bytes_hex": "55488bec488d6424c04889e74889f6",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp - 64"},
+        "memory_writes": [
+          {"address": "init_rsp - 8", "value": "init_rbp"},
+          {"address": "init_rsp - 16", "value": "init_rbx"},
+          {"address": "init_rsp - 24", "value": "init_rdi"},
+          {"address": "init_rsp - 32", "value": "init_rsi"},
+          {"address": "init_rsp - 40", "value": "init_r12"},
+          {"address": "init_rsp - 48", "value": "init_r13"},
+          {"address": "init_rsp - 56", "value": "init_r14"},
+          {"address": "init_rsp - 64", "value": "init_r15"}
+        ],
+        "input_symbols": {"rsp": "init_rsp", "rbp": "init_rbp", "rbx": "init_rbx", "rdi": "init_rdi", "rsi": "init_rsi"}
+      },
+      "description": "VMP vm_enter: save host context to VM context area"
+    },
+    {
+      "id": "vmp_vm_exit_035",
+      "label": "vm_control",
+      "handler_bytes_hex": "488b7c2408488b742410488b6c2418488be5c3",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp + 64"},
+        "memory_writes": [],
+        "input_symbols": {"rsp": "init_rsp"}
+      },
+      "description": "VMP vm_exit: restore host context and return"
+    },
+    {
+      "id": "vmp_fetch_opcode_036",
+      "label": "vm_control",
+      "handler_bytes_hex": "0fb606488d760148980fb604078b0487",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "mem_init_rdi_0"},
+        "memory_writes": [],
+        "input_symbols": {"rdi": "init_rdi", "rsi": "init_rsi"}
+      },
+      "description": "VMP fetch_opcode: read handler table entry"
+    },
+    {
+      "id": "vmp_ctx_save_037",
+      "label": "vm_control",
+      "handler_bytes_hex": "0fb606488d76018b042489048748",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [{"address": "init_rdi + 16", "value": "init_rax"}],
+        "input_symbols": {"rdi": "init_rdi", "rax": "init_rax"}
+      },
+      "description": "VMP context_save: store to VM context slot"
+    },
+    {
+      "id": "vmp_ctx_restore_038",
+      "label": "vm_control",
+      "handler_bytes_hex": "0fb606488d76018b04874889c0",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "mem_init_rdi_0"},
+        "memory_writes": [],
+        "input_symbols": {"rdi": "init_rdi"}
+      },
+      "description": "VMP context_restore: load from VM context slot"
+    },
+    {
+      "id": "vmp_nop_039",
+      "label": "nop",
+      "handler_bytes_hex": "90",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [],
+        "input_symbols": {}
+      },
+      "description": "VMP nop (single-byte junk)"
+    },
+    {
+      "id": "vmp_nop_junk_040",
+      "label": "nop",
+      "handler_bytes_hex": "8bc08bc08bc0",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP junk sequence (mov eax,eax chain)"
+    },
+    {
+      "id": "vmp_cmp_dw_041",
+      "label": "comparison",
+      "handler_bytes_hex": "8b06488d76043b0424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rflags": "init_rax - init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP cmp dword: sets flags from subtraction"
+    },
+    {
+      "id": "vmp_test_dw_042",
+      "label": "comparison",
+      "handler_bytes_hex": "8b06488d7604850424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rflags": "init_rax & init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP test dword: AND then set flags"
+    },
+    {
+      "id": "vmp_sdiv_043",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d760499f73424488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "SDiv(init_rax, init_rbx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP signed div"
+    },
+    {
+      "id": "vmp_and_qw_044",
+      "label": "bitwise",
+      "handler_bytes_hex": "488b06488d7608482304244889c0488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax & init_rcx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP and qword"
+    },
+    {
+      "id": "vmp_or_qw_045",
+      "label": "bitwise",
+      "handler_bytes_hex": "488b06488d7608480b04244889c0488d642408",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax | init_rcx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP or qword"
+    },
+    {
+      "id": "vmp_shr_arith_046",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d76048a0c24d3f8488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax >> init_rcx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rcx": "init_rcx"}
+      },
+      "description": "VMP arithmetic shift right"
+    },
+    {
+      "id": "vmp_decrypt_bytecode_047",
+      "label": "crypto",
+      "handler_bytes_hex": "8b063106488d7604d1c0",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "RotateLeft(init_rax ^ init_rbx, 1)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP bytecode decrypt: xor + rol 1"
+    },
+    {
+      "id": "vmp_key_schedule_048",
+      "label": "crypto",
+      "handler_bytes_hex": "8b0631064889c2c1c20d3106",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "RotateRight(init_rax ^ init_rbx, 13) ^ init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP key schedule update: xor + ror 13 + xor"
+    },
+    {
+      "id": "vmp_push_flags_049",
+      "label": "stack",
+      "handler_bytes_hex": "9c8f0424488d6424fc",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp - 4"},
+        "memory_writes": [{"address": "init_rsp - 4", "value": "init_rflags"}],
+        "input_symbols": {"rsp": "init_rsp", "rflags": "init_rflags"}
+      },
+      "description": "VMP pushfd: push flags"
+    },
+    {
+      "id": "vmp_pop_flags_050",
+      "label": "stack",
+      "handler_bytes_hex": "ff34249d488d642404",
+      "symbolic_summary": {
+        "simplified_registers": {"rsp": "init_rsp + 4", "rflags": "mem_init_rsp_0"},
+        "memory_writes": [],
+        "input_symbols": {"rsp": "init_rsp"}
+      },
+      "description": "VMP popfd: pop flags"
+    },
+    {
+      "id": "vmp_movsx_051",
+      "label": "conversion",
+      "handler_bytes_hex": "0fb606488d76010fbec0890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "SignExt(init_al, 32)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP movsx byte→dword"
+    },
+    {
+      "id": "vmp_movzx_052",
+      "label": "conversion",
+      "handler_bytes_hex": "0fb606488d76010fb6c0890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "ZeroExt(init_al, 32)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax"}
+      },
+      "description": "VMP movzx byte→dword"
+    },
+    {
+      "id": "vmp_unknown_053",
+      "label": "unknown",
+      "handler_bytes_hex": "cc",
+      "symbolic_summary": {
+        "error": "unsupported_instruction"
+      },
+      "description": "Unknown / unsupported handler (int3)"
+    },
+    {
+      "id": "vmp_add_flags_054",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d7604010424488d6424089c8f0424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax + init_rbx", "rflags": "init_rax + init_rbx"},
+        "memory_writes": [{"address": "init_rsp", "value": "flags(init_rax + init_rbx)"}],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx", "rsp": "init_rsp"}
+      },
+      "description": "VMP add + pushf (saves result flags)"
+    },
+    {
+      "id": "vmp_sub_flags_055",
+      "label": "arithmetic",
+      "handler_bytes_hex": "8b06488d76042b0424488d6424089c8f0424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "init_rax - init_rbx", "rflags": "init_rax - init_rbx"},
+        "memory_writes": [{"address": "init_rsp", "value": "flags(init_rax - init_rbx)"}],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx", "rsp": "init_rsp"}
+      },
+      "description": "VMP sub + pushf variant"
+    },
+    {
+      "id": "vmp_nand_056",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d7604f7d02304248b00",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "~init_rax & init_rbx"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP nand (not + and — MBA basis)"
+    },
+    {
+      "id": "vmp_nor_057",
+      "label": "bitwise",
+      "handler_bytes_hex": "8b06488d7604f7d0f71424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "~(init_rax | init_rbx)"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP nor (not-or — MBA obfuscation)"
+    },
+    {
+      "id": "vmp_load_word_058",
+      "label": "memory",
+      "handler_bytes_hex": "8b04240fb700890424",
+      "symbolic_summary": {
+        "simplified_registers": {"rax": "mem_init_rbx_0"},
+        "memory_writes": [],
+        "input_symbols": {"rbx": "init_rbx"}
+      },
+      "description": "VMP load word (16-bit)"
+    },
+    {
+      "id": "vmp_jcc_above_059",
+      "label": "control_flow",
+      "handler_bytes_hex": "8b06488d7604ff342490ff0424770289c6",
+      "symbolic_summary": {
+        "simplified_registers": {"rip": "init_rax"},
+        "memory_writes": [],
+        "input_symbols": {"rax": "init_rax", "rflags": "init_rflags"}
+      },
+      "description": "VMP jcc above (ja/jnbe)"
+    },
+    {
+      "id": "vmp_store_word_060",
+      "label": "memory",
+      "handler_bytes_hex": "8b0424488d6424048b0c24488d642404668901",
+      "symbolic_summary": {
+        "simplified_registers": {},
+        "memory_writes": [{"address": "init_rbx", "value": "init_ax"}],
+        "input_symbols": {"rax": "init_rax", "rbx": "init_rbx"}
+      },
+      "description": "VMP store word (16-bit)"
+    }
+  ]
+}

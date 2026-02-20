@@ -248,16 +248,16 @@ class TestExtendedFeatures:
 class TestSyntheticDataGeneration:
     def test_generates_correct_count(self):
         handlers = generate_synthetic_handlers(n_per_category=10, seed=1)
-        # 9 categories with templates: arith, logic, stack, load_store, branch,
-        # nop, vm_entry_exit, context, crypto
-        assert len(handlers) == 9 * 10
+        # 8 categories with templates: arith, bitwise, stack, memory,
+        # control_flow, nop, vm_control, crypto
+        assert len(handlers) == 8 * 10
 
     def test_all_categories_present(self):
         handlers = generate_synthetic_handlers(n_per_category=5, seed=2)
         cats = {h["category"] for h in handlers}
         expected = {
-            "arithmetic", "logic", "stack", "load_store",
-            "branch", "nop", "vm_entry_exit", "context", "crypto",
+            "arithmetic", "bitwise", "stack", "memory",
+            "control_flow", "nop", "vm_control", "crypto",
         }
         assert cats == expected
 
@@ -307,7 +307,7 @@ class TestTrainingDataPrep:
         h = {"operation": "vm_add"}
         assert label_from_heuristics(h) == "arithmetic"
         h2 = {"operation": "vm_xor"}
-        assert label_from_heuristics(h2) == "logic"
+        assert label_from_heuristics(h2) == "bitwise"
 
 
 # ===================================================================

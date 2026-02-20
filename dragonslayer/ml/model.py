@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 import logging
 import re
 
+from .taxonomy import canonicalize as _canonicalize
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,12 +67,12 @@ class BaseModel:
 
 HANDLER_CATEGORIES: List[str] = [
     "arithmetic",    # ADD, SUB, MUL, DIV, NEG, INC, DEC
-    "logic",         # AND, OR, XOR, NOT, SHL, SHR, ROL, ROR
+    "bitwise",       # AND, OR, XOR, NOT, SHL, SHR, ROL, ROR
     "stack",         # PUSH, POP
-    "load_store",    # MOV [mem] / MOV reg,[mem]
-    "branch",        # JMP, JCC, CALL, RET
-    "vm_entry_exit", # VM_ENTER, VM_EXIT (context save/restore)
-    "context",       # CONTEXT_SAVE, CONTEXT_RESTORE, FETCH_OPCODE
+    "memory",        # MOV [mem] / MOV reg,[mem]
+    "control_flow",  # JMP, JCC, CALL, RET
+    "vm_control",    # VM_ENTER, VM_EXIT (context save/restore)
+    "comparison",    # CMP, TEST
     "crypto",        # DECRYPT_OPCODE, KEY_UPDATE, flag-mixing MUL
     "nop",           # NOP / junk
     "unknown",
@@ -90,7 +92,7 @@ _HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
         ("stack_ratio", -0.5, 0.40, "above"),
         ("branch_ratio", -1.0, 0.20, "above"),
     ],
-    "logic": [
+    "bitwise": [
         ("logic_ratio", 3.0, 0.25, "above"),
         ("arith_ratio", -0.5, 0.30, "above"),
         ("branch_ratio", -1.0, 0.20, "above"),
@@ -99,13 +101,13 @@ _HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
         ("stack_ratio", 3.0, 0.30, "above"),
         ("instruction_count", 1.0, 5.0, "below"),
     ],
-    "load_store": [
+    "memory": [
         ("mem_ratio", 3.0, 0.30, "above"),
         ("has_memory_read", 1.5, 0.5, "above"),
         ("has_memory_write", 1.5, 0.5, "above"),
         ("branch_ratio", -1.0, 0.10, "above"),
     ],
-    "branch": [
+    "control_flow": [
         ("branch_ratio", 3.0, 0.15, "above"),
         ("has_indirect_branch", 1.5, 0.5, "above"),
     ],
@@ -113,15 +115,15 @@ _HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
         ("nop_ratio", 4.0, 0.50, "above"),
         ("instruction_count", 1.0, 3.0, "below"),
     ],
-    "vm_entry_exit": [
+    "vm_control": [
         ("stack_ratio", 2.0, 0.30, "above"),
         ("instruction_count", 1.0, 8.0, "above"),
         ("mem_ratio", 1.0, 0.20, "above"),
     ],
-    "context": [
-        ("mem_ratio", 2.5, 0.25, "above"),
-        ("instruction_count", 1.0, 4.0, "above"),
-        ("stack_ratio", -0.5, 0.30, "above"),
+    "comparison": [
+        ("arith_ratio", 1.5, 0.10, "above"),
+        ("logic_ratio", 1.5, 0.10, "above"),
+        ("branch_ratio", 1.0, 0.10, "above"),
     ],
     "crypto": [
         ("logic_ratio", 2.5, 0.15, "above"),
@@ -198,6 +200,10 @@ class SymbolicClassifierModel(BaseModel):
         (r"mem_", "memory", 0.82),
         # Stack (rsp/esp write)
         (r"init_rsp|init_esp", "stack", 0.85),
+        # Control flow (rip modified / indirect target)
+        (r"init_rip|init_rflags", "control_flow", 0.87),
+        # Type conversion
+        (r"SignExt\(|ZeroExt\(|Extract\(", "conversion", 0.88),
     ]
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
@@ -217,23 +223,67 @@ class SymbolicClassifierModel(BaseModel):
         mem_writes = s.get("memory_writes") or []
         input_syms = s.get("input_symbols") or {}
 
-        # Collect interesting expression strings
+        # --- Determine which registers actually changed value ----------
+        modified_regs: set = set()
         interesting: List[str] = []
         for rname, expr_str in regs.items():
             init_sym = input_syms.get(rname, "")
             if expr_str != init_sym and expr_str not in ("0", str(0)):
+                modified_regs.add(rname.lower())
                 interesting.append(str(expr_str))
 
         combined = " ".join(interesting)
 
-        # Check for memory writes
+        # --- Check for memory writes -----------------------------------
         _rsp_re = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
         has_stack_write = any(
             _rsp_re.search(str(w.get("address", ""))) for w in mem_writes
         )
         has_mem_write = len(mem_writes) > 0
 
-        # Stack/memory special cases
+        # --- Structural / register-name based checks -------------------
+
+        # 1. Nop: nothing changed at all
+        if not modified_regs and not has_mem_write:
+            return PredictionResult(label="nop", confidence=0.90,
+                                    metadata={"method": "symbolic", "reason": "no_effects"})
+
+        # 2. Comparison: only flags register modified, no mem writes
+        if modified_regs in ({"rflags"}, {"eflags"}) and not has_mem_write:
+            return PredictionResult(label="comparison", confidence=0.91,
+                                    metadata={"method": "symbolic", "reason": "flags_only"})
+
+        # 3. Control flow: rip/eip modified (jump / call / ret)
+        if "rip" in modified_regs or "eip" in modified_regs:
+            return PredictionResult(label="control_flow", confidence=0.90,
+                                    metadata={"method": "symbolic", "reason": "rip_modified"})
+
+        # 4. VM control: VM context pointer (rdi/rsi) in inputs
+        input_vals = {str(v) for v in input_syms.values()}
+        has_vm_ctx = any("init_rdi" in v for v in input_vals)
+        if has_vm_ctx:
+            return PredictionResult(label="vm_control", confidence=0.87,
+                                    metadata={"method": "symbolic", "reason": "vm_context_ptr"})
+
+        # 5. VM control: many stack writes (>2) saving init_ values
+        if len(mem_writes) > 2:
+            init_saves = sum(1 for w in mem_writes
+                             if str(w.get("value", "")).startswith("init_"))
+            if init_saves > 2:
+                return PredictionResult(label="vm_control", confidence=0.88,
+                                        metadata={"method": "symbolic",
+                                                   "reason": "context_save"})
+
+        # 6. VM control: large stack frame adjustment (vm_enter / vm_exit)
+        if modified_regs <= {"rsp", "esp"} and not has_mem_write:
+            rsp_expr = str(regs.get("rsp", regs.get("esp", "")))
+            m = re.search(r"[+-]\s*(\d+)", rsp_expr)
+            if m and int(m.group(1)) >= 32:
+                return PredictionResult(label="vm_control", confidence=0.85,
+                                        metadata={"method": "symbolic",
+                                                   "reason": "large_frame_adjust"})
+
+        # --- Stack / memory special cases ------------------------------
         if has_stack_write and not interesting:
             return PredictionResult(label="stack", confidence=0.86,
                                     metadata={"method": "symbolic", "reason": "stack_write"})
@@ -241,7 +291,7 @@ class SymbolicClassifierModel(BaseModel):
             return PredictionResult(label="memory", confidence=0.88,
                                     metadata={"method": "symbolic", "reason": "mem_write"})
 
-        # Pattern match expressions
+        # --- Pattern match expressions ---------------------------------
         label_scores: Dict[str, float] = {}
         for pattern, label, conf in self._EXPR_RULES:
             if re.search(pattern, combined):
@@ -340,7 +390,7 @@ class VMHandlerModel(BaseModel):
 
         best = max(probs, key=probs.get)  # type: ignore[arg-type]
         return PredictionResult(
-            label=best,
+            label=_canonicalize(best),
             confidence=round(probs[best], 4),
             probabilities=probs,
             metadata={"method": "heuristic"},
@@ -357,7 +407,7 @@ class VMHandlerModel(BaseModel):
             probs = {str(c): float(v) for c, v in zip(classes, p)}
         confidence = probs.get(str(label), 0.9)
         return PredictionResult(
-            label=str(label),
+            label=_canonicalize(str(label)),
             confidence=round(confidence, 4),
             probabilities=probs,
             metadata={"method": "sklearn"},

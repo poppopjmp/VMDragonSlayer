@@ -1,8 +1,8 @@
-"""Tests for ML handler categories + model serialization (Batch 34).
+"""Tests for ML handler categories + model serialization (Batch 34 + B42 taxonomy).
 
-Validates new handler categories (vm_entry_exit, context, crypto),
+Validates canonical handler categories (vm_control, bitwise, crypto),
 updated op-to-label mappings, synthetic data generation for all
-9 categories, and model save/load round-trip.
+categories, and model save/load round-trip.
 """
 
 import pytest
@@ -37,11 +37,11 @@ sklearn_required = pytest.mark.skipif(not _HAS_SKLEARN, reason="scikit-learn not
 class TestCategories:
     """New handler categories are registered properly."""
 
-    def test_vm_entry_exit_in_categories(self):
-        assert "vm_entry_exit" in HANDLER_CATEGORIES
+    def test_vm_control_in_categories(self):
+        assert "vm_control" in HANDLER_CATEGORIES
 
-    def test_context_in_categories(self):
-        assert "context" in HANDLER_CATEGORIES
+    def test_comparison_in_categories(self):
+        assert "comparison" in HANDLER_CATEGORIES
 
     def test_crypto_in_categories(self):
         assert "crypto" in HANDLER_CATEGORIES
@@ -62,31 +62,31 @@ class TestOpToLabel:
     """New operation → label mappings cover VMProtect operations."""
 
     @pytest.mark.parametrize("op,label", [
-        ("vm_enter", "vm_entry_exit"),
-        ("vm_exit", "vm_entry_exit"),
-        ("vm_ctx_save", "context"),
-        ("vm_ctx_restore", "context"),
-        ("vm_fetch_opcode", "context"),
-        ("vm_dispatch", "context"),
+        ("vm_enter", "vm_control"),
+        ("vm_exit", "vm_control"),
+        ("vm_ctx_save", "vm_control"),
+        ("vm_ctx_restore", "vm_control"),
+        ("vm_fetch_opcode", "vm_control"),
+        ("vm_dispatch", "vm_control"),
         ("vm_decrypt", "crypto"),
         ("vm_key_update", "crypto"),
         ("vm_cpuid", "crypto"),
         ("vm_rdtsc", "crypto"),
-        ("vm_nand", "logic"),
-        ("vm_nor", "logic"),
+        ("vm_nand", "bitwise"),
+        ("vm_nor", "bitwise"),
     ])
     def test_mapping(self, op, label):
         assert _OP_TO_LABEL[op] == label
 
     def test_label_from_heuristics_vm_enter(self):
-        assert label_from_heuristics({"operation": "vm_enter"}) == "vm_entry_exit"
+        assert label_from_heuristics({"operation": "vm_enter"}) == "vm_control"
 
     def test_label_from_heuristics_vm_decrypt(self):
         assert label_from_heuristics({"operation": "vm_decrypt"}) == "crypto"
 
     def test_label_from_heuristics_partial_match(self):
         # "vm_ctx_save" partial match
-        assert label_from_heuristics({"operation": "vm_ctx_save"}) == "context"
+        assert label_from_heuristics({"operation": "vm_ctx_save"}) == "vm_control"
 
 
 # ---------------------------------------------------------------------------
@@ -110,15 +110,15 @@ class TestSyntheticGeneration:
         for cat in _HANDLER_TEMPLATES:
             assert counts.get(cat, 0) == n, f"{cat} should have {n} samples"
 
-    def test_vm_entry_exit_has_push_pop(self):
+    def test_vm_control_has_push_pop(self):
         handlers = generate_synthetic_handlers(n_per_category=10, seed=42)
-        entry_exit = [h for h in handlers if h["category"] == "vm_entry_exit"]
-        assert len(entry_exit) == 10
+        vm_ctrl = [h for h in handlers if h["category"] == "vm_control"]
+        assert len(vm_ctrl) == 10
         # At least some should contain push or pop mnemonics
         all_mnems = set()
-        for h in entry_exit:
+        for h in vm_ctrl:
             all_mnems.update(h["mnemonics"])
-        assert "push" in all_mnems or "pop" in all_mnems
+        assert "push" in all_mnems or "pop" in all_mnems or "movzx" in all_mnems
 
     def test_crypto_has_xor_or_rol(self):
         handlers = generate_synthetic_handlers(n_per_category=10, seed=42)
@@ -128,13 +128,13 @@ class TestSyntheticGeneration:
             all_mnems.update(h["mnemonics"])
         assert "xor" in all_mnems or "rol" in all_mnems or "imul" in all_mnems
 
-    def test_context_has_movzx_or_lea(self):
+    def test_vm_control_context_has_movzx_or_lea(self):
         handlers = generate_synthetic_handlers(n_per_category=10, seed=42)
-        context = [h for h in handlers if h["category"] == "context"]
+        vm_ctrl = [h for h in handlers if h["category"] == "vm_control"]
         all_mnems = set()
-        for h in context:
+        for h in vm_ctrl:
             all_mnems.update(h["mnemonics"])
-        assert "movzx" in all_mnems or "lea" in all_mnems or "sub" in all_mnems
+        assert "movzx" in all_mnems or "lea" in all_mnems or "sub" in all_mnems or "push" in all_mnems
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +175,8 @@ class TestTrainingPipeline:
     def test_prepare_extended_training_data_new_cats(self):
         handlers = generate_synthetic_handlers(n_per_category=10, seed=42)
         features, labels = prepare_extended_training_data(handlers, label_key="category")
-        assert "vm_entry_exit" in labels
+        assert "vm_control" in labels
         assert "crypto" in labels
-        assert "context" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +250,8 @@ class TestHeuristicRules:
                  "has_indirect_branch"]
         vals = [0.7, 16.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         scores = _score_rules(vals, names)
-        assert "vm_entry_exit" in scores
-        assert scores["vm_entry_exit"] > 0
+        assert "vm_control" in scores
+        assert scores["vm_control"] > 0
 
     def test_crypto_heuristic(self):
         from dragonslayer.ml.model import _score_rules

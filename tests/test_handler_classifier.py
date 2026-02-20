@@ -65,8 +65,8 @@ class TestTrainedHandlerModelHeuristic:
                 "handler_span", "insn_density", "log_handler_addr",
             ],
         })
-        # vip_delta=0 → branch
-        assert result.label == "branch"
+        # vip_delta=0 → control_flow
+        assert result.label == "control_flow"
 
     def test_probabilities_sum_to_one(self):
         model = TrainedHandlerModel()
@@ -100,14 +100,14 @@ class TestClassifyHandlers:
     def test_basic_classification(self):
         boundaries = [
             _boundary(insn_count=2, vip_delta=1),   # nop
-            _boundary(insn_count=10, vip_delta=0),   # branch
+            _boundary(insn_count=10, vip_delta=0),   # control_flow
             _boundary(insn_count=6, vip_delta=2),     # arithmetic
         ]
         results = classify_handlers(boundaries)
         assert len(results) == 3
         assert all(isinstance(r, PredictionResult) for r in results)
         assert results[0].label == "nop"
-        assert results[1].label == "branch"
+        assert results[1].label == "control_flow"
 
     def test_empty_list(self):
         results = classify_handlers([])

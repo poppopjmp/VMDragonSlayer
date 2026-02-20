@@ -331,8 +331,8 @@ class TestMLClassifierIntegration:
     def test_label_from_heuristics(self):
         assert label_from_heuristics({"operation": "vm_add"}) == "arithmetic"
         assert label_from_heuristics({"operation": "vm_push"}) == "stack"
-        assert label_from_heuristics({"operation": "vm_jmp"}) == "branch"
-        assert label_from_heuristics({"operation": "vm_load"}) == "load_store"
+        assert label_from_heuristics({"operation": "vm_jmp"}) == "control_flow"
+        assert label_from_heuristics({"operation": "vm_load"}) == "memory"
         assert label_from_heuristics({}) == "unknown"
         assert label_from_heuristics({"operation": ""}) == "unknown"
 
@@ -344,7 +344,7 @@ class TestMLClassifierIntegration:
         ]
         features, labels = prepare_training_data(handlers)
         assert len(features) == 3
-        assert labels == ["arithmetic", "stack", "branch"]
+        assert labels == ["arithmetic", "stack", "control_flow"]
 
     def test_trainer_heuristic_validation(self):
         """ModelTrainer validates heuristic accuracy without sklearn."""
