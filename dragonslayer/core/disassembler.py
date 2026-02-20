@@ -199,6 +199,24 @@ class Disassembler:
     def is_capstone_available(self) -> bool:
         return self._cs is not None
 
+    def disassemble_to_text(
+        self,
+        code: bytes,
+        address: int = 0,
+    ) -> Tuple[str, int]:
+        """Disassemble one instruction and return ``(text, size)``.
+
+        Convenience wrapper for trace engines that only need the
+        mnemonic+operands string.  Returns ``("db 0x??", 1)`` on
+        failure or when capstone is not available.
+        """
+        insn = self.disassemble_one(code, address)
+        if insn is None or insn.mnemonic == "db":
+            fallback = f"db 0x{code[0]:02x}" if code else "db 0x00"
+            return fallback, max(len(code), 1)
+        text = f"{insn.mnemonic} {insn.operands}".strip()
+        return text, insn.size
+
     def get_info(self) -> Dict[str, Any]:
         """Return diagnostic info about this disassembler instance."""
         return {
@@ -342,3 +360,49 @@ def disassemble_section(
     """Convenience: disassemble an entire code section."""
     dis = create_disassembler(architecture)
     return dis.disassemble(section_data, base_address)
+
+
+# ---------------------------------------------------------------------------
+# Adapter: DisassembledInstruction → LiftedInstruction
+# ---------------------------------------------------------------------------
+
+def to_lifted_instruction(insn: DisassembledInstruction) -> Any:
+    """Convert a :class:`DisassembledInstruction` to a ``LiftedInstruction``.
+
+    The import is deferred to avoid circular imports when the disassembler
+    module is loaded before the lifter.
+
+    An additional mov-family refinement is applied: if the category is
+    ``"memory"`` and the destination operand contains ``[`` or ``ptr``,
+    the category is set to ``"memory_write"``; otherwise ``"memory_read"``.
+    """
+    from dragonslayer.analysis.symbolic_execution.lifter import LiftedInstruction
+
+    category = insn.category
+    # Refine mov-family: memory → memory_read / memory_write
+    if category == "memory" and insn.operands:
+        dest = insn.operands.split(",")[0].strip()
+        if dest.startswith("[") or "ptr" in dest.lower():
+            category = "memory_write"
+        else:
+            category = "memory_read"
+
+    return LiftedInstruction(
+        address=insn.address,
+        size=insn.size,
+        mnemonic=insn.mnemonic,
+        operands=insn.operands,
+        category=category,
+        raw_bytes=insn.raw_bytes,
+        reads=list(insn.reads),
+        writes=list(insn.writes),
+        is_branch=insn.is_branch,
+        branch_target=insn.branch_target,
+    )
+
+
+def to_lifted_instructions(
+    insns: Sequence[DisassembledInstruction],
+) -> list:
+    """Batch-convert a sequence of :class:`DisassembledInstruction` objects."""
+    return [to_lifted_instruction(i) for i in insns]

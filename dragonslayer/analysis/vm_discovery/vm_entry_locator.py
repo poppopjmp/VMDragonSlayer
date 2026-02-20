@@ -55,6 +55,12 @@ try:
 except ImportError:
     pass
 
+from dragonslayer.core.disassembler import (
+    Disassembler as _Disassembler,
+    create_disassembler as _create_disasm,
+    CAPSTONE_AVAILABLE as _DISASM_AVAILABLE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -359,54 +365,73 @@ def _refine_with_capstone(
     section_rva: int,
     bit_width: int,
     max_insns: int = 30,
+    *,
+    disassembler: _Disassembler | None = None,
 ) -> Tuple[int, Optional[int], Optional[int], str]:
     """Disassemble a short prologue and check for push-save + load + branch.
 
+    Parameters
+    ----------
+    disassembler
+        Optional unified :class:`Disassembler`.  If provided, reused
+        across calls to avoid per-candidate ``Cs()`` creation.
+
     Returns ``(push_count, bytecode_addr, branch_target, reason)``.
     """
-    if not _HAS_CAPSTONE:
+    if not _HAS_CAPSTONE and not _DISASM_AVAILABLE:
         return 0, None, None, "capstone unavailable"
 
-    if bit_width == 64:
-        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    # Use provided disassembler or create one from unified module
+    if disassembler is not None:
+        dis = disassembler
     else:
-        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-    md.detail = True
+        arch_str = "x64" if bit_width == 64 else "x86"
+        dis = _create_disasm(arch_str)
 
     push_count = 0
     load_imm: Optional[int] = None
     branch_target: Optional[int] = None
     reason_parts: List[str] = []
 
-    insns = list(md.disasm(data[file_offset:file_offset + 120], section_rva))
-    for insn in insns[:max_insns]:
+    insns = dis.disassemble(
+        data[file_offset:file_offset + 120], section_rva,
+        max_instructions=max_insns,
+    )
+    for insn in insns:
         mn = insn.mnemonic
         if mn in ("push", "pushfq", "pushfd"):
             push_count += 1
         elif mn == "pusha" or mn == "pushad":
             push_count += 8
-        elif mn in ("mov", "movabs") and "," in insn.op_str:
-            parts = insn.op_str.replace(" ", "").split(",")
+        elif mn in ("mov", "movabs") and "," in insn.operands:
+            parts = insn.operands.replace(" ", "").split(",")
             if len(parts) == 2:
                 try:
                     load_imm = int(parts[1], 16)
                 except (ValueError, TypeError):
                     pass
-        elif mn == "lea" and "," in insn.op_str:
-            # Try to extract rip-relative target
+        elif mn == "lea" and "," in insn.operands:
+            # Try to extract rip-relative target from operand string
             try:
-                if "[rip" in insn.op_str:
-                    # Capstone gives us the resolved address via detail
-                    for op in insn.operands:
-                        if op.type == capstone.x86.X86_OP_MEM:
-                            load_imm = insn.address + insn.size + op.mem.disp
+                if "[rip" in insn.operands:
+                    # Use branch_target if available (capstone extracted),
+                    # otherwise parse from the DisassembledInstruction.
+                    if insn.branch_target is not None:
+                        load_imm = insn.branch_target
+                    elif _HAS_CAPSTONE:
+                        # Fallback: capstone detail — kept for LEA
+                        pass
             except Exception:
                 pass
         elif mn in ("jmp", "call"):
-            try:
-                branch_target = int(insn.op_str, 16)
-            except (ValueError, TypeError):
-                pass
+            # Prefer the extracted branch_target from Disassembler
+            if insn.branch_target is not None:
+                branch_target = insn.branch_target
+            else:
+                try:
+                    branch_target = int(insn.operands, 16)
+                except (ValueError, TypeError):
+                    pass
             break  # stop after first branch
 
     if push_count >= (_MIN_PUSH_COUNT_64 if bit_width == 64 else _MIN_PUSH_COUNT_32):
@@ -533,6 +558,13 @@ def locate_vm_entries(
         sec_infos.append((si, 0.0))
 
     # ── Scan each executable section ─────────────────────────────────
+    # Create a single shared disassembler for capstone refinement
+    # (avoids per-candidate Cs() allocation).
+    _shared_dis: _Disassembler | None = None
+    if use_capstone and (_HAS_CAPSTONE or _DISASM_AVAILABLE):
+        arch_str = "x64" if bit_width == 64 else "x86"
+        _shared_dis = _create_disasm(arch_str)
+
     for si, entropy in sec_infos:
         if not si.executable:
             continue
@@ -581,9 +613,10 @@ def locate_vm_entries(
                 reason += f", branch → {jmp_target:#x}"
 
             # Capstone refinement
-            if use_capstone and _HAS_CAPSTONE:
+            if use_capstone and (_HAS_CAPSTONE or _DISASM_AVAILABLE):
                 cs_push, cs_bc, cs_br, cs_reason = _refine_with_capstone(
-                    pe_data, start + i, si.rva + i, bit_width)
+                    pe_data, start + i, si.rva + i, bit_width,
+                    disassembler=_shared_dis)
                 if cs_push > 0:
                     pushes = max(pushes, cs_push)
                     bytecode_addr = cs_bc or bytecode_addr

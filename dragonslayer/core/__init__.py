@@ -20,6 +20,8 @@ from .disassembler import (
     create_disassembler,
     from_pe,
     disassemble_section,
+    to_lifted_instruction,
+    to_lifted_instructions,
     CAPSTONE_AVAILABLE,
 )
 
@@ -41,6 +43,8 @@ __all__ = [
     'create_disassembler',
     'from_pe',
     'disassemble_section',
+    'to_lifted_instruction',
+    'to_lifted_instructions',
     'CAPSTONE_AVAILABLE',
 
     # Exceptions

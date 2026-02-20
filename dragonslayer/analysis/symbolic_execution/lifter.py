@@ -179,16 +179,32 @@ class InstructionLifter:
     """
     Lift raw machine code to :class:`LiftedInstruction` IR.
 
+    Can optionally delegate disassembly to the unified
+    :class:`~dragonslayer.core.disassembler.Disassembler` from
+    the core module.
+
     Usage::
 
         lifter = InstructionLifter(arch="x86_64")
         instructions = lifter.lift(code_bytes, base_address=0x401000)
+
+        # Or with an explicit Disassembler:
+        from dragonslayer.core.disassembler import create_disassembler
+        lifter = InstructionLifter(arch="x86_64",
+                                   disassembler=create_disassembler("x64"))
     """
 
-    def __init__(self, arch: str = "x86_64") -> None:
+    def __init__(
+        self,
+        arch: str = "x86_64",
+        *,
+        disassembler: Any = None,
+    ) -> None:
         self.arch = arch
         self._md = None
-        if _CAPSTONE_AVAILABLE:
+        self._unified_disasm = disassembler  # Disassembler | None
+
+        if self._unified_disasm is None and _CAPSTONE_AVAILABLE:
             if "64" in arch:
                 self._md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
             else:
@@ -222,6 +238,8 @@ class InstructionLifter:
         list[LiftedInstruction]
         """
         if not _CAPSTONE_AVAILABLE or self._md is None:
+            if self._unified_disasm is not None:
+                return self._lift_via_unified(code, base_address, max_instructions)
             return self._fallback_lift(code, base_address, max_instructions)
 
         instructions: List[LiftedInstruction] = []
@@ -272,6 +290,19 @@ class InstructionLifter:
             ))
 
         return instructions
+
+    def _lift_via_unified(
+        self,
+        code: bytes,
+        base_address: int,
+        max_instructions: int,
+    ) -> List[LiftedInstruction]:
+        """Delegate to the unified :class:`Disassembler` and convert."""
+        from dragonslayer.core.disassembler import to_lifted_instructions as _convert
+        raw = self._unified_disasm.disassemble(
+            code, base_address, max_instructions=max_instructions,
+        )
+        return _convert(raw)
 
     @staticmethod
     def _fallback_lift(

@@ -166,6 +166,10 @@ class QilingAnalyzer(Plugin):
                 "ebp", "esp", "eip",
             ]
 
+        # Unified disassembler — created once, reused for every instruction
+        from dragonslayer.core.disassembler import create_disassembler as _mk_disasm
+        _ql_disasm = _mk_disasm("x64" if is_64 else "x86")
+
         def _block_hook(ql: Any, address: int, size: int) -> None:
             if len(block_set) >= max_blocks:
                 ql.stop()
@@ -195,17 +199,11 @@ class QilingAnalyzer(Plugin):
             except Exception:
                 raw = b""
 
-            # Disassemble via capstone if available
+            # Disassemble via unified disassembler (one instance, reused)
             disasm = ""
             try:
-                import capstone
-                if is_64:
-                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-                else:
-                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-                for ci in md.disasm(raw, address):
-                    disasm = f"{ci.mnemonic} {ci.op_str}".strip()
-                    break
+                _text, _ = _ql_disasm.disassemble_to_text(raw, address)
+                disasm = _text
             except Exception:
                 disasm = raw.hex()
 

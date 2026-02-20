@@ -55,6 +55,8 @@ try:
 except ImportError:
     CAPSTONE_AVAILABLE = False
 
+from dragonslayer.core.disassembler import create_disassembler as _create_disasm
+
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
     TraceInstruction,
@@ -64,23 +66,19 @@ from dragonslayer.analysis.trace_ingestion import (
 
 
 # ---------------------------------------------------------------------------
-# Disassembler helper
+# Disassembler helper — delegates to unified Disassembler
 # ---------------------------------------------------------------------------
 
 def _make_disassembler(arch: str):
-    """Create a Capstone disassembler, or None if not available."""
-    if not CAPSTONE_AVAILABLE:
-        return None
-    if "64" in arch:
-        return capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    return capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    """Create a unified Disassembler for the given architecture."""
+    arch_str = "x64" if "64" in arch else "x86"
+    return _create_disasm(arch_str)
 
 
-def _disassemble_one(cs, code: bytes, address: int) -> Tuple[str, int]:
+def _disassemble_one(dis, code: bytes, address: int) -> Tuple[str, int]:
     """Disassemble one instruction, return (disasm_text, size)."""
-    if cs is not None:
-        for insn in cs.disasm(code, address, count=1):
-            return f"{insn.mnemonic} {insn.op_str}".strip(), insn.size
+    if dis is not None:
+        return dis.disassemble_to_text(code, address)
     # Fallback — no disassembler
     return f"db 0x{code[0]:02x}" if code else "db 0x00", max(len(code), 1)
 
