@@ -80,7 +80,7 @@ class VMClassifier:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# B71 — Feature explainability
+# B71 / B72 — Feature explainability
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FeatureExplainer:
@@ -90,8 +90,12 @@ class FeatureExplainer:
 
     1. **Global importance** — permutation importance across a dataset.
     2. **Local explanation** — per-feature contribution for a single
-       prediction (simplified LIME-style approach using feature
-       perturbation).
+       prediction (simplified LIME-style perturbation).
+
+    The explainer operates at the *feature-vector* level: it first
+    extracts features from every sample, then permutes / zeroes
+    individual feature columns before feeding them to the underlying
+    model.  This ensures perturbations are actually seen by the model.
 
     Usage::
 
@@ -104,6 +108,16 @@ class FeatureExplainer:
         self.classifier = classifier
         self.n_repeats = n_repeats
 
+    # -- helper: classify from raw feature values ---------------------------
+
+    def _predict_from_values(
+        self,
+        values: List[float],
+        names: List[str],
+    ) -> PredictionResult:
+        """Run the model directly on a pre-built feature vector."""
+        return self.classifier.model.predict({"values": values, "names": names})
+
     # -- Global permutation importance --------------------------------------
 
     def global_importance(
@@ -113,50 +127,49 @@ class FeatureExplainer:
     ) -> List[tuple[str, float]]:
         """Compute permutation importance for each feature.
 
-        For each feature, permute its values across *dataset* and
-        measure the drop in accuracy (when *labels* are given) or
-        confidence.
+        For each feature column, shuffle its values across *dataset*
+        and measure the accuracy / confidence drop.
 
         Returns ``[(feature_name, importance_score)]`` sorted descending.
         """
         if not dataset:
             return []
 
-        # Get baseline predictions
-        baseline = self.classifier.classify_batch(dataset)
+        # Extract all feature vectors up-front
+        vectors = [extract_handler_features(d) for d in dataset]
+        names = vectors[0].feature_names
+        n = len(vectors)
+
+        # Baseline score
+        baseline = [self._predict_from_values(v.values, names) for v in vectors]
         if labels:
             base_score = sum(
                 1 for p, l in zip(baseline, labels) if p.label == l
             ) / len(labels)
         else:
-            base_score = sum(p.confidence for p in baseline) / len(baseline)
+            base_score = sum(p.confidence for p in baseline) / n
 
-        # Gather feature names from first sample
-        sample_features = extract_handler_features(dataset[0])
-        feature_names = sample_features.feature_names
-
-        importances: Dict[str, float] = {}
         import random
-        for fi, fname in enumerate(feature_names):
-            drops = []
+        importances: Dict[str, float] = {}
+        for fi, fname in enumerate(names):
+            drops: list[float] = []
+            original_col = [v.values[fi] for v in vectors]
             for _ in range(self.n_repeats):
-                # Permute feature fi across samples
-                permuted = []
-                indices = list(range(len(dataset)))
-                random.shuffle(indices)
-                for orig_idx, shuf_idx in enumerate(indices):
-                    item = dict(dataset[orig_idx])
-                    # Mark which feature to permute — the extractor will
-                    # re-extract, but we inject the permuted value after.
-                    permuted.append(item)
-
-                perm_preds = self.classifier.classify_batch(permuted)
+                shuffled_col = list(original_col)
+                random.shuffle(shuffled_col)
+                perm_preds = []
+                for si, vec in enumerate(vectors):
+                    perturbed_vals = list(vec.values)
+                    perturbed_vals[fi] = shuffled_col[si]
+                    perm_preds.append(
+                        self._predict_from_values(perturbed_vals, names)
+                    )
                 if labels:
                     perm_score = sum(
                         1 for p, l in zip(perm_preds, labels) if p.label == l
                     ) / len(labels)
                 else:
-                    perm_score = sum(p.confidence for p in perm_preds) / len(perm_preds)
+                    perm_score = sum(p.confidence for p in perm_preds) / n
                 drops.append(base_score - perm_score)
             importances[fname] = sum(drops) / len(drops) if drops else 0.0
 
@@ -171,32 +184,31 @@ class FeatureExplainer:
         *,
         n_perturbations: int = 20,
     ) -> Dict[str, float]:
-        """Explain a single prediction by perturbing each feature.
+        """Explain a single prediction by zeroing each feature.
 
-        For each feature, zero it out and measure the confidence
+        For each feature, set it to zero and measure the confidence
         change.  A large drop means the feature is important for
         this particular prediction.
 
         Returns ``{feature_name: contribution}`` where positive
         values mean the feature *supports* the prediction.
         """
-        base_pred = self.classifier.classify(sample)
+        features = extract_handler_features(sample)
+        base_pred = self._predict_from_values(features.values, features.feature_names)
         base_conf = base_pred.confidence
         base_label = base_pred.label
 
-        features = extract_handler_features(sample)
         contributions: Dict[str, float] = {}
 
         for fi, fname in enumerate(features.feature_names):
-            # Perturb: set feature to 0
-            perturbed = dict(sample)
-            perturbed[f"_perturb_feature_{fi}"] = 0.0  # marker
+            perturbed_vals = list(features.values)
+            perturbed_vals[fi] = 0.0  # zero the feature
             try:
-                pert_pred = self.classifier.classify(perturbed)
+                pert_pred = self._predict_from_values(perturbed_vals, features.feature_names)
                 if pert_pred.label == base_label:
                     contributions[fname] = base_conf - pert_pred.confidence
                 else:
-                    contributions[fname] = base_conf  # full contribution
+                    contributions[fname] = base_conf  # label changed → full contribution
             except Exception:
                 contributions[fname] = 0.0
 

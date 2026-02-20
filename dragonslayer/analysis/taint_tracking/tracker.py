@@ -406,7 +406,64 @@ class TaintTracker:
         self._implicit_scope_remaining: int = 0
         self._implicit_scope_tag: TaintTag = TaintTag.CLEAN
 
-    # ── Sub-register helpers (Batch 31) ─────────────────────────────────────
+        # B72: Interprocedural taint context — tracks register taint at
+        # call boundaries so cross-function analysis is possible.
+        self._context_stack: List[Dict[str, TaintTag]] = []
+        self._call_depth: int = 0
+
+    # ── B72: Interprocedural context management ─────────────────────────────
+
+    def push_call_context(self) -> None:
+        """Save current register taint state for interprocedural analysis.
+
+        Call this when entering a callee to preserve the caller's
+        register-taint snapshot.  On return, :meth:`pop_call_context`
+        restores it while merging any new taint from the callee's
+        return registers.
+        """
+        snapshot = dict(self._reg_taint)
+        self._context_stack.append(snapshot)
+        self._call_depth += 1
+        logger.debug("push_call_context: depth=%d", self._call_depth)
+
+    def pop_call_context(self, *, return_regs: tuple[str, ...] = ("rax", "rdx")) -> None:
+        """Restore caller taint, merging taint from callee return registers.
+
+        Parameters
+        ----------
+        return_regs:
+            Registers that carry return values (default: x86-64 ABI
+            ``rax`` and ``rdx``).  Their taint from the callee scope
+            is OR-merged into the restored caller state.
+        """
+        if not self._context_stack:
+            logger.warning("pop_call_context: stack empty")
+            return
+
+        # Capture return-register taint from callee scope BEFORE restoring
+        return_taint = {
+            r: self._reg_taint.get(r.lower(), TaintTag.CLEAN)
+            for r in return_regs
+        }
+
+        caller_state = self._context_stack.pop()
+        self._call_depth = max(0, self._call_depth - 1)
+
+        # Restore caller register taint
+        self._reg_taint = caller_state
+
+        # Merge callee return-register taint
+        for r, tag in return_taint.items():
+            if tag != TaintTag.CLEAN:
+                existing = self._reg_taint.get(r.lower(), TaintTag.CLEAN)
+                self._reg_taint[r.lower()] = existing | tag
+
+        logger.debug("pop_call_context: depth=%d, merged %s", self._call_depth, return_taint)
+
+    @property
+    def call_depth(self) -> int:
+        """Current interprocedural nesting depth."""
+        return self._call_depth
 
     def _resolve_reg(self, reg: str) -> str:
         """Normalise to canonical 64-bit name when sub-register aware."""

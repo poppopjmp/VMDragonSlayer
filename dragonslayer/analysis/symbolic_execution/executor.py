@@ -404,11 +404,24 @@ class SymbolicExecutor:
                         "type": "tail_call",
                     })
                 elif last.branch_target is None:
-                    edges.append({
-                        "source": src_addr,
-                        "target": 0,  # unknown
-                        "type": "indirect",
-                    })
+                    # B72: Try to resolve indirect targets from register
+                    # snapshots or switch-table analysis.
+                    resolved_targets = SymbolicExecutor._resolve_indirect_targets(
+                        last, block_addr_set,
+                    )
+                    if resolved_targets:
+                        for rt in resolved_targets:
+                            edges.append({
+                                "source": src_addr,
+                                "target": rt,
+                                "type": "indirect_resolved",
+                            })
+                    else:
+                        edges.append({
+                            "source": src_addr,
+                            "target": 0,  # unknown
+                            "type": "indirect",
+                        })
             elif last.is_branch:
                 # Other branch types
                 if last.branch_target is not None and last.branch_target in block_addr_set:
@@ -634,6 +647,37 @@ class SymbolicExecutor:
                                 "type": "cxx_eh",
                             })
         return cxx_edges
+
+    # -- B72: Indirect-target resolution -------------------------------------
+
+    @staticmethod
+    def _resolve_indirect_targets(
+        insn: "LiftedInstruction",
+        block_addrs: set[int],
+        *,
+        max_targets: int = 64,
+    ) -> List[int]:
+        """Attempt to resolve an indirect branch's possible targets.
+
+        Uses the instruction's *registers* snapshot (populated from
+        dynamic traces) to compute concrete target addresses.
+
+        Returns a (possibly empty) list of resolved addresses that
+        belong to *block_addrs*.
+        """
+        targets: List[int] = []
+        if not insn.registers:
+            return targets
+
+        # Heuristic: the operand string often names the target register
+        # e.g. "jmp rax", "jmp qword ptr [rax+rcx*8]"
+        ops = (insn.operands or "").strip().lower()
+        # Direct register target: "jmp rax"
+        for reg, val in insn.registers.items():
+            if reg.lower() in ops and isinstance(val, int):
+                if val in block_addrs:
+                    targets.append(val)
+        return targets[:max_targets]
 
     # -- Dispatcher identification -------------------------------------------
 

@@ -685,3 +685,114 @@ class Z3Solver:
             return SolverResult(satisfiable=True, model=model)
 
         return SolverResult(satisfiable=False, error="RC4 key recovery heuristic failed")
+
+    # -- B72: Cipher-type auto-detection -------------------------------------
+
+    # Well-known constant signatures for common ciphers.
+    _CIPHER_SIGNATURES: Dict[str, tuple[tuple[int, ...], str]] = {
+        "aes_sbox_fwd": (
+            (0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5),
+            "AES (forward S-box)",
+        ),
+        "aes_sbox_inv": (
+            (0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38),
+            "AES (inverse S-box)",
+        ),
+        "aes_rcon": (
+            (0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80),
+            "AES (round constants / Rcon)",
+        ),
+        "des_ip": (
+            (58, 50, 42, 34, 26, 18, 10, 2),
+            "DES (initial permutation)",
+        ),
+        "des_sbox1": (
+            (14, 4, 13, 1, 2, 15, 11, 8),
+            "DES (S-box 1)",
+        ),
+        "sha256_k_first8": (
+            (0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
+             0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5),
+            "SHA-256 (round constants K)",
+        ),
+        "rc4_identity_sbox": (
+            tuple(range(8)),
+            "RC4 (identity S-box initialisation)",
+        ),
+        "tea_delta": (
+            (0x9E, 0x37, 0x79, 0xB9),
+            "TEA/XTEA (delta constant 0x9E3779B9)",
+        ),
+    }
+
+    @classmethod
+    def detect_cipher_type(
+        cls,
+        data: bytes | list[int],
+        *,
+        min_match_bytes: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """Auto-detect cipher type(s) by scanning for known constants.
+
+        Searches *data* for well-known S-boxes, permutation tables,
+        and magic constants from common ciphers (AES, DES, SHA-256,
+        RC4, TEA).
+
+        Parameters
+        ----------
+        data:
+            Raw binary blob to scan.
+        min_match_bytes:
+            Minimum consecutive matching bytes to report a hit.
+
+        Returns
+        -------
+        list[dict]
+            ``[{cipher, description, offset, match_length}]``
+            sorted by match length descending.
+        """
+        raw = bytes(data) if not isinstance(data, bytes) else data
+        hits: List[Dict[str, Any]] = []
+
+        for sig_name, (sig_bytes, description) in cls._CIPHER_SIGNATURES.items():
+            # Try byte-level matching (for 8-bit signatures)
+            if all(b < 256 for b in sig_bytes):
+                needle = bytes(sig_bytes)
+                idx = raw.find(needle)
+                if idx >= 0:
+                    hits.append({
+                        "cipher": sig_name,
+                        "description": description,
+                        "offset": idx,
+                        "match_length": len(needle),
+                    })
+                    continue
+
+            # Try 32-bit word matching (for SHA-256 K constants etc.)
+            if all(b >= 256 for b in sig_bytes):
+                for endian in ("big", "little"):
+                    needle = b"".join(
+                        v.to_bytes(4, endian) for v in sig_bytes
+                    )
+                    idx = raw.find(needle)
+                    if idx >= 0:
+                        hits.append({
+                            "cipher": sig_name,
+                            "description": description,
+                            "offset": idx,
+                            "match_length": len(needle),
+                        })
+                        break
+
+        # Also run the AES S-box detector for full-table matches
+        aes_result = cls.detect_aes_sbox(data)
+        if aes_result["found"]:
+            hits.append({
+                "cipher": f"aes_sbox_{aes_result['direction']}",
+                "description": f"AES {aes_result['direction']} S-box (full table)",
+                "offset": aes_result["offset"],
+                "match_length": 256,
+            })
+
+        hits.sort(key=lambda h: h["match_length"], reverse=True)
+        return hits

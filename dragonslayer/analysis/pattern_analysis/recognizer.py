@@ -390,10 +390,34 @@ class PatternRecognizer:
     # Used by ``normalize_semantics`` to canonicalise instructions before
     # byte-level matching, improving resilience to trivial obfuscation.
     _SEMANTIC_EQUIV: Dict[str, str] = {
-        # xor reg, reg  ≡  sub reg, reg  ≡  mov reg, 0  (covered by byte pattern)
-        "test": "and",    # TEST and AND set the same flags; normalise to AND
-        "sal": "shl",     # SAL is identical to SHL
-        "jo": "jo",       # identity — included for completeness
+        # Arithmetic / logic equivalences
+        "test": "and",        # TEST and AND set the same flags; normalise to AND
+        "sal": "shl",         # SAL is identical to SHL
+        # Conditional branch aliases (Intel synonyms)
+        "jnb": "jae",         # Jump Not Below ≡ Jump Above or Equal
+        "jnbe": "ja",         # Jump Not Below or Equal ≡ Jump Above
+        "jna": "jbe",         # Jump Not Above ≡ Jump Below or Equal
+        "jnae": "jb",         # Jump Not Above or Equal ≡ Jump Below
+        "jz": "je",           # Jump Zero ≡ Jump Equal
+        "jnz": "jne",         # Jump Not Zero ≡ Jump Not Equal
+        "jc": "jb",           # Jump Carry ≡ Jump Below
+        "jnc": "jae",         # Jump Not Carry ≡ Jump Above or Equal
+        "jp": "jpe",          # Jump Parity ≡ Jump Parity Even
+        "jnp": "jpo",         # Jump Not Parity ≡ Jump Parity Odd
+        # Conditional move aliases
+        "cmovz": "cmove",     # CMOVZero ≡ CMOVEqual
+        "cmovnz": "cmovne",   # CMOVNotZero ≡ CMOVNotEqual
+        "cmovc": "cmovb",     # CMOVCarry ≡ CMOVBelow
+        "cmovnc": "cmovae",   # CMOVNotCarry ≡ CMOVAboveEqual
+        "cmovna": "cmovbe",   # CMOVNotAbove ≡ CMOVBelowEqual
+        # Set-byte aliases
+        "setz": "sete",       # SETZero ≡ SETEqual
+        "setnz": "setne",     # SETNotZero ≡ SETNotEqual
+        "setc": "setb",       # SETCarry ≡ SETBelow
+        "setnc": "setae",     # SETNotCarry ≡ SETAboveEqual
+        # Misc
+        "repe": "rep",        # REP/REPE prefix equivalence for string ops
+        "repz": "rep",
     }
 
     # Junk / NOP-equivalent single-byte opcodes (can be stripped).
