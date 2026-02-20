@@ -1232,6 +1232,92 @@ def _extract_cluster_summary(clustering: Any) -> Dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Post-processing helpers (B43)
+# ---------------------------------------------------------------------------
+
+def _apply_context_renaming(
+    text: str,
+    context_layout: Any,
+) -> str:
+    """Replace generic register references with VM role names.
+
+    If *context_layout* provides a mapping like ``{"vsp": "rsp",
+    "vip_register": "rsi"}``, occurrences of ``rsp`` in the body are
+    renamed to ``vSP`` and ``rsi`` to ``vIP``.  This makes the
+    pseudocode significantly more readable.
+    """
+    if context_layout is None:
+        return text
+
+    import re as _re
+
+    role_map = _extract_context_registers(context_layout)
+    if not role_map:
+        return text
+
+    # Invert to register → pretty_name.
+    _PRETTY: Dict[str, str] = {
+        "vsp": "vSP",
+        "table_base": "hTable",
+        "key_register": "vKey",
+        "context_base": "vCtx",
+        "vip_register": "vIP",
+        "vip": "vIP",
+    }
+    rename_map: Dict[str, str] = {}
+    for role, reg in role_map.items():
+        pretty = _PRETTY.get(role.lower(), role)
+        rename_map[reg.lower()] = pretty
+
+    for reg, pretty in rename_map.items():
+        # Word-boundary replacement so we don't clobber substrings.
+        text = _re.sub(rf"\b{_re.escape(reg)}\b", pretty, text,
+                        flags=_re.IGNORECASE)
+
+    return text
+
+
+def _eliminate_trivial_dead(text: str) -> str:
+    """Remove trivially dead variable assignments.
+
+    A line ``  tmp_3 = some_value;`` is dead when ``tmp_3`` never
+    appears on any other line.  This reduces noise from the SSA
+    naming pass.
+    """
+    import re as _re
+
+    lines = text.split("\n")
+    # Identify assignments that define SSA-style vars.
+    assignments: Dict[int, str] = {}  # line_idx → var_name
+    for i, ln in enumerate(lines):
+        stripped = ln.strip()
+        m = _re.match(r"([a-z]+_\d+)\s*=", stripped)
+        if m:
+            assignments[i] = m.group(1)
+
+    if not assignments:
+        return text
+
+    # Count total mentions of each variable across all lines.
+    full = "\n".join(lines)
+    var_counts: Dict[str, int] = {}
+    for var in set(assignments.values()):
+        var_counts[var] = len(_re.findall(rf"\b{_re.escape(var)}\b", full))
+
+    # Remove lines where the variable appears only once (its definition).
+    dead_indices: set = set()
+    for i, var in assignments.items():
+        if var_counts.get(var, 0) <= 1:
+            dead_indices.add(i)
+
+    if not dead_indices:
+        return text
+
+    result = [ln for i, ln in enumerate(lines) if i not in dead_indices]
+    return "\n".join(result)
+
+
+# ---------------------------------------------------------------------------
 # C-like wrapper
 # ---------------------------------------------------------------------------
 
@@ -1246,14 +1332,23 @@ def emit_c_like(
 ) -> PseudocodeResult:
     """Emit C-like pseudocode wrapped in a function declaration.
 
+    When a *handler_cfg* is available, uses Cifuentes-style structural
+    analysis to produce proper ``if``/``else`` and ``while`` constructs
+    instead of goto-based output.
+
     When *context_layout* is provided (dict or VMContextLayout), a VM
-    context struct comment is emitted and virtual register names (vSP,
-    vIP, etc.) appear in the header.
+    context struct comment is emitted, virtual register names (vSP,
+    vIP, etc.) appear in the header, and generic variable references
+    are replaced with their VM role names.
 
     When *clustering* is provided (dict or ClusteringResult), canonical
     cluster operation names annotate the output.
     """
-    inner = emit_structured(opcode_table, boundaries, handler_cfg)
+    # Use Cifuentes structuring when a CFG is present; fall back to goto-based.
+    if handler_cfg is not None:
+        inner = emit_cifuentes(opcode_table, boundaries, handler_cfg)
+    else:
+        inner = emit_structured(opcode_table, boundaries, handler_cfg)
 
     header_lines: List[str] = []
 
@@ -1307,6 +1402,12 @@ def emit_c_like(
     footer_lines = ["}", ""]
     body = inner.text
 
+    # ── Context-based variable renaming (B43) ───────────────────────
+    body = _apply_context_renaming(body, context_layout)
+
+    # ── Dead variable elimination (B43) ─────────────────────────────
+    body = _eliminate_trivial_dead(body)
+
     text = "\n".join(header_lines) + "\n" + body + "\n" + "\n".join(footer_lines)
     total_lines = text.count("\n") + 1
 
@@ -1338,7 +1439,8 @@ def emit_pseudocode(
         opcode_table: Semantic opcode table.
         boundaries: Handler boundaries in execution order.
         handler_cfg: Optional networkx DiGraph (handler-level CFG).
-        style: One of ``"linear"``, ``"structured"``, ``"c_like"``.
+        style: One of ``"linear"``, ``"structured"``, ``"c_like"``,
+            ``"cifuentes"``.
         function_name: Function name for C-like output.
         context_layout: Optional VM context layout (dict or VMContextLayout)
             from :func:`~..vm_discovery.context_registers.identify_vm_context`.
@@ -1354,6 +1456,8 @@ def emit_pseudocode(
         return emit_linear(opcode_table, boundaries)
     elif style == "structured":
         return emit_structured(opcode_table, boundaries, handler_cfg)
+    elif style == "cifuentes":
+        return emit_cifuentes(opcode_table, boundaries, handler_cfg)
     elif style == "c_like":
         return emit_c_like(opcode_table, boundaries, handler_cfg,
                            function_name=function_name,
