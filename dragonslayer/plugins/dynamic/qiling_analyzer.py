@@ -138,6 +138,33 @@ class QilingAnalyzer(Plugin):
         executed_blocks: List[Dict[str, int]] = []
         block_set: set[int] = set()
         max_blocks = int(ctx.config.get("qiling.max_blocks", 50_000))
+        max_insns = int(ctx.config.get("qiling.max_instructions", 200_000))
+
+        # Per-instruction trace data
+        instruction_trace: List[Dict[str, Any]] = []
+        mem_accesses: List[Dict[str, Any]] = []
+        insn_count = 0
+
+        # Determine architecture for register snapshot
+        is_64 = file_data[:2] == b"MZ" and len(file_data) > 0x40
+        fileinfo = ctx.shared_data.get("fileinfo", {})
+        file_type = fileinfo.get("type", "").lower()
+        if "64" in file_type or "pe32+" in file_type:
+            is_64 = True
+        elif "32" in file_type:
+            is_64 = False
+
+        if is_64:
+            _REG_LIST = [
+                "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+                "rbp", "rsp", "r8", "r9", "r10", "r11",
+                "r12", "r13", "r14", "r15", "rip",
+            ]
+        else:
+            _REG_LIST = [
+                "eax", "ebx", "ecx", "edx", "esi", "edi",
+                "ebp", "esp", "eip",
+            ]
 
         def _block_hook(ql: Any, address: int, size: int) -> None:
             if len(block_set) >= max_blocks:
@@ -147,6 +174,77 @@ class QilingAnalyzer(Plugin):
                 block_set.add(address)
                 executed_blocks.append({"start": address, "end": address + size})
 
+        def _code_hook(ql: Any, address: int, size: int) -> None:
+            nonlocal insn_count
+            if insn_count >= max_insns:
+                ql.stop()
+                return
+            insn_count += 1
+
+            # Register snapshot
+            reg_snapshot: Dict[str, int] = {}
+            for rname in _REG_LIST:
+                try:
+                    reg_snapshot[rname] = ql.arch.regs.read(rname)
+                except Exception:
+                    pass
+
+            # Read raw instruction bytes
+            try:
+                raw = bytes(ql.mem.read(address, size))
+            except Exception:
+                raw = b""
+
+            # Disassemble via capstone if available
+            disasm = ""
+            try:
+                import capstone
+                if is_64:
+                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+                else:
+                    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+                for ci in md.disasm(raw, address):
+                    disasm = f"{ci.mnemonic} {ci.op_str}".strip()
+                    break
+            except Exception:
+                disasm = raw.hex()
+
+            instruction_trace.append({
+                "address": address,
+                "size": size,
+                "raw_bytes": raw.hex(),
+                "disassembly": disasm,
+                "registers": reg_snapshot,
+                "memory_accesses": [],  # filled by mem hooks via index
+            })
+
+        def _mem_read_hook(
+            ql: Any, access: int, address: int, size: int, value: int
+        ) -> None:
+            entry = {
+                "type": "read",
+                "address": address,
+                "size": size,
+                "value": value,
+            }
+            mem_accesses.append(entry)
+            # Attach to current instruction
+            if instruction_trace:
+                instruction_trace[-1]["memory_accesses"].append(entry)
+
+        def _mem_write_hook(
+            ql: Any, access: int, address: int, size: int, value: int
+        ) -> None:
+            entry = {
+                "type": "write",
+                "address": address,
+                "size": size,
+                "value": value,
+            }
+            mem_accesses.append(entry)
+            if instruction_trace:
+                instruction_trace[-1]["memory_accesses"].append(entry)
+
         timeout = int(ctx.config.get("qiling.timeout", 60))
 
         ql = Qiling(
@@ -155,6 +253,16 @@ class QilingAnalyzer(Plugin):
             verbose=QL_VERBOSE.DISABLED,
         )
         ql.hook_block(_block_hook)
+        ql.hook_code(_code_hook)
+
+        # Memory access hooks
+        try:
+            from qiling.const import QL_INTERCEPT  # type: ignore[import-untyped]
+
+            ql.hook_mem_read(_mem_read_hook)
+            ql.hook_mem_write(_mem_write_hook)
+        except Exception:
+            logger.debug("Qiling memory hooks not fully available")
 
         try:
             ql.run(timeout=timeout * 1_000_000)  # microseconds
@@ -167,5 +275,8 @@ class QilingAnalyzer(Plugin):
             "rootfs": rootfs,
             "executed_blocks": executed_blocks,
             "unique_blocks": len(block_set),
+            "instructions_executed": insn_count,
+            "instruction_trace": instruction_trace,
+            "memory_accesses": mem_accesses,
             "confidence": round(confidence, 4),
         }
