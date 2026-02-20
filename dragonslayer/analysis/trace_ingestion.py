@@ -446,20 +446,82 @@ def from_qiling_result(data: Dict[str, Any]) -> ExecutionTrace:
 # ---------------------------------------------------------------------------
 
 def _ingest_triton(data: Dict[str, Any], trace: ExecutionTrace) -> None:
-    """Ingest Triton's taint_flow and path_constraints."""
+    """Ingest Triton's enriched per-instruction trace data.
+
+    Reads instruction_trace[] (address, size, raw_bytes hex, disassembly,
+    registers dict, memory_accesses list) produced by the enriched Triton
+    plugin.  Falls back to taint_flow entries for backward compatibility.
+    """
     seen_addrs = {inst.address for inst in trace.instructions}
 
-    for entry in data.get("taint_flow", []):
-        addr = entry.get("address", 0)
-        if addr in seen_addrs:
-            continue
-        seen_addrs.add(addr)
-        disasm = entry.get("disasm", "")
-        trace.instructions.append(TraceInstruction(
-            address=addr,
-            size=0,  # Triton doesn't provide instruction size
-            raw_bytes=b"",
-            disassembly=disasm,
+    # ---- Primary path: enriched instruction_trace ----------------------
+    insn_trace = data.get("instruction_trace", [])
+    if insn_trace:
+        for entry in insn_trace:
+            addr = entry.get("address", 0)
+            if addr in seen_addrs:
+                continue
+            seen_addrs.add(addr)
+
+            raw_hex = entry.get("raw_bytes", "")
+            try:
+                raw = bytes.fromhex(raw_hex) if raw_hex else b""
+            except ValueError:
+                raw = b""
+
+            regs = entry.get("registers", {})
+            # Ensure register values are ints
+            int_regs: Dict[str, int] = {}
+            for k, v in regs.items():
+                try:
+                    int_regs[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+
+            trace.instructions.append(TraceInstruction(
+                address=addr,
+                size=entry.get("size", len(raw)),
+                raw_bytes=raw,
+                disassembly=entry.get("disassembly", ""),
+                registers=int_regs,
+            ))
+
+            # Per-instruction memory accesses
+            for mem in entry.get("memory_accesses", []):
+                mtype = mem.get("type", "R").upper()
+                if mtype not in ("R", "W"):
+                    mtype = "R" if mtype == "READ" else "W"
+                trace.memory_accesses.append(TraceMemoryAccess(
+                    type=mtype,
+                    address=mem.get("address", 0),
+                    size=mem.get("size", 0),
+                    value=mem.get("value", 0),
+                ))
+    else:
+        # ---- Fallback: legacy taint_flow only --------------------------
+        for entry in data.get("taint_flow", []):
+            addr = entry.get("address", 0)
+            if addr in seen_addrs:
+                continue
+            seen_addrs.add(addr)
+            disasm = entry.get("disasm", "")
+            trace.instructions.append(TraceInstruction(
+                address=addr,
+                size=0,
+                raw_bytes=b"",
+                disassembly=disasm,
+            ))
+
+    # Global memory accesses (outside instruction_trace)
+    for mem in data.get("memory_accesses", []):
+        mtype = mem.get("type", "R").upper()
+        if mtype not in ("R", "W"):
+            mtype = "R" if mtype == "READ" else "W"
+        trace.memory_accesses.append(TraceMemoryAccess(
+            type=mtype,
+            address=mem.get("address", 0),
+            size=mem.get("size", 0),
+            value=mem.get("value", 0),
         ))
 
     # Path constraints → metadata
@@ -471,16 +533,52 @@ def _ingest_triton(data: Dict[str, Any], trace: ExecutionTrace) -> None:
 
 
 def _ingest_angr(data: Dict[str, Any], trace: ExecutionTrace) -> None:
-    """Ingest angr's function and handler exploration data."""
+    """Ingest angr's enriched handler traces and function data.
+
+    Reads handler_traces[] (per-handler instruction list with address,
+    size, raw_bytes, disassembly, registers) produced by the enriched
+    angr plugin.  Falls back to function-level placeholders.
+    """
     seen_addrs = {inst.address for inst in trace.instructions}
 
+    # ---- Primary path: enriched handler_traces -------------------------
+    handler_traces = data.get("handler_traces", [])
+    for htrace in handler_traces:
+        for entry in htrace.get("instructions", []):
+            addr = entry.get("address", 0)
+            if addr in seen_addrs:
+                continue
+            seen_addrs.add(addr)
+
+            raw_hex = entry.get("raw_bytes", "")
+            try:
+                raw = bytes.fromhex(raw_hex) if raw_hex else b""
+            except ValueError:
+                raw = b""
+
+            regs = entry.get("registers", {})
+            int_regs: Dict[str, int] = {}
+            for k, v in regs.items():
+                try:
+                    int_regs[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+
+            trace.instructions.append(TraceInstruction(
+                address=addr,
+                size=entry.get("size", len(raw)),
+                raw_bytes=raw,
+                disassembly=entry.get("disassembly", ""),
+                registers=int_regs,
+            ))
+
+    # ---- Fallback: function-level placeholders -------------------------
     for func in data.get("functions", []):
         addr = func.get("address", 0)
         if addr in seen_addrs:
             continue
         seen_addrs.add(addr)
         name = func.get("name", "")
-        # angr reports block-level info; create a placeholder instruction
         trace.instructions.append(TraceInstruction(
             address=addr,
             size=0,
@@ -497,11 +595,10 @@ def _ingest_angr(data: Dict[str, Any], trace: ExecutionTrace) -> None:
             address=disp,
             handler_type=hd.get("type", "unknown"),
         ))
-        # Also record control-flow from dispatcher to handler
         trace.control_flow.append(TraceControlFlow(
             type="jmp",
             source=disp,
-            target=disp,  # handler_details doesn't provide separate target
+            target=disp,
         ))
 
     if "shared_data" in trace.source:
@@ -511,20 +608,81 @@ def _ingest_angr(data: Dict[str, Any], trace: ExecutionTrace) -> None:
 
 
 def _ingest_qiling(data: Dict[str, Any], trace: ExecutionTrace) -> None:
-    """Ingest Qiling's executed_blocks as address ranges."""
+    """Ingest Qiling's enriched per-instruction trace data.
+
+    Reads instruction_trace[] (address, size, raw_bytes hex, disassembly,
+    registers dict, memory_accesses list) produced by the enriched Qiling
+    plugin.  Falls back to executed_blocks for backward compatibility.
+    """
     seen_addrs = {inst.address for inst in trace.instructions}
 
-    for block in data.get("executed_blocks", []):
-        start = block.get("start", 0) if isinstance(block, dict) else block
-        end = block.get("end", start) if isinstance(block, dict) else start
-        if start in seen_addrs:
-            continue
-        seen_addrs.add(start)
-        trace.instructions.append(TraceInstruction(
-            address=start,
-            size=end - start if end > start else 0,
-            raw_bytes=b"",
-            disassembly=f"block:0x{start:x}",
+    # ---- Primary path: enriched instruction_trace ----------------------
+    insn_trace = data.get("instruction_trace", [])
+    if insn_trace:
+        for entry in insn_trace:
+            addr = entry.get("address", 0)
+            if addr in seen_addrs:
+                continue
+            seen_addrs.add(addr)
+
+            raw_hex = entry.get("raw_bytes", "")
+            try:
+                raw = bytes.fromhex(raw_hex) if raw_hex else b""
+            except ValueError:
+                raw = b""
+
+            regs = entry.get("registers", {})
+            int_regs: Dict[str, int] = {}
+            for k, v in regs.items():
+                try:
+                    int_regs[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+
+            trace.instructions.append(TraceInstruction(
+                address=addr,
+                size=entry.get("size", len(raw)),
+                raw_bytes=raw,
+                disassembly=entry.get("disassembly", ""),
+                registers=int_regs,
+            ))
+
+            # Per-instruction memory accesses
+            for mem in entry.get("memory_accesses", []):
+                mtype = mem.get("type", "R").upper()
+                if mtype not in ("R", "W"):
+                    mtype = "R" if mtype == "READ" else "W"
+                trace.memory_accesses.append(TraceMemoryAccess(
+                    type=mtype,
+                    address=mem.get("address", 0),
+                    size=mem.get("size", 0),
+                    value=mem.get("value", 0),
+                ))
+    else:
+        # ---- Fallback: legacy executed_blocks only ---------------------
+        for block in data.get("executed_blocks", []):
+            start = block.get("start", 0) if isinstance(block, dict) else block
+            end = block.get("end", start) if isinstance(block, dict) else start
+            if start in seen_addrs:
+                continue
+            seen_addrs.add(start)
+            trace.instructions.append(TraceInstruction(
+                address=start,
+                size=end - start if end > start else 0,
+                raw_bytes=b"",
+                disassembly=f"block:0x{start:x}",
+            ))
+
+    # Global memory accesses
+    for mem in data.get("memory_accesses", []):
+        mtype = mem.get("type", "R").upper()
+        if mtype not in ("R", "W"):
+            mtype = "R" if mtype == "READ" else "W"
+        trace.memory_accesses.append(TraceMemoryAccess(
+            type=mtype,
+            address=mem.get("address", 0),
+            size=mem.get("size", 0),
+            value=mem.get("value", 0),
         ))
 
     if "shared_data" in trace.source:
