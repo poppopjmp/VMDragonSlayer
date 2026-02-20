@@ -96,17 +96,65 @@ class BinExportPlugin(Plugin):
 
     def _analyze(self, be_path: str) -> Dict[str, Any]:
         be = ProgramBinExport(be_path)
-        functions = []
+        functions: list[Dict[str, Any]] = []
+        total_instructions = 0
+        call_graph_edges: list[tuple[int, int]] = []
+
         for func_addr, func in be.items():
-            functions.append({
+            mnemonics: list[str] = []
+            instructions: list[Dict[str, Any]] = []
+            block_count = 0
+
+            # Walk basic blocks → instructions when the API exposes them.
+            if hasattr(func, "blocks") or hasattr(func, "__iter__"):
+                blocks = func.blocks if hasattr(func, "blocks") else list(func)
+                block_count = len(blocks) if blocks else 0
+                for bb in (blocks or []):
+                    bb_insns = (
+                        bb.instructions
+                        if hasattr(bb, "instructions")
+                        else list(bb) if hasattr(bb, "__iter__") else []
+                    )
+                    for inst in bb_insns:
+                        mnem = getattr(inst, "mnemonic", "")
+                        if mnem:
+                            mnemonics.append(mnem.lower())
+                        inst_entry: Dict[str, Any] = {"mnemonic": mnem.lower()}
+                        if hasattr(inst, "address"):
+                            inst_entry["address"] = inst.address
+                        if hasattr(inst, "operands"):
+                            inst_entry["operands"] = [
+                                str(o) for o in inst.operands
+                            ]
+                        instructions.append(inst_entry)
+
+            total_instructions += len(instructions)
+
+            # Cross-references / callees.
+            callees: list[int] = []
+            if hasattr(func, "callees"):
+                callees = [int(c) for c in func.callees]
+                for callee in callees:
+                    call_graph_edges.append((func_addr, callee))
+
+            func_entry: Dict[str, Any] = {
                 "name": func.name,
                 "address": func_addr,
-            })
+                "block_count": block_count,
+                "instruction_count": len(instructions),
+                "mnemonics": mnemonics,
+                "instructions": instructions,
+                "callees": callees,
+            }
+            functions.append(func_entry)
 
         confidence = min(1.0, len(functions) / 100)
         return {
             "binexport_path": be_path,
             "function_count": len(functions),
+            "total_instructions": total_instructions,
+            "call_graph_edge_count": len(call_graph_edges),
+            "call_graph_edges": call_graph_edges[:500],  # cap for serialisation
             "functions": functions,
             "confidence": round(confidence, 4),
         }

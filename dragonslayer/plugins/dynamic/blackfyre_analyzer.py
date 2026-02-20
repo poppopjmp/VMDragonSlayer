@@ -114,11 +114,13 @@ class BlackfyreAnalyzer(Plugin):
         bcc = BinaryContext.load_from_file(bcc_path)
 
         functions: List[Dict[str, Any]] = []
+        total_instructions = 0
 
         func_contexts = list(bcc.function_contexts) if hasattr(bcc, "function_contexts") else []
 
         for func in func_contexts:
             mnemonics: List[str] = []
+            instructions: List[Dict[str, Any]] = []
             block_count = 0
 
             if hasattr(func, "basic_block_context_dict") and isinstance(
@@ -128,16 +130,39 @@ class BlackfyreAnalyzer(Plugin):
                 for _bb_addr, bb in sorted(func.basic_block_context_dict.items()):
                     if hasattr(bb, "instruction_contexts"):
                         for inst in bb.instruction_contexts:
+                            mnem = ""
                             if hasattr(inst, "mnemonic"):
-                                mnemonics.append(inst.mnemonic.lower())
+                                mnem = inst.mnemonic.lower()
+                                mnemonics.append(mnem)
+                            inst_entry: Dict[str, Any] = {"mnemonic": mnem}
+                            if hasattr(inst, "address"):
+                                inst_entry["address"] = inst.address
+                            if hasattr(inst, "operands"):
+                                inst_entry["operands"] = [
+                                    str(o) for o in inst.operands
+                                ]
+                            instructions.append(inst_entry)
 
+            total_instructions += len(instructions)
             fhash = _function_hash(func.name, mnemonics)
+
+            # Cross-references: callees and callers.
+            callees: List[int] = []
+            callers: List[int] = []
+            if hasattr(func, "callees"):
+                callees = [int(c) for c in func.callees]
+            if hasattr(func, "callers"):
+                callers = [int(c) for c in func.callers]
 
             func_entry: Dict[str, Any] = {
                 "name": func.name,
                 "address": func.address,
                 "block_count": block_count,
-                "instruction_count": len(mnemonics),
+                "instruction_count": len(instructions),
+                "mnemonics": mnemonics,
+                "instructions": instructions,
+                "callees": callees,
+                "callers": callers,
                 "hash": fhash,
             }
             functions.append(func_entry)
@@ -160,6 +185,7 @@ class BlackfyreAnalyzer(Plugin):
         return {
             "bcc_path": bcc_path,
             "function_count": len(functions),
+            "total_instructions": total_instructions,
             "functions": functions,
             "confidence": round(confidence, 4),
         }
