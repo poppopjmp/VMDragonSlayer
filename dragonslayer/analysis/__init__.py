@@ -58,3 +58,13 @@ from .pseudocode import (  # noqa: F401
     emit_c_like,
     PseudocodeResult,
 )
+
+from .mba_simplifier import (  # noqa: F401
+    simplify_mba,
+    simplify_expr,
+    simplify_batch,
+    simplify_handler_operands,
+    verify_equivalence,
+    MBAResult,
+    MBAStats,
+)
