@@ -8,8 +8,10 @@ import asyncio
 import base64
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
@@ -135,6 +137,180 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# B62: Production middleware
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# --- Request-ID middleware ---------------------------------------------------
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Attach a unique X-Request-ID header to every request/response."""
+    req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    # Store on request state so downstream handlers can access it
+    request.state.request_id = req_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
+
+# --- Per-request timeout middleware ------------------------------------------
+
+REQUEST_TIMEOUT_SECONDS: float = 300.0  # 5 minutes default
+
+
+@app.middleware("http")
+async def timeout_middleware(request: Request, call_next):
+    """Cancel requests that exceed REQUEST_TIMEOUT_SECONDS."""
+    try:
+        response = await asyncio.wait_for(
+            call_next(request),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        return response
+    except asyncio.TimeoutError:
+        req_id = getattr(request.state, "request_id", "unknown")
+        logger.warning("Request %s timed out after %ss", req_id, REQUEST_TIMEOUT_SECONDS)
+        return JSONResponse(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            content={
+                "error": "Request timed out",
+                "detail": f"Request exceeded {REQUEST_TIMEOUT_SECONDS}s limit",
+                "request_id": req_id,
+            },
+        )
+
+
+# --- API-key authentication middleware ---------------------------------------
+
+# Set VMDS_API_KEY env-var (or config) to enable; empty/unset = no auth.
+import os as _os
+
+API_KEY: str = _os.environ.get("VMDS_API_KEY", "")
+
+# Paths that never require authentication
+_PUBLIC_PATHS: frozenset[str] = frozenset({
+    "/", "/health", "/status", "/metrics", "/docs", "/redoc", "/openapi.json",
+})
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Reject requests without a valid API key (when API_KEY is set)."""
+    if API_KEY and request.url.path not in _PUBLIC_PATHS:
+        provided = (
+            request.headers.get("x-api-key")
+            or request.query_params.get("api_key")
+            or ""
+        )
+        if provided != API_KEY:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={
+                    "error": "Unauthorized",
+                    "detail": "Missing or invalid API key",
+                },
+            )
+    return await call_next(request)
+
+
+# --- Circuit breaker ---------------------------------------------------------
+
+class CircuitState(Enum):
+    CLOSED = "closed"      # normal operation
+    OPEN = "open"          # rejecting requests
+    HALF_OPEN = "half_open"  # testing recovery
+
+
+class CircuitBreaker:
+    """Simple circuit breaker to prevent cascade failures.
+
+    After *failure_threshold* consecutive failures the circuit **opens**
+    and all requests are rejected for *recovery_timeout* seconds.  After
+    that window the circuit moves to **half-open** and lets one request
+    through.  If it succeeds the circuit closes; if it fails the circuit
+    re-opens.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 30.0,
+    ) -> None:
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_time: float = 0.0
+        self._lock = asyncio.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        return self._state
+
+    async def record_success(self) -> None:
+        async with self._lock:
+            self._failure_count = 0
+            self._state = CircuitState.CLOSED
+
+    async def record_failure(self) -> None:
+        async with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = time.time()
+            if self._failure_count >= self.failure_threshold:
+                self._state = CircuitState.OPEN
+                logger.warning(
+                    "Circuit breaker OPENED after %d failures",
+                    self._failure_count,
+                )
+
+    async def allow_request(self) -> bool:
+        async with self._lock:
+            if self._state == CircuitState.CLOSED:
+                return True
+            if self._state == CircuitState.OPEN:
+                if time.time() - self._last_failure_time >= self.recovery_timeout:
+                    self._state = CircuitState.HALF_OPEN
+                    logger.info("Circuit breaker moved to HALF_OPEN")
+                    return True
+                return False
+            # HALF_OPEN: allow a single probe
+            return True
+
+
+circuit_breaker = CircuitBreaker()
+
+
+@app.middleware("http")
+async def circuit_breaker_middleware(request: Request, call_next):
+    """Reject requests when the circuit breaker is open."""
+    # Health/status endpoints bypass the circuit breaker
+    if request.url.path in ("/health", "/status", "/metrics"):
+        return await call_next(request)
+
+    if not await circuit_breaker.allow_request():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": "Service temporarily unavailable",
+                "detail": "Circuit breaker is open — too many recent failures",
+            },
+        )
+
+    try:
+        response = await call_next(request)
+        if response.status_code < 500:
+            await circuit_breaker.record_success()
+        else:
+            await circuit_breaker.record_failure()
+        return response
+    except Exception:
+        await circuit_breaker.record_failure()
+        raise
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Global state
 server_state: Dict[str, Any] = {
