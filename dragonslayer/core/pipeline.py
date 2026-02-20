@@ -1112,10 +1112,29 @@ class AnalysisPipeline:
             except Exception as exc:
                 logger.debug("VM context register identification skipped: %s", exc)
 
-            # ── 7. Semantic analysis + clustering (Batch 16) ─────────────
-            sym_summaries = ctx.shared_data.get(
-                "symbolic_execution", {},
-            ).get("handler_summaries", None)
+            # ── 7. Semantic analysis + clustering (Batch 16 + 22) ────────
+            # Use the symbolic depth bridge to extract per-handler summaries
+            # from all available sources (SE results, plugin traces,
+            # handler extraction deltas), running fresh SE when coverage
+            # is low.
+            sym_summaries: Optional[Dict[int, Any]] = None
+            try:
+                from ..analysis.symbolic_depth import collect_symbolic_summaries
+                ext_handlers = None
+                if extraction_data and isinstance(extraction_data, dict):
+                    ext_handlers = extraction_data.get("handlers")
+                sym_summaries = collect_symbolic_summaries(
+                    ctx.shared_data,
+                    boundaries=boundaries,
+                    handler_bodies=ext_handlers,
+                    bit_width=64,
+                    run_fresh=True,
+                ) or None
+            except Exception as exc:
+                logger.debug("Symbolic depth collection skipped: %s", exc)
+                sym_summaries = ctx.shared_data.get(
+                    "symbolic_execution", {},
+                ).get("handler_summaries", None)
 
             opcode_table = analyse_handler_semantics(
                 trace, boundaries,

@@ -71,6 +71,12 @@ from .bytecode_cfg import (  # noqa: F401
     HandlerCFG,
 )
 
+from .symbolic_depth import (  # noqa: F401
+    extract_symbolic_summaries,
+    run_handler_symbolic_execution,
+    collect_symbolic_summaries,
+)
+
 from .mba_simplifier import (  # noqa: F401
     simplify_mba,
     simplify_expr,
