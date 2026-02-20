@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 import z3
 
+# B57: Import resource-limit exceptions for raising on solver exhaustion.
+try:
+    from dragonslayer.core.exceptions import ResourceLimitError, AnalysisTimeoutError
+except ImportError:  # pragma: no cover — standalone usage
+    class ResourceLimitError(RuntimeError):  # type: ignore[no-redef]
+        pass
+    class AnalysisTimeoutError(RuntimeError):  # type: ignore[no-redef]
+        pass
+
 
 @dataclass
 class SolverResult:
@@ -104,8 +113,16 @@ class Z3Solver:
 
     # -- Solving -------------------------------------------------------------
 
-    def check(self) -> SolverResult:
-        """Check satisfiability and extract a model if SAT."""
+    def check(self, *, raise_on_resource_limit: bool = False) -> SolverResult:
+        """Check satisfiability and extract a model if SAT.
+
+        Parameters
+        ----------
+        raise_on_resource_limit : bool
+            When *True*, a solver ``unknown`` result (typically caused by
+            timeout or memory exhaustion) raises :class:`ResourceLimitError`
+            instead of returning a non-satisfiable :class:`SolverResult`.
+        """
 
         try:
             result = self._solver.check()
@@ -122,7 +139,23 @@ class Z3Solver:
             elif result == z3.unsat:
                 return SolverResult(satisfiable=False)
             else:
-                return SolverResult(satisfiable=False, error="solver returned unknown")
+                # B57: ``unknown`` — typically timeout or memory exhaustion.
+                reason = str(self._solver.reason_unknown())
+                if raise_on_resource_limit:
+                    if "timeout" in reason.lower():
+                        raise AnalysisTimeoutError(
+                            f"Z3 solver timed out: {reason}",
+                            error_code="SOLVER_TIMEOUT",
+                            details={"reason": reason, "timeout_ms": self.timeout_ms},
+                        )
+                    raise ResourceLimitError(
+                        f"Z3 solver returned unknown: {reason}",
+                        error_code="SOLVER_RESOURCE_LIMIT",
+                        details={"reason": reason, "memory_limit_mb": self.memory_limit_mb},
+                    )
+                return SolverResult(satisfiable=False, error=f"solver returned unknown: {reason}")
+        except (ResourceLimitError, AnalysisTimeoutError):
+            raise  # re-raise our own exceptions
         except Exception as exc:
             return SolverResult(satisfiable=False, error=str(exc))
 

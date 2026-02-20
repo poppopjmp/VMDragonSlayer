@@ -18,11 +18,18 @@ import tempfile
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..core.orchestrator import Orchestrator
 from ..core.api import VMDragonSlayerAPI
-from ..core.exceptions import AnalysisError, InvalidDataError, ConfigurationError
+from ..core.exceptions import (
+    AnalysisError,
+    AnalysisTimeoutError,
+    ConfigurationError,
+    InvalidDataError,
+    ResourceLimitError,
+    VMDragonSlayerError,
+)
 from ..core.config import get_config
 
 
@@ -43,7 +50,8 @@ class AnalysisRequest(BaseModel):
     options: Dict[str, Any] = Field(default_factory=dict, description="Additional analysis options")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
     
-    @validator('sample_data')
+    @field_validator('sample_data')
+    @classmethod
     def validate_base64(cls, v):
         """Validate base64 encoding."""
         try:
@@ -150,16 +158,29 @@ RATE_LIMIT_WINDOW = 60  # seconds
 
 
 async def check_rate_limit(request: Request) -> bool:
-    """Check if request exceeds rate limit (async-safe)."""
+    """Check if request exceeds rate limit (async-safe).
+
+    B57: Also evicts stale IPs that have no recent requests to prevent
+    unbounded memory growth in ``server_state['rate_limiter']``.
+    """
     client_ip = request.client.host
     now = time.time()
 
     async with _rate_lock:
-        # Clean old entries
+        # Clean old entries for this IP
         server_state['rate_limiter'][client_ip] = [
             t for t in server_state['rate_limiter'][client_ip]
             if now - t < RATE_LIMIT_WINDOW
         ]
+
+        # B57: Evict IPs with no recent requests (cheap periodic sweep).
+        if server_state['total_requests'] % 100 == 0:
+            stale_ips = [
+                ip for ip, ts in server_state['rate_limiter'].items()
+                if not ts or (now - max(ts)) > RATE_LIMIT_WINDOW * 2
+            ]
+            for ip in stale_ips:
+                del server_state['rate_limiter'][ip]
 
         # Check limit
         if len(server_state['rate_limiter'][client_ip]) >= RATE_LIMIT_REQUESTS:
@@ -213,6 +234,60 @@ async def analysis_error_handler(request: Request, exc: AnalysisError):
             'error': 'Analysis failed',
             'detail': str(exc),
             'error_code': exc.error_code if hasattr(exc, 'error_code') else 'ANALYSIS_ERROR'
+        }
+    )
+
+
+# B57: Additional exception handlers ----------------------------------------
+
+@app.exception_handler(ConfigurationError)
+async def configuration_error_handler(request: Request, exc: ConfigurationError):
+    """Handle configuration errors (e.g. invalid config at startup)."""
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            'error': 'Configuration error',
+            'detail': str(exc),
+            'error_code': getattr(exc, 'error_code', 'CONFIGURATION_ERROR'),
+        }
+    )
+
+
+@app.exception_handler(ResourceLimitError)
+async def resource_limit_handler(request: Request, exc: ResourceLimitError):
+    """Handle resource-limit exceeded (memory, paths, loop iterations)."""
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            'error': 'Resource limit exceeded',
+            'detail': str(exc),
+            'error_code': getattr(exc, 'error_code', 'RESOURCE_LIMIT'),
+        }
+    )
+
+
+@app.exception_handler(AnalysisTimeoutError)
+async def analysis_timeout_handler(request: Request, exc: AnalysisTimeoutError):
+    """Handle analysis-timeout exceeded."""
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={
+            'error': 'Analysis timed out',
+            'detail': str(exc),
+            'error_code': getattr(exc, 'error_code', 'ANALYSIS_TIMEOUT'),
+        }
+    )
+
+
+@app.exception_handler(VMDragonSlayerError)
+async def generic_vmds_error_handler(request: Request, exc: VMDragonSlayerError):
+    """Catch-all for any VMDragonSlayerError subclass not handled above."""
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            'error': 'Internal error',
+            'detail': str(exc),
+            'error_code': getattr(exc, 'error_code', 'VMDS_ERROR'),
         }
     )
 
@@ -380,6 +455,9 @@ async def analyze_binary(
         raise
     except HTTPException:
         raise
+    except VMDragonSlayerError:
+        # B57: Let registered exception handlers process framework errors.
+        raise
     except Exception as exc:
         logger.error("Analysis failed: %s", exc)
         raise HTTPException(
@@ -447,6 +525,9 @@ async def upload_and_analyze(
         return result
 
     except HTTPException:
+        raise
+    except VMDragonSlayerError:
+        # B57: Let registered exception handlers process framework errors.
         raise
     except Exception as exc:
         logger.error("Upload analysis failed: %s", exc)

@@ -58,7 +58,13 @@ class Config:
         },
     }
     
-    def __init__(self, config_dir: Optional[Path] = None, environment: str = 'development'):
+    def __init__(
+        self,
+        config_dir: Optional[Path] = None,
+        environment: str = 'development',
+        *,
+        validate_on_load: bool = True,
+    ):
 
         self.environment = environment
         self.config_dir = config_dir or self._find_config_dir()
@@ -68,6 +74,14 @@ class Config:
         self._load_defaults()
         self._load_yaml_config()
         self._load_env_variables()
+
+        # B57: Auto-validate after loading — catches misconfigurations early.
+        if validate_on_load:
+            try:
+                self.validate()
+            except ValidationError as exc:
+                logger.error("Configuration validation failed: %s", exc)
+                raise
         
         logger.info(f"Configuration loaded for environment: {environment}")
     

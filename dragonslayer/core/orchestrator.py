@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from .config import get_config
 from .exceptions import (
     AnalysisError,
+    AnalysisTimeoutError,
     ConfigurationError,
     InvalidDataError,
 )
@@ -463,15 +464,16 @@ class Orchestrator:
                 "Pipeline timed out after %.1fs (limit=%ds)",
                 elapsed, pipeline_timeout,
             )
-            return AnalysisResult(
-                success=False,
-                file_info=asdict(request.file_info) if request.file_info else {},
-                analysis_type=request.analysis_type.value,
-                results={},
-                engine_results=[],
-                execution_time=elapsed,
-                errors=[f"Pipeline timed out after {pipeline_timeout}s"],
-                confidence_scores={},
+            # B57: Raise AnalysisTimeoutError so callers (API, tests) can
+            # handle timeouts specifically instead of inspecting error strings.
+            raise AnalysisTimeoutError(
+                f"Pipeline timed out after {pipeline_timeout}s",
+                error_code="PIPELINE_TIMEOUT",
+                details={
+                    "elapsed": round(elapsed, 2),
+                    "limit_seconds": pipeline_timeout,
+                    "analysis_type": request.analysis_type.value,
+                },
             )
         except Exception as exc:
             elapsed = time.monotonic() - t0
