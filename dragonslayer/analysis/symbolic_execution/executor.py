@@ -1028,13 +1028,15 @@ class SymbolicExecutor:
                             continue
 
                         if len(worklist) < self.max_paths:
-                            # B59: Incremental feasibility check — prune
+                            # B59+B65: Incremental feasibility check — prune
                             # the taken branch if it is provably infeasible
                             # under the current path constraints.
+                            # B65: Use push/pop for true incremental solving
+                            # instead of resetting and re-adding all constraints.
                             taken_feasible = True
                             if branch_constraint is not None:
                                 try:
-                                    self._solver.reset()
+                                    self._solver.push()
                                     for c in state.constraints:
                                         self._solver.add(c)
                                     taken_feasible = self._solver.check_feasibility(
@@ -1042,6 +1044,8 @@ class SymbolicExecutor:
                                     )
                                 except Exception:
                                     taken_feasible = True  # conservative
+                                finally:
+                                    self._solver.pop()
 
                             if taken_feasible:
                                 taken = state.fork()
@@ -1060,12 +1064,12 @@ class SymbolicExecutor:
                             state.pc = next_addr
                             if branch_constraint is not None and Z3Solver.available():
                                 import z3 as _z3
-                                # B59: Check fall-through feasibility before
+                                # B59+B65: Check fall-through feasibility before
                                 # committing the negated constraint.
                                 neg_constraint = _z3.Not(branch_constraint)
                                 fall_feasible = True
                                 try:
-                                    self._solver.reset()
+                                    self._solver.push()
                                     for c in state.constraints:
                                         self._solver.add(c)
                                     fall_feasible = self._solver.check_feasibility(
@@ -1073,6 +1077,8 @@ class SymbolicExecutor:
                                     )
                                 except Exception:
                                     fall_feasible = True
+                                finally:
+                                    self._solver.pop()
                                 if fall_feasible:
                                     state.add_constraint(neg_constraint)
                                 else:

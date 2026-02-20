@@ -113,6 +113,7 @@ class TestConfigValidation:
         c = Config.__new__(Config)
         c.environment = "test"
         c.config_dir = None
+        c._lock = __import__('threading').RLock()  # B64: required by set()
         import copy
         c._config = copy.deepcopy(Config.DEFAULTS)
         for key, val in overrides.items():

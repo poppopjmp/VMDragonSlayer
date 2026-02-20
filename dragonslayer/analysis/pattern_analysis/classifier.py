@@ -260,17 +260,26 @@ def _match_instruction_sequence_gap(
     def _matches(mnem: str, pat: str) -> bool:
         return pat == "*" or mnem == pat
 
+    # B63: Memoize (mi, pi) → bool to prevent exponential backtracking
+    _memo: Dict[tuple[int, int], bool] = {}
+
     def _search(mi: int, pi: int) -> bool:
         if pi == plen:
             return True
+        key = (mi, pi)
+        if key in _memo:
+            return _memo[key]
+        result = False
         for i in range(mi, n):
             if _matches(mnemonics[i], pattern[pi]):
                 # Check gap constraint: gap = i - mi (skipped instructions)
                 if pi > 0 and (i - mi) > max_gap:
-                    return False
+                    break  # further positions only increase gap
                 if _search(i + 1, pi + 1):
-                    return True
-        return False
+                    result = True
+                    break
+        _memo[key] = result
+        return result
 
     # Try every starting position
     for start in range(n):
@@ -384,6 +393,7 @@ class PatternClassifier:
         *,
         handler_name: str = "",
         mnemonics: Optional[List[str]] = None,
+        operands: Optional[List[str]] = None,
     ) -> ClassificationResult:
         """
         Classify a raw handler byte sequence directly (no Match object).
@@ -396,8 +406,12 @@ class PatternClassifier:
             Optional handler name for keyword matching.
         mnemonics : list of str or None
             B56: Optional mnemonic sequence for instruction-sequence matching.
+        operands : list of str or None
+            B63: Per-instruction operand strings (parallel to *mnemonics*).
+            Used for identity-mov detection in junk stripping and
+            register-class normalization for LLM refinement.
         """
-        match_dict = {
+        match_dict: Dict[str, Any] = {
             "pattern_id": f"raw_{handler_name or 'unknown'}",
             "name": handler_name or "raw_handler",
             "operation": "",
@@ -407,6 +421,12 @@ class PatternClassifier:
         }
         if mnemonics is not None:
             match_dict["_mnemonics"] = mnemonics
+        if operands is not None:
+            match_dict["_operands"] = operands
+            # B63: Store register-normalized operands for LLM / downstream
+            match_dict["_normalized_operands"] = [
+                normalize_operands(op) for op in operands
+            ]
         return self._classify_single(match_dict)
 
     # -- internal -----------------------------------------------------------

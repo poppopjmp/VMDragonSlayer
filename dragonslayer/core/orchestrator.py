@@ -282,6 +282,15 @@ class Orchestrator:
         )
         logger.info("Orchestrator initialised")
 
+    # B64: Context-manager protocol ------------------------------------------
+
+    def __enter__(self) -> "Orchestrator":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
+        self.shutdown()
+        return None
+
     # ------------------------------------------------------------------
     # Public entry points
     # ------------------------------------------------------------------

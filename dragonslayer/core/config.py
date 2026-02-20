@@ -69,6 +69,8 @@ class Config:
         self.environment = environment
         self.config_dir = config_dir or self._find_config_dir()
         self._config: Dict[str, Any] = {}
+        # B64: Thread-safe access to _config for concurrent API requests
+        self._lock = threading.RLock()
         
         # Load configuration in order of precedence
         self._load_defaults()
@@ -135,7 +137,15 @@ class Config:
         )
     
     def _load_env_variables(self):
-        """Load configuration from environment variables."""
+        """Load configuration from environment variables.
+
+        Supports both legacy hardcoded keys and the B64 generic convention:
+        ``VMDS_<SECTION>__<KEY>=value`` where ``__`` maps to ``.`` in the
+        config hierarchy.  For example ``VMDS_SYMBOLIC_EXECUTION__MAX_PATHS=128``
+        sets ``symbolic_execution.max_paths`` to ``128``.  Integer and float
+        values are auto-parsed; everything else stays as a string.
+        """
+        # Legacy hardcoded overrides (kept for backwards compat)
         if 'VMDS_LOGGING_LEVEL' in os.environ:
             self._config['logging']['level'] = os.environ['VMDS_LOGGING_LEVEL']
         
@@ -157,6 +167,23 @@ class Config:
                 self._config['api']['port'] = int(os.environ['VMDS_API_PORT'])
             except ValueError:
                 logger.warning("Invalid VMDS_API_PORT value")
+
+        # B64: Generic VMDS_ prefix convention
+        for env_key, env_val in os.environ.items():
+            if not env_key.startswith("VMDS_") or "__" not in env_key:
+                continue
+            # Strip prefix and convert VMDS_SECTION__KEY → section.key
+            path = env_key[5:].lower().replace("__", ".")
+            # Auto-parse numeric values
+            parsed: Any = env_val
+            try:
+                parsed = int(env_val)
+            except ValueError:
+                try:
+                    parsed = float(env_val)
+                except ValueError:
+                    pass
+            self.set(path, parsed)
     
     def _merge_config(self, new_config: Dict[str, Any]):
         """Recursively merge new configuration into existing config."""
@@ -178,31 +205,34 @@ class Config:
     def get(self, key: str, default: Any = None) -> Any:
 
         keys = key.split('.')
-        value = self._config
-        
-        for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
-            else:
-                return default
-        
-        return value
+        with self._lock:
+            value = self._config
+
+            for k in keys:
+                if isinstance(value, dict) and k in value:
+                    value = value[k]
+                else:
+                    return default
+
+            return value
     
     def set(self, key: str, value: Any):
 
         keys = key.split('.')
-        config = self._config
-        
-        for k in keys[:-1]:
-            if k not in config:
-                config[k] = {}
-            config = config[k]
-        
-        config[keys[-1]] = value
+        with self._lock:
+            config = self._config
+
+            for k in keys[:-1]:
+                if k not in config:
+                    config[k] = {}
+                config = config[k]
+
+            config[keys[-1]] = value
     
     def get_section(self, section: str) -> Dict[str, Any]:
 
-        return self._config.get(section, {})
+        with self._lock:
+            return self._config.get(section, {})
     
     def validate(self):
         """Validate configuration values (B53 — comprehensive).

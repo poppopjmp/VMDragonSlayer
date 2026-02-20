@@ -185,6 +185,7 @@ async def timeout_middleware(request: Request, call_next):
 # --- API-key authentication middleware ---------------------------------------
 
 # Set VMDS_API_KEY env-var (or config) to enable; empty/unset = no auth.
+import hmac as _hmac
 import os as _os
 
 API_KEY: str = _os.environ.get("VMDS_API_KEY", "")
@@ -204,7 +205,7 @@ async def api_key_middleware(request: Request, call_next):
             or request.query_params.get("api_key")
             or ""
         )
-        if provided != API_KEY:
+        if not _hmac.compare_digest(provided, API_KEY):
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={
