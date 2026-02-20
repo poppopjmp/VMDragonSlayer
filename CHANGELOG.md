@@ -4,6 +4,69 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Phase 10 — Core Engine Hardening (7 commits)
+
+Phase 10 addresses the top-7 critical gaps identified by an expert
+audit, transforming the symbolic execution engine and analysis pipeline
+from proof-of-concept quality into production-ready components.
+Test count: **430 → 541** (111 new tests, 7 skipped).
+
+#### New — Sub-Register Aliasing + SIB Addressing (`analysis.symbolic_execution`)
+- **Full x86-64 sub-register model** — `_SUBREG_MAP_64`/`_SUBREG_MAP_32` lookup tables map
+  every sub-register (al/ah/ax/eax, r8b/r8w/r8d, sil/dil/bpl/spl) to `(parent, bit_lo, width, zero_ext)` tuples (`6a10bec`)
+- `get_register()` uses z3.Extract for symbolic reads, bit masking for concrete
+- `set_register()` with zero-extension for 32-bit writes on x64 (x86-64 ABI)
+- **SIB tokenizer** — `_resolve_sib_address()` parses full `[base+index*scale+disp]` addressing modes via regex tokenizer + arithmetic evaluator that promotes to z3 when any operand is symbolic
+- Rewrote `_resolve_operand()`, `_write_operand()`, `_resolve_effective_address()` to use new sub-register + SIB infrastructure
+- 40 new tests (22 sub-register, 9 SIB, 9 integration)
+
+#### New — Byte-Granular Memory Model (`analysis.symbolic_execution.state`)
+- Replaced single-slot `Dict[int, Any]` with **byte-addressable store** (`4a8cd77`)
+- `write_memory(addr, val, size)` splits into individual bytes (little-endian)
+- `read_memory(addr, size)` coalesces bytes into int or z3.Concat for symbolic
+- `_resolve_operand_sized()` for size-prefixed memory reads (`byte ptr`, `word ptr`, etc.)
+- Legacy fast-path preserved for backwards compatibility
+- 12 new memory tests (concrete, symbolic, overlap, fork)
+
+#### New — VA ↔ File-Offset Mapping (`analysis.binary_format`)
+- `section_at_va()`, `va_to_offset()`, `offset_to_va()` for PE/ELF section-based address translation (`d933de1`)
+- `load_sections(data)` returns `{va: bytes}` memory map
+- `read_va(data, va, size)` reads bytes at any virtual address
+- 11 new tests (VA mapping, roundtrips, load, edge cases)
+
+#### New — Built-in Unicorn Trace Engine (`analysis.trace_engine`) — P0
+- `TraceEngine` class wraps Unicorn for x86/x86-64 emulation (`954d03e`)
+- `trace(data, entry_va)` → `ExecutionTrace` with instructions, memory accesses, and control flow
+- `trace_parsed(parsed_binary, data)` integrates with ParsedBinary metadata
+- `TraceConfig` for max_instructions, register/memory capture, stop_addresses
+- Auto-maps unmapped memory, Capstone disassembly integration
+- 18 new tests (64-bit, 32-bit, config, parsed binary, pipeline)
+
+#### Fixed — INC/DEC Carry Flag Preservation (`analysis.symbolic_execution.state`)
+- `update_flags_inc_dec()` now saves/restores CF before/after `update_flags_arith()` (`24fcf6b`)
+- Cleaned up executor's inline workaround
+- 4 new tests (concrete CF, ZF+CF, executor integration)
+
+#### New — Symbolic vIP Identification (`analysis.vm_discovery.handler_boundaries`)
+- `score_vip_from_symbolic()` analyzes `HandlerSymbolicSummary.final_registers` to detect which `in_{reg}` symbol self-advances (vIP pattern) (`d473d91`)
+- `identify_vip_register()` gains `symbolic_summaries` parameter; when provided, symbolic self-advance score blended in at 0.30 weight
+- `VIPCandidate.symbolic_score` field added
+- 13 new tests (9 standalone symbolic + 4 integration)
+
+#### Enhanced — MBA Rewrite Rules (`analysis.mba_simplifier`)
+- Expanded from 16 → 31 proven rules: 21 two-variable + 10 three-variable (`e2aab65`)
+- New 2-var rules: De Morgan (nor/nand), `or_and_to_add`, complement constants, `complement_to_neg`, `and_xor_or_to_xor`, `xor_xor_and_to_or`
+- New 3-var rules: `or_xor_to_and ± w`, `or_and ± w`, `neg_add_3`
+- 14 new proven tests
+
+#### Test Suite
+- **541 tests** (541 pass, 7 skip — yara-python only)
+- New test files: `test_phase10_subreg_sib`, `test_trace_engine`, `test_symbolic_vip`
+- Enhanced: `test_binary_format`, `test_mba_simplifier`
+- Trajectory: 430 (Phase 9 end) → 470 → 481 → 492 → 510 → 514 → 527 → 541
+
+---
+
 ### Phase 9 — Correctness & Depth Improvements (12 commits)
 
 Phase 9 addresses the top-10 correctness and depth issues identified by an expert

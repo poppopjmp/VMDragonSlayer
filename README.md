@@ -24,16 +24,17 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | Dispatcher Analysis | `analysis.vm_discovery.dispatcher` | Jump-table scanning, push/ret trampoline detection, handler table reconstruction, opcode→address mapping |
 | Pattern Analysis | `analysis.pattern_analysis` | Rule-based + similarity + ML (hybrid auto-selection), regex entry-point matching, optional YARA backend |
 | Taint Tracking | `analysis.taint_tracking` | Register + memory taint propagation with SIB addressing (`[base+index*scale+disp]`), virtual register mapping (VMProtect/Themida presets), handler boundary detection |
-| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), explicit EFLAGS modelling (ZF/CF/SF/OF), z3 branch constraints, opaque predicate detection, dispatcher back-edge scoring, concrete SP for push/pop, handler-local symbolic execution with MBA simplification |
+| Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), explicit EFLAGS modelling (ZF/CF/SF/OF), **full x86-64 sub-register aliasing** (al/ah/ax/eax, r8b-r15b, sil/dil/bpl/spl), **byte-granular memory model** (LE byte store with z3 Concat), **SIB addressing** (`[base+index*scale+disp]` tokenizer), z3 branch constraints, opaque predicate detection, dispatcher back-edge scoring, concrete SP for push/pop, handler-local symbolic execution with MBA simplification |
 | Anti-Evasion | `analysis.anti_evasion` | Section-aware instruction scanning (PE/ELF), anti-debug/VM/sandbox detection, binary patching |
-| Binary Parsing | `analysis.binary_format` | Shared LIEF-based PE/ELF parser used across all analysis modules |
+| Binary Parsing | `analysis.binary_format` | Shared LIEF-based PE/ELF parser, **VA ↔ file-offset mapping** (`va_to_offset`, `offset_to_va`, `section_at_va`), `load_sections`, `read_va` |
+| Trace Production | `analysis.trace_engine` | **Built-in Unicorn-based trace engine** for x86/x86-64, `TraceConfig` (max_insns, register/memory capture, stop_addresses), auto-maps unmapped memory, Capstone disassembly, `trace_parsed` integration with ParsedBinary |
 | Trace Ingestion | `analysis.trace_ingestion` | Unified `ExecutionTrace` model; ingestion from text files, angr, Triton, Qiling, and shared plugin data |
-| Handler Boundaries | `analysis.vm_discovery.handler_boundaries` | vIP register identification (monotonic + alignment scoring), trace segmentation into per-handler slices |
+| Handler Boundaries | `analysis.vm_discovery.handler_boundaries` | vIP register identification (monotonic + alignment + **symbolic self-advance** scoring), `score_vip_from_symbolic` for handler-summary-based vIP detection, trace segmentation into per-handler slices |
 | CFG Reconstruction | `analysis.cfg` | Instruction-level and handler-level CFGs via networkx, basic-block extraction, dominator analysis |
 | Bytecode Extraction | `analysis.bytecode_extract` | Correlates memory reads with handler boundaries to extract the VM bytecode stream |
 | Handler Semantics | `analysis.handler_semantics` | Mnemonic histogram analysis → VMOperation classification (add, xor, load, store, jcc, …), opcode table construction, taint-based semantic slicing, junk-code filtering |
 | Pseudocode Emission | `analysis.pseudocode` | Linear listing, structured (if/while/goto), and C-like function output with SSA def-use variable naming |
-| MBA Simplification | `analysis.mba_simplifier` | 16 z3-proven rewrite rules (11 two-var + 5 three-var), `verify_equivalence`, N-variable permutation matching, recursive-descent expression parser, batch simplification |
+| MBA Simplification | `analysis.mba_simplifier` | 31 z3-proven rewrite rules (21 two-var + 10 three-var), `verify_equivalence`, N-variable permutation matching, recursive-descent expression parser, batch simplification |
 | Devirtualise Stage | `core.pipeline` (devirtualize) | End-to-end pipeline stage: trace → vIP → boundaries → semantics → pseudocode |
 | LLM-Assisted | `llm.analyzer` | Few-shot handler classification, deobfuscation hints, code recovery, pattern explanation (via litellm) |
 | ML Pipeline | `ml.handler_classifier`, `ml.pipeline`, `ml.model`, `ml.trainer` | 15-D feature extraction, handler classifier (heuristic + sklearn RF), training pipeline, label derivation, `VMClassifier`, `EnsembleClassifier` |
@@ -123,17 +124,27 @@ graph TD
 #### 4. **Symbolic Execution** (`dragonslayer.analysis.symbolic_execution`)
 - **Purpose**: Explore VM execution paths symbolically
 - **Instruction Semantics**: mov, add/sub, and/or/xor, shl/shr/sar/rol/ror, push/pop, lea, cmp/test, inc/dec, neg/not, xchg, movzx/movsx — all produce z3 BitVec expressions
+- **Sub-Register Aliasing**: Full x86-64 sub-register model (al/ah/ax/eax → rax, r8b/r8w/r8d, sil/dil/bpl/spl) with z3.Extract reads and zero-ext 32→64 writes
+- **Byte-Granular Memory**: LE byte store with z3.Concat for symbolic byte coalescing; size-prefixed reads (byte/word/dword/qword ptr)
+- **SIB Addressing**: Tokenizer + evaluator for `[base+index*scale+disp]` with automatic z3 promotion
 - **Handler-Local Execution**: `execute_handler()` runs isolated symbolic analysis on individual handler bodies, producing `HandlerSymbolicSummary` (final registers, constraints, memory writes)
-- **MBA Simplification**: Final register expressions simplified via `mba_simplifier.simplify_expr` (11 proven rewrite rules + z3 fallback)
+- **MBA Simplification**: Final register expressions simplified via `mba_simplifier.simplify_expr` (31 proven rewrite rules + z3 fallback)
 - **Branch Analysis**: Maps jcc mnemonics to z3 constraints, forks state on conditional branches
 - **Opaque Predicate Detection**: Trivial (`cmp reg,reg`) + z3-proven constant predicates
 - **Integration**: Uses dispatcher addresses from vm_discovery for focused exploration
 
 #### 4b. **MBA Simplifier** (`dragonslayer.analysis.mba_simplifier`)
 - **Purpose**: Reduce Mixed Boolean-Arithmetic obfuscation in VM handler operands
-- **Rewrite Rules**: 11 z3-proven rules (and_or→add, xor_and→add, XNOR, complement_sub, double_not, etc.)
+- **Rewrite Rules**: 31 z3-proven rules (21 two-var + 10 three-var) including De Morgan, complement identities, XNOR, carry-chain decomposition
 - **Verification**: `verify_equivalence()` proves bit-accurate equivalence of original and simplified forms
 - **Interfaces**: `simplify_mba()` (text), `simplify_expr()` (z3), `simplify_batch()` (bulk), `simplify_handler_operands()` (in-place disassembly rewrite)
+
+#### 4c. **Trace Engine** (`dragonslayer.analysis.trace_engine`)
+- **Purpose**: Built-in dynamic trace production via Unicorn emulation
+- **Architecture**: x86 and x86-64 via Unicorn, Capstone disassembly
+- **API**: `trace(data, entry_va)` → `ExecutionTrace`; `trace_parsed(binary, data)` with ParsedBinary
+- **Configuration**: `TraceConfig` for max_instructions, register/memory capture, stop_addresses, stack setup
+- **Auto-Mapping**: Automatically maps unmapped memory regions on access
 
 #### 5. **Anti-Evasion** (`dragonslayer.analysis.anti_evasion`)
 - **Purpose**: Detect and neutralise anti-analysis techniques
@@ -166,12 +177,13 @@ VMDragonSlayer/
 │   │   ├── symbolic_execution/    # Symbolic execution with real semantics
 │   │   ├── taint_tracking/        # Register + memory taint, VM-aware tracker
 │   │   ├── anti_evasion/          # Section-aware anti-analysis detection
-│   │   ├── binary_format.py       # Shared LIEF binary parser
+│   │   ├── binary_format.py       # Shared LIEF binary parser + VA ↔ offset mapping
 │   │   ├── trace_ingestion.py     # Unified execution trace model
+│   │   ├── trace_engine.py        # Built-in Unicorn trace engine (x86/x86-64)
 │   │   ├── cfg.py                 # CFG reconstruction (instruction + handler level)
 │   │   ├── bytecode_extract.py    # VM bytecode stream extraction
 │   │   ├── handler_semantics.py   # Handler-to-VMOperation classification
-│   │   ├── mba_simplifier.py      # z3-based Mixed Boolean-Arithmetic simplification
+│   │   ├── mba_simplifier.py      # z3-based MBA simplification (31 proven rules)
 │   │   └── pseudocode.py          # Pseudocode emission (linear/structured/C-like with SSA)
 │   ├── api/                       # REST API server and client
 │   ├── cli.py                     # Click CLI: analyze, serve, info
