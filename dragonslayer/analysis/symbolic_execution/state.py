@@ -27,6 +27,53 @@ except ImportError:
     _Z3_AVAILABLE = False
 
 
+# ---------------------------------------------------------------------------
+# Sub-register aliasing for x86/x86-64
+# ---------------------------------------------------------------------------
+# Maps sub-register names to (parent_64, parent_32, bit_lo, bit_hi).
+# bit_hi is *exclusive* — e.g. (0, 8) means bits [7:0].
+# For 32-bit sub-registers on x86-64, writes zero-extend to 64 bits.
+
+_SUBREG_MAP_64: Dict[str, tuple] = {}
+_SUBREG_MAP_32: Dict[str, tuple] = {}
+
+def _build_subreg_maps() -> None:
+    """Populate the sub-register alias tables."""
+    _R64 = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp"]
+    _R32 = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
+    _R16 = ["ax",  "bx",  "cx",  "dx",  "si",  "di",  "bp",  "sp"]
+    _R8L = ["al",  "bl",  "cl",  "dl",  "sil", "dil", "bpl", "spl"]
+    _R8H = ["ah",  "bh",  "ch",  "dh"]  # only first 4 have *h
+
+    # --- x86-64 map -------------------------------------------------------
+    for r64, r32, r16, r8l in zip(_R64, _R32, _R16, _R8L):
+        # 32-bit → zero-extends to 64
+        _SUBREG_MAP_64[r32] = (r64, 0, 32,  True)   # (parent, bit_lo, width, zero_ext)
+        # 16-bit sub
+        _SUBREG_MAP_64[r16] = (r64, 0, 16, False)
+        # 8-bit low
+        _SUBREG_MAP_64[r8l] = (r64, 0, 8,  False)
+
+    for i, r8h in enumerate(_R8H):
+        _SUBREG_MAP_64[r8h] = (_R64[i], 8, 8, False)
+
+    # r8–r15 extended registers
+    for n in range(8, 16):
+        base = f"r{n}"
+        _SUBREG_MAP_64[f"r{n}d"]  = (base, 0, 32, True)
+        _SUBREG_MAP_64[f"r{n}w"]  = (base, 0, 16, False)
+        _SUBREG_MAP_64[f"r{n}b"]  = (base, 0, 8,  False)
+
+    # --- x86-32 map -------------------------------------------------------
+    for r32, r16, r8l in zip(_R32, _R16, _R8L[:4]):
+        _SUBREG_MAP_32[r16] = (r32, 0, 16, False)
+        _SUBREG_MAP_32[r8l] = (r32, 0, 8,  False)
+    for i, r8h in enumerate(_R8H):
+        _SUBREG_MAP_32[r8h] = (_R32[i], 8, 8, False)
+
+_build_subreg_maps()
+
+
 @dataclass
 class MemoryWrite:
     """Record of a symbolic write to memory."""
@@ -207,15 +254,94 @@ class SymbolicState:
             return z3.BitVecVal(val, bw)
         return val
 
-    # -- Register access ----------------------------------------------------
+    # -- Register access (with sub-register aliasing) -------------------------
+
+    def _subreg_info(self, name: str) -> Optional[tuple]:
+        """Return ``(parent, bit_lo, width, zero_ext)`` or *None*."""
+        table = _SUBREG_MAP_64 if self.bit_width == 64 else _SUBREG_MAP_32
+        return table.get(name)
 
     def get_register(self, name: str) -> Any:
-        """Get the current value (symbolic or concrete) of a register."""
-        return self.registers.get(name.lower(), 0)
+        """Get the current value (symbolic or concrete) of a register.
+
+        Handles sub-register reads: ``al`` extracts bits [7:0] of ``rax``,
+        ``eax`` extracts bits [31:0], etc.
+        """
+        key = name.lower()
+        # Direct hit — full-width register
+        if key in self.registers:
+            return self.registers[key]
+
+        # Sub-register alias?
+        info = self._subreg_info(key)
+        if info is None:
+            return 0
+
+        parent, bit_lo, width, _ = info
+        parent_val = self.registers.get(parent, 0)
+
+        if _Z3_AVAILABLE and hasattr(parent_val, "sort"):
+            return z3.Extract(bit_lo + width - 1, bit_lo, parent_val)
+        else:
+            if isinstance(parent_val, int):
+                return (parent_val >> bit_lo) & ((1 << width) - 1)
+            return 0
 
     def set_register(self, name: str, value: Any) -> None:
-        """Set a register to a symbolic or concrete value."""
-        self.registers[name.lower()] = value
+        """Set a register to a symbolic or concrete value.
+
+        Handles sub-register writes: writing ``eax`` on x86-64 zero-extends
+        to ``rax`` (upper 32 bits cleared).  Writing ``al`` or ``ax``
+        preserves the upper bits of the parent.
+        """
+        key = name.lower()
+        # Direct hit — full-width register
+        if key in self.registers:
+            self.registers[key] = value
+            return
+
+        # Sub-register alias?
+        info = self._subreg_info(key)
+        if info is None:
+            self.registers[key] = value
+            return
+
+        parent, bit_lo, width, zero_ext = info
+        parent_val = self.registers.get(parent, 0)
+        bw = self.bit_width
+
+        if zero_ext:
+            # Writing a 32-bit sub-register on x86-64 → zero-extend to 64 bits
+            if _Z3_AVAILABLE and hasattr(value, "sort"):
+                val_bv = value
+                if val_bv.sort().size() != width:
+                    val_bv = z3.Extract(width - 1, 0, val_bv)
+                self.registers[parent] = z3.ZeroExt(bw - width, val_bv)
+            else:
+                v = value if isinstance(value, int) else 0
+                self.registers[parent] = v & ((1 << width) - 1)
+        else:
+            # Merge into parent preserving other bits
+            if _Z3_AVAILABLE and (hasattr(parent_val, "sort") or hasattr(value, "sort")):
+                parent_bv = self._ensure_bv_static(parent_val, bw) if not hasattr(parent_val, "sort") else parent_val
+                val_bv = self._ensure_bv_static(value, width) if not hasattr(value, "sort") else value
+                if hasattr(val_bv, "sort") and val_bv.sort().size() != width:
+                    val_bv = z3.Extract(width - 1, 0, val_bv)
+                # Build mask: clear bits [bit_lo+width-1 : bit_lo]
+                mask_int = ((1 << bw) - 1) ^ (((1 << width) - 1) << bit_lo)
+                mask_bv = z3.BitVecVal(mask_int, bw)
+                cleared = parent_bv & mask_bv
+                # Extend the value to full width and shift into position
+                ext_val = z3.ZeroExt(bw - width, val_bv)
+                if bit_lo > 0:
+                    ext_val = ext_val << bit_lo
+                self.registers[parent] = cleared | ext_val
+            else:
+                p = parent_val if isinstance(parent_val, int) else 0
+                v = value if isinstance(value, int) else 0
+                v &= (1 << width) - 1
+                mask = ((1 << bw) - 1) ^ (((1 << width) - 1) << bit_lo)
+                self.registers[parent] = (p & mask) | (v << bit_lo)
 
     # -- Memory access -------------------------------------------------------
 

@@ -702,6 +702,140 @@ class SymbolicExecutor:
             # Non-fatal: log for debugging, but continue execution
             logger.debug("Could not model '%s %s': %s", mnemonic, insn.operands, exc)
 
+    # ---- SIB address resolver ----
+    _SIB_RE = None  # lazily compiled
+
+    @classmethod
+    def _sib_regex(cls):
+        """Return compiled regex for SIB-style memory operands.
+
+        Matches patterns like:
+          reg, reg+disp, reg-disp, reg+reg*scale+disp, reg+reg*scale,
+          reg+reg+disp, reg+reg, disp (absolute), etc.
+        """
+        if cls._SIB_RE is None:
+            import re
+            # Tokenize into identifiers, hex/dec numbers, +, -, *
+            cls._SIB_RE = re.compile(
+                r"([A-Za-z_]\w*|0[xX][0-9A-Fa-f]+|\d+|[+\-*])"
+            )
+        return cls._SIB_RE
+
+    def _resolve_sib_address(self, state: SymbolicState, inner: str) -> Any:
+        """Parse a general SIB-form address expression and compute the address.
+
+        Handles: ``base``, ``base+disp``, ``base-disp``,
+        ``base+index*scale``, ``base+index*scale+disp``,
+        ``base+index*scale-disp``, ``base+index+disp``, and absolute ``disp``.
+        Returns an *int* or a *z3.BitVec* expression.
+        """
+        tokens = self._sib_regex().findall(inner.strip())
+        if not tokens:
+            return 0
+
+        # Classify tokens into additive terms.  Each term is (value, negate).
+        # Multiplication binds tighter: if we see A * B, combine immediately.
+        terms: list[tuple[Any, bool]] = []
+        pending_negate = False
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok == "+":
+                i += 1
+                continue
+            if tok == "-":
+                pending_negate = not pending_negate
+                i += 1
+                continue
+
+            # Resolve token value
+            val = self._tok_value(state, tok)
+
+            # Look ahead for '*'
+            if i + 2 < len(tokens) and tokens[i + 1] == "*":
+                scale_val = self._tok_value(state, tokens[i + 2])
+                val = self._mul(val, scale_val, state.bit_width)
+                i += 3
+            else:
+                i += 1
+
+            terms.append((val, pending_negate))
+            pending_negate = False
+
+        if not terms:
+            return 0
+
+        # Sum all terms
+        result = terms[0][0] if not terms[0][1] else self._negate(terms[0][0], state.bit_width)
+        for val, neg in terms[1:]:
+            if neg:
+                result = self._sub(result, val, state.bit_width)
+            else:
+                result = self._add(result, val, state.bit_width)
+        return result
+
+    # ---- helpers for SIB arithmetic ----
+
+    def _tok_value(self, state: SymbolicState, tok: str) -> Any:
+        """Return the value of a single token (register name or number)."""
+        low = tok.lower()
+        if low in state.registers or state._subreg_info(low) is not None:
+            return state.get_register(low)
+        try:
+            return int(tok, 0)
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _mul(a: Any, b: Any, bw: int) -> Any:
+        a_sym = hasattr(a, "sort")
+        b_sym = hasattr(b, "sort")
+        if a_sym or b_sym:
+            if Z3Solver.available():
+                import z3 as _z3
+                if not a_sym:
+                    a = _z3.BitVecVal(a, bw)
+                if not b_sym:
+                    b = _z3.BitVecVal(b, bw)
+                return a * b
+        return (a if isinstance(a, int) else 0) * (b if isinstance(b, int) else 0)
+
+    @staticmethod
+    def _add(a: Any, b: Any, bw: int) -> Any:
+        a_sym = hasattr(a, "sort")
+        b_sym = hasattr(b, "sort")
+        if a_sym or b_sym:
+            if Z3Solver.available():
+                import z3 as _z3
+                if not a_sym:
+                    a = _z3.BitVecVal(a, bw)
+                if not b_sym:
+                    b = _z3.BitVecVal(b, bw)
+                return a + b
+        return (a if isinstance(a, int) else 0) + (b if isinstance(b, int) else 0)
+
+    @staticmethod
+    def _sub(a: Any, b: Any, bw: int) -> Any:
+        a_sym = hasattr(a, "sort")
+        b_sym = hasattr(b, "sort")
+        if a_sym or b_sym:
+            if Z3Solver.available():
+                import z3 as _z3
+                if not a_sym:
+                    a = _z3.BitVecVal(a, bw)
+                if not b_sym:
+                    b = _z3.BitVecVal(b, bw)
+                return a - b
+        return (a if isinstance(a, int) else 0) - (b if isinstance(b, int) else 0)
+
+    @staticmethod
+    def _negate(v: Any, bw: int) -> Any:
+        if hasattr(v, "sort"):
+            if Z3Solver.available():
+                import z3 as _z3
+                return -v
+        return -(v if isinstance(v, int) else 0)
+
     def _resolve_effective_address(self, state: SymbolicState, operand: str) -> Any:
         """Compute an effective address WITHOUT dereferencing memory.
 
@@ -717,29 +851,7 @@ class SymbolicExecutor:
                 break
 
         if operand.startswith("[") and operand.endswith("]"):
-            inner = operand[1:-1].strip()
-            for sep in ("+", "-"):
-                if sep in inner:
-                    parts = inner.split(sep, 1)
-                    base_reg = parts[0].strip().lower()
-                    if base_reg in state.registers:
-                        base_val = state.get_register(base_reg)
-                        try:
-                            offset_val = int(parts[1].strip(), 0)
-                            if sep == "-":
-                                offset_val = -offset_val
-                        except ValueError:
-                            offset_val = 0
-                        if isinstance(base_val, int):
-                            return base_val + offset_val
-                        elif Z3Solver.available() and hasattr(base_val, "sort"):
-                            import z3 as _z3
-                            return base_val + _z3.BitVecVal(offset_val, state.bit_width)
-                    break
-            # Simple [reg]
-            inner_lower = inner.lower()
-            if inner_lower in state.registers:
-                return state.get_register(inner_lower)
+            return self._resolve_sib_address(state, operand[1:-1].strip())
 
         # Fallback to _resolve_operand for non-memory operands
         return self._resolve_operand(state, operand)
@@ -748,9 +860,14 @@ class SymbolicExecutor:
         """Resolve an operand to a symbolic or concrete value."""
         operand = operand.strip()
 
-        # Register?
+        # Size prefixed operands (e.g., "dword ptr [rax]")
+        for prefix in ("byte ptr ", "word ptr ", "dword ptr ", "qword ptr "):
+            if operand.lower().startswith(prefix):
+                return self._resolve_operand(state, operand[len(prefix):])
+
+        # Register? (includes sub-registers via state.get_register)
         reg = operand.lower()
-        if reg in state.registers:
+        if reg in state.registers or state._subreg_info(reg) is not None:
             return state.get_register(reg)
 
         # Immediate / hex constant?
@@ -762,78 +879,40 @@ class SymbolicExecutor:
         except ValueError:
             pass
 
-        # Memory dereference like [rax], [rsp+0x8], etc.
+        # Memory dereference like [rax], [rsp+0x8], [rax+rbx*4+0x10], etc.
         if operand.startswith("[") and operand.endswith("]"):
-            inner = operand[1:-1].strip()
-            # Try to parse [reg+offset]
-            for sep in ("+", "-"):
-                if sep in inner:
-                    parts = inner.split(sep, 1)
-                    base_reg = parts[0].strip().lower()
-                    if base_reg in state.registers:
-                        base_val = state.get_register(base_reg)
-                        try:
-                            offset_val = int(parts[1].strip(), 0)
-                            if sep == "-":
-                                offset_val = -offset_val
-                        except ValueError:
-                            offset_val = 0
-                        if isinstance(base_val, int):
-                            return state.read_memory(base_val + offset_val)
-                    break
-            # Simple [reg]
-            inner_lower = inner.lower()
-            if inner_lower in state.registers:
-                addr = state.get_register(inner_lower)
-                if isinstance(addr, int):
-                    return state.read_memory(addr)
-
-        # Size prefixed operands (e.g., "dword ptr [rax]")
-        for prefix in ("byte ptr ", "word ptr ", "dword ptr ", "qword ptr "):
-            if operand.lower().startswith(prefix):
-                return self._resolve_operand(state, operand[len(prefix):])
+            addr = self._resolve_sib_address(state, operand[1:-1].strip())
+            if isinstance(addr, int):
+                return state.read_memory(addr)
+            # Symbolic address — create fresh symbolic read
+            if Z3Solver.available():
+                import z3 as _z3
+                return _z3.BitVec(f"mem_sym_{state.depth}", state.bit_width)
+            return 0
 
         return 0  # fallback
 
     def _write_operand(self, state: SymbolicState, operand: str, value: Any) -> None:
         """Write a value to the destination operand."""
         operand = operand.strip()
-        reg = operand.lower()
-        if reg in state.registers:
-            state.set_register(reg, value)
-            return
-
-        # Memory dereference
-        if operand.startswith("[") and operand.endswith("]"):
-            inner = operand[1:-1].strip()
-            for sep in ("+", "-"):
-                if sep in inner:
-                    parts = inner.split(sep, 1)
-                    base_reg = parts[0].strip().lower()
-                    if base_reg in state.registers:
-                        base_val = state.get_register(base_reg)
-                        try:
-                            offset_val = int(parts[1].strip(), 0)
-                            if sep == "-":
-                                offset_val = -offset_val
-                        except ValueError:
-                            offset_val = 0
-                        if isinstance(base_val, int):
-                            state.write_memory(base_val + offset_val, value)
-                        return
-                    break
-            inner_lower = inner.lower()
-            if inner_lower in state.registers:
-                addr = state.get_register(inner_lower)
-                if isinstance(addr, int):
-                    state.write_memory(addr, value)
-                return
 
         # Size prefixed operands
         for prefix in ("byte ptr ", "word ptr ", "dword ptr ", "qword ptr "):
             if operand.lower().startswith(prefix):
                 self._write_operand(state, operand[len(prefix):], value)
                 return
+
+        reg = operand.lower()
+        if reg in state.registers or state._subreg_info(reg) is not None:
+            state.set_register(reg, value)
+            return
+
+        # Memory dereference
+        if operand.startswith("[") and operand.endswith("]"):
+            addr = self._resolve_sib_address(state, operand[1:-1].strip())
+            if isinstance(addr, int):
+                state.write_memory(addr, value)
+            return
 
     @staticmethod
     def _ensure_bv(val: Any, bit_width: int) -> Any:
