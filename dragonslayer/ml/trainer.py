@@ -669,6 +669,42 @@ _HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
             ("mov", "[rbp], rax"),
         ],
     ],
+    "comparison": [
+        # CMP two virtual registers, save flags
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("cmp", "rax, rcx"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp+8], rax"),
+        ],
+        # TEST (bitwise AND without storing result)
+        [
+            ("mov", "rax, [rbp]"),
+            ("mov", "rcx, [rbp+8]"),
+            ("test", "rax, rcx"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp+8], rax"),
+        ],
+        # CMP with immediate zero (common in VM conditional branches)
+        [
+            ("mov", "rax, [rbp]"),
+            ("cmp", "rax, 0"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+        # TEST self (zero-check idiom)
+        [
+            ("mov", "rax, [rbp]"),
+            ("test", "rax, rax"),
+            ("pushf", ""),
+            ("pop", "rax"),
+            ("mov", "[rbp], rax"),
+        ],
+    ],
     "crypto": [
         # XOR decrypt opcode
         [
@@ -761,6 +797,7 @@ def generate_synthetic_handlers(
                 "memory": "vm_load",
                 "control_flow": "vm_jmp",
                 "vm_control": "vm_enter",
+                "comparison": "vm_cmp",
                 "crypto": "vm_decrypt",
                 "nop": "vm_nop",
             }

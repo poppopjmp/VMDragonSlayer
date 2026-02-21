@@ -428,6 +428,11 @@ class VMHandlerModel(BaseModel):
         # Otherwise fall back to heuristic scoring.
         return self._predict_heuristic(values, names)
 
+    #: Minimum raw score a category must reach before the heuristic
+    #: considers it a valid classification.  Below this floor the
+    #: prediction falls back to ``"unknown"`` with low confidence.
+    SCORE_FLOOR: float = 0.05
+
     def _predict_heuristic(
         self,
         values: List[float],
@@ -438,6 +443,18 @@ class VMHandlerModel(BaseModel):
         probs = {k: max(0, v) / total for k, v in scores.items()}
 
         best = max(probs, key=probs.get)  # type: ignore[arg-type]
+
+        # Score floor: if no category reaches the minimum raw score,
+        # the handler is too ambiguous to classify confidently.
+        raw_best = scores.get(best, 0.0)
+        if raw_best < self.SCORE_FLOOR:
+            return PredictionResult(
+                label="unknown",
+                confidence=round(probs.get("unknown", 0.01), 4),
+                probabilities=probs,
+                metadata={"method": "heuristic", "reason": "below_score_floor"},
+            )
+
         return PredictionResult(
             label=_canonicalize(best),
             confidence=round(probs[best], 4),

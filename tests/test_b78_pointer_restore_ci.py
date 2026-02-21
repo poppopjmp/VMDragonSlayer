@@ -312,8 +312,10 @@ class TestCIConfigB78:
         return ci_path.read_text(encoding="utf-8")
 
     def test_pip_caching_present(self, ci_yaml):
-        """CI should use actions/cache for pip packages."""
-        assert "actions/cache@v4" in ci_yaml or "actions/cache@v3" in ci_yaml
+        """CI should use pip caching (setup-python cache or actions/cache)."""
+        has_setup_cache = "cache: 'pip'" in ci_yaml
+        has_actions_cache = "actions/cache@v4" in ci_yaml or "actions/cache@v3" in ci_yaml
+        assert has_setup_cache or has_actions_cache
 
     def test_mypy_no_strict_optional_removed(self, ci_yaml):
         """Mypy should not use --no-strict-optional."""

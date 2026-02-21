@@ -247,18 +247,16 @@ class TestExtendedFeatures:
 
 class TestSyntheticDataGeneration:
     def test_generates_correct_count(self):
+        from dragonslayer.ml.trainer import _HANDLER_TEMPLATES
         handlers = generate_synthetic_handlers(n_per_category=10, seed=1)
-        # 8 categories with templates: arith, bitwise, stack, memory,
-        # control_flow, nop, vm_control, crypto
-        assert len(handlers) == 8 * 10
+        n_cats = len(_HANDLER_TEMPLATES)
+        assert len(handlers) == n_cats * 10
 
     def test_all_categories_present(self):
+        from dragonslayer.ml.trainer import _HANDLER_TEMPLATES
         handlers = generate_synthetic_handlers(n_per_category=5, seed=2)
         cats = {h["category"] for h in handlers}
-        expected = {
-            "arithmetic", "bitwise", "stack", "memory",
-            "control_flow", "nop", "vm_control", "crypto",
-        }
+        expected = set(_HANDLER_TEMPLATES.keys())
         assert cats == expected
 
     def test_handlers_have_required_keys(self):

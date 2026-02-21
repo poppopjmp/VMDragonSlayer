@@ -28,14 +28,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -57,18 +50,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: lint-pip-${{ hashFiles('requirements.txt') }}
+          cache: 'pip'
 
       - name: Install linters
         run: pip install ruff
 
       - name: Ruff check
-        run: ruff check dragonslayer/ --select E,W,F,B,UP,SIM --ignore E501
+        run: ruff check dragonslayer/ --select E,W,F,B,UP,SIM,I,C4 --ignore E501
 
   typecheck:
     runs-on: ubuntu-latest
@@ -79,12 +67,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: typecheck-pip-${{ hashFiles('requirements.txt') }}
+          cache: 'pip'
 
       - name: Install deps
         run: |
@@ -93,4 +76,4 @@ jobs:
           pip install -e .
 
       - name: Mypy
-        run: mypy dragonslayer/ --ignore-missing-imports --warn-return-any --warn-unused-configs
+        run: mypy dragonslayer/ --ignore-missing-imports --warn-return-any --warn-unused-configs --disallow-untyped-defs

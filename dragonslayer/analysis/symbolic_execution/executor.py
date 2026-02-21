@@ -15,8 +15,10 @@ the pipeline and LLM analyzer consume.
 
 from __future__ import annotations
 
+import hashlib
 import heapq
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
@@ -24,6 +26,15 @@ from typing import Any, Dict, List, Optional, Set
 from .state import SymbolicState
 from .lifter import InstructionLifter, LiftedInstruction, InstructionCategory
 from .solver import Z3Solver, SolverResult
+
+# B79: Hoist z3 import to module level to avoid repeated inline imports.
+# The module is optional; all z3-dependent code checks _HAS_Z3 first.
+try:
+    import z3 as _z3  # noqa: F401
+    _HAS_Z3 = True
+except ImportError:
+    _z3 = None  # type: ignore[assignment]
+    _HAS_Z3 = False
 
 logger = logging.getLogger(__name__)
 
@@ -228,8 +239,7 @@ class SymbolicExecutor:
 
             # Step 3: Identify dispatcher using VMProtect pattern matching
             # B70: Check cache first to avoid recomputation.
-            import hashlib as _hashlib
-            _cache_key = (_hashlib.sha256(code).hexdigest(), entry_point)
+            _cache_key = (hashlib.sha256(code).hexdigest(), entry_point)
             if _cache_key in self._dispatcher_cache:
                 dispatcher_addr, dispatcher_confidence = self._dispatcher_cache[_cache_key]
             else:
@@ -969,7 +979,6 @@ class SymbolicExecutor:
         if not Z3Solver.available():
             return []
 
-        import z3 as _z3
 
         opaque: List[Dict[str, Any]] = []
         path_constraints = path_constraints or []
@@ -1304,13 +1313,12 @@ class SymbolicExecutor:
 
             path_len = 0
             # B70: Per-path timeout — record start time.
-            import time as _time
-            _path_start = _time.monotonic()
+            _path_start = time.monotonic()
             _path_timeout_s = self.per_path_timeout_ms / 1000.0 if self.per_path_timeout_ms > 0 else 0.0
 
             while not state.halted and path_len < self.max_depth:
                 # B70: Check per-path timeout
-                if _path_timeout_s > 0 and (_time.monotonic() - _path_start) > _path_timeout_s:
+                if _path_timeout_s > 0 and (time.monotonic() - _path_start) > _path_timeout_s:
                     state.halt("per-path timeout")
                     break
 
@@ -1411,7 +1419,6 @@ class SymbolicExecutor:
                         if next_addr in insn_map:
                             state.pc = next_addr
                             if branch_constraint is not None and Z3Solver.available():
-                                import z3 as _z3
                                 # B59+B65: Check fall-through feasibility before
                                 # committing the negated constraint.
                                 neg_constraint = _z3.Not(branch_constraint)
@@ -1510,7 +1517,6 @@ class SymbolicExecutor:
         merge_pc = taken_end
 
         # Both sides reach the same merge point — execute inline
-        import z3 as _z3
 
         taken_state = state.fork()
         taken_state.add_constraint(branch_constraint)
@@ -1590,7 +1596,6 @@ class SymbolicExecutor:
         bw = self.bit_width
         try:
             if Z3Solver.available():
-                import z3 as _z3
                 # Widen general-purpose registers (they may have been loop-modified)
                 gp_regs = (
                     SymbolicState.X86_64_REGISTERS[:16]
@@ -1678,7 +1683,6 @@ class SymbolicExecutor:
                 left = self._resolve_operand(state, ops[0])
                 right = self._resolve_operand(state, ops[1])
                 if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
-                    import z3 as _z3
                     left = self._ensure_bv(left, state.bit_width)
                     right = self._ensure_bv(right, state.bit_width)
                     result = (left + right) if mnemonic in ("add", "adc") else (left - right)
@@ -1692,7 +1696,6 @@ class SymbolicExecutor:
                 left = self._resolve_operand(state, ops[0])
                 right = self._resolve_operand(state, ops[1])
                 if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
-                    import z3 as _z3
                     left = self._ensure_bv(left, state.bit_width)
                     right = self._ensure_bv(right, state.bit_width)
                     if mnemonic == "and":
@@ -1716,7 +1719,6 @@ class SymbolicExecutor:
                 val = self._resolve_operand(state, ops[0])
                 amount = self._resolve_operand(state, ops[1])
                 if Z3Solver.available() and hasattr(val, "sort"):
-                    import z3 as _z3
                     amount = self._ensure_bv(amount, state.bit_width)
                     if mnemonic == "shl":
                         result = val << amount
@@ -1739,7 +1741,6 @@ class SymbolicExecutor:
             elif mnemonic in ("inc", "dec") and len(ops) == 1:
                 val = self._resolve_operand(state, ops[0])
                 if Z3Solver.available() and hasattr(val, "sort"):
-                    import z3 as _z3
                     one = _z3.BitVecVal(1, state.bit_width)
                     result = val + one if mnemonic == "inc" else val - one
                 else:
@@ -1759,7 +1760,7 @@ class SymbolicExecutor:
                 # NEG sets CF = (val != 0), updates ZF/SF/OF for 0 - val
                 zero: Any = 0
                 if Z3Solver.available() and hasattr(val, "sort"):
-                    zero = __import__('z3').BitVecVal(0, state.bit_width)
+                    zero = _z3.BitVecVal(0, state.bit_width)
                 _opsz = self._infer_operand_bits(ops[0], state.bit_width)
                 state.update_flags_arith(result, zero, val, is_sub=True, operand_size=_opsz)
 
@@ -1781,7 +1782,6 @@ class SymbolicExecutor:
                     state.set_register(sp_reg, sp)
                     state.write_memory(sp, val, word_size)
                 elif Z3Solver.available() and hasattr(sp, "sort"):
-                    import z3 as _z3
                     dec = _z3.BitVecVal(word_size, state.bit_width)
                     new_sp = sp - dec
                     state.set_register(sp_reg, new_sp)
@@ -1807,7 +1807,6 @@ class SymbolicExecutor:
                     sp += word_size
                     state.set_register(sp_reg, sp)
                 elif Z3Solver.available() and hasattr(sp, "sort"):
-                    import z3 as _z3
                     # Can't read from symbolic address — create fresh symbolic
                     val = _z3.BitVec(f"pop_{state.depth}", state.bit_width)
                     self._write_operand(state, ops[0], val)
@@ -1855,7 +1854,6 @@ class SymbolicExecutor:
                     dx_reg = "rdx" if state.bit_width == 64 else "edx"
                     ax_val = state.get_register(ax_reg)
                     if Z3Solver.available() and (hasattr(ax_val, "sort") or hasattr(src, "sort")):
-                        import z3 as _z3
                         a = self._ensure_bv(ax_val, state.bit_width)
                         b = self._ensure_bv(src, state.bit_width)
                         full = _z3.SignExt(state.bit_width, a) * _z3.SignExt(state.bit_width, b)
@@ -1892,7 +1890,6 @@ class SymbolicExecutor:
                 dx_reg = "rdx" if state.bit_width == 64 else "edx"
                 ax_val = state.get_register(ax_reg)
                 if Z3Solver.available() and (hasattr(ax_val, "sort") or hasattr(src, "sort")):
-                    import z3 as _z3
                     a = self._ensure_bv(ax_val, state.bit_width)
                     b = self._ensure_bv(src, state.bit_width)
                     full = _z3.ZeroExt(state.bit_width, a) * _z3.ZeroExt(state.bit_width, b)
@@ -1914,7 +1911,6 @@ class SymbolicExecutor:
                 if Z3Solver.available() and (
                     hasattr(ax_val, "sort") or hasattr(dx_val, "sort") or hasattr(divisor, "sort")
                 ):
-                    import z3 as _z3
                     bw = state.bit_width
                     hi = _z3.ZeroExt(bw, self._ensure_bv(dx_val, bw))
                     lo = _z3.ZeroExt(bw, self._ensure_bv(ax_val, bw))
@@ -1947,7 +1943,6 @@ class SymbolicExecutor:
                     hasattr(cond, 'sort') if Z3Solver.available() else False
                 ):
                     # Symbolic condition → use z3 If
-                    import z3 as _z3
                     dst = self._resolve_operand(state, ops[0])
                     dst_bv = self._ensure_bv(dst, state.bit_width)
                     src_bv = self._ensure_bv(src, state.bit_width)
@@ -1960,7 +1955,6 @@ class SymbolicExecutor:
                 cc = mnemonic[3:]
                 cond = self._evaluate_condition(state, cc)
                 if Z3Solver.available() and hasattr(cond, 'sort'):
-                    import z3 as _z3
                     result = _z3.If(cond, _z3.BitVecVal(1, state.bit_width),
                                     _z3.BitVecVal(0, state.bit_width))
                 else:
@@ -1971,7 +1965,6 @@ class SymbolicExecutor:
             elif mnemonic == "bswap" and len(ops) == 1:
                 val = self._resolve_operand(state, ops[0])
                 if Z3Solver.available() and hasattr(val, "sort"):
-                    import z3 as _z3
                     bw = val.sort().size()
                     byte_count = bw // 8
                     bytes_list = [_z3.Extract(i * 8 + 7, i * 8, val)
@@ -1988,7 +1981,6 @@ class SymbolicExecutor:
             elif mnemonic in ("pushf", "pushfq", "pushfd"):
                 # Build a symbolic EFLAGS value from individual flags
                 if Z3Solver.available():
-                    import z3 as _z3
                     bw = state.bit_width
                     eflags = _z3.BitVecVal(0x202, bw)  # reserved bits
                     for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
@@ -2022,7 +2014,6 @@ class SymbolicExecutor:
                     state.set_register(sp_reg, sp + word_size)
                     # Try to concretize z3 constants so flags stay plain bool
                     if Z3Solver.available() and hasattr(eflags, "sort"):
-                        import z3 as _z3
                         try:
                             val = _z3.simplify(eflags)
                             if val.as_long is not None:
@@ -2030,7 +2021,6 @@ class SymbolicExecutor:
                         except Exception:
                             pass
                     if Z3Solver.available() and hasattr(eflags, "sort"):
-                        import z3 as _z3
                         one = _z3.BitVecVal(1, 1)
                         state.flags["CF"] = _z3.Extract(0, 0, eflags) == one
                         state.flags["ZF"] = _z3.Extract(6, 6, eflags) == one
@@ -2048,7 +2038,6 @@ class SymbolicExecutor:
                 eax_val = state.get_register("eax")  # lower 32 bits of rax
                 dx_reg = "rdx" if state.bit_width == 64 else "edx"
                 if Z3Solver.available() and hasattr(eax_val, "sort"):
-                    import z3 as _z3
                     bw = eax_val.sort().size()
                     sign = _z3.Extract(31, 31, self._ensure_bv(eax_val, 32)) if bw >= 32 else _z3.Extract(bw - 1, bw - 1, eax_val)
                     allones = _z3.BitVecVal((1 << state.bit_width) - 1, state.bit_width)
@@ -2064,7 +2053,6 @@ class SymbolicExecutor:
                 # CQO: sign-extend RAX (64-bit) into RDX:RAX
                 ax_val = state.get_register("rax")
                 if Z3Solver.available() and hasattr(ax_val, "sort"):
-                    import z3 as _z3
                     sign = _z3.Extract(63, 63, self._ensure_bv(ax_val, 64))
                     allones = _z3.BitVecVal((1 << 64) - 1, 64)
                     zero = _z3.BitVecVal(0, 64)
@@ -2080,7 +2068,6 @@ class SymbolicExecutor:
                 if state.bit_width == 64:
                     eax_val = state.get_register("eax")
                     if Z3Solver.available() and hasattr(eax_val, "sort"):
-                        import z3 as _z3
                         if eax_val.sort().size() == 32:
                             state.set_register("rax", _z3.SignExt(32, eax_val))
                         else:
@@ -2112,7 +2099,6 @@ class SymbolicExecutor:
                 base = self._resolve_operand(state, ops[0])
                 bit_pos = self._resolve_operand(state, ops[1])
                 if Z3Solver.available() and (hasattr(base, "sort") or hasattr(bit_pos, "sort")):
-                    import z3 as _z3
                     base_bv = self._ensure_bv(base, state.bit_width)
                     pos_bv = self._ensure_bv(bit_pos, state.bit_width)
                     tested = _z3.LShR(base_bv, pos_bv) & _z3.BitVecVal(1, state.bit_width)
@@ -2256,7 +2242,6 @@ class SymbolicExecutor:
         b_sym = hasattr(b, "sort")
         if a_sym or b_sym:
             if Z3Solver.available():
-                import z3 as _z3
                 if not a_sym:
                     a = _z3.BitVecVal(a, bw)
                 if not b_sym:
@@ -2270,7 +2255,6 @@ class SymbolicExecutor:
         b_sym = hasattr(b, "sort")
         if a_sym or b_sym:
             if Z3Solver.available():
-                import z3 as _z3
                 if not a_sym:
                     a = _z3.BitVecVal(a, bw)
                 if not b_sym:
@@ -2284,7 +2268,6 @@ class SymbolicExecutor:
         b_sym = hasattr(b, "sort")
         if a_sym or b_sym:
             if Z3Solver.available():
-                import z3 as _z3
                 if not a_sym:
                     a = _z3.BitVecVal(a, bw)
                 if not b_sym:
@@ -2296,7 +2279,6 @@ class SymbolicExecutor:
     def _negate(v: Any, bw: int) -> Any:
         if hasattr(v, "sort"):
             if Z3Solver.available():
-                import z3 as _z3
                 return -v
         return -(v if isinstance(v, int) else 0)
 
@@ -2447,7 +2429,6 @@ class SymbolicExecutor:
         """Ensure *val* is a z3 BitVec of the correct width."""
         if hasattr(val, "sort"):
             return val
-        import z3 as _z3
         return _z3.BitVecVal(int(val), bit_width)
 
     # -- Handler-local symbolic execution ------------------------------------
@@ -2487,7 +2468,6 @@ class SymbolicExecutor:
         )
 
         # Make input registers symbolic so we can track data-flow.
-        import z3 as _z3
         sym_regs: Dict[str, _z3.BitVecRef] = {}
 
         # Initialise the stack pointer to a concrete address so that
@@ -2615,7 +2595,6 @@ class SymbolicExecutor:
         )
 
         if _symbolic:
-            import z3 as _z3
 
             def _to_bv(v: Any) -> Any:
                 if isinstance(v, bool):
@@ -2698,10 +2677,8 @@ class SymbolicExecutor:
             cc = mn[1:]
             result = self._evaluate_condition(state, cc)
             if result is False:
-                import z3 as _z3
                 return _z3.BoolVal(False)
             if result is True:
-                import z3 as _z3
                 return _z3.BoolVal(True)
             return result
 
