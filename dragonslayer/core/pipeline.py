@@ -35,7 +35,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypedDict
 
 import shutil as _shutil
 
@@ -106,9 +106,42 @@ class PipelineConfig:
 # Pipeline stage result
 # ---------------------------------------------------------------------------
 
+class StageResultDict(TypedDict):
+    """Serialised shape of :meth:`StageResult.to_dict`."""
+
+    stage: str
+    success: bool
+    data: Dict[str, Any]
+    error: Optional[str]
+    duration: float
+    plugins_run: int
+    plugins_succeeded: int
+
+
+class PipelineResultDict(TypedDict):
+    """Serialised shape of :meth:`PipelineResult.to_dict`."""
+
+    success: bool
+    stages: List[StageResultDict]
+    shared_data: Dict[str, Any]
+    llm_insights: Dict[str, Any]
+    total_duration: float
+    errors: List[str]
+
+
 @dataclass
 class StageResult:
-    """Output from a single pipeline stage."""
+    """Output from a single pipeline stage.
+
+    Attributes:
+        stage: Name of the pipeline stage (e.g. ``"static"``).
+        success: Whether the stage completed without fatal errors.
+        data: Arbitrary data produced by the stage's plugins.
+        error: Error message if the stage failed, else ``None``.
+        duration: Wall-clock seconds the stage took.
+        plugins_run: Number of plugins invoked.
+        plugins_succeeded: Number of plugins that returned success.
+    """
     stage: str
     success: bool
     data: Dict[str, Any] = field(default_factory=dict)
@@ -117,13 +150,22 @@ class StageResult:
     plugins_run: int = 0
     plugins_succeeded: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> StageResultDict:
         return asdict(self)
 
 
 @dataclass
 class PipelineResult:
-    """Complete pipeline output."""
+    """Complete pipeline output.
+
+    Attributes:
+        success: ``True`` if every stage succeeded.
+        stages: Per-stage results in execution order.
+        shared_data: Merged scratchpad data from all stages.
+        llm_insights: LLM-generated analysis notes (if enabled).
+        total_duration: Wall-clock seconds for the entire pipeline.
+        errors: Collected error messages from any failed stages.
+    """
     success: bool
     stages: List[StageResult] = field(default_factory=list)
     shared_data: Dict[str, Any] = field(default_factory=dict)
@@ -131,7 +173,7 @@ class PipelineResult:
     total_duration: float = 0.0
     errors: List[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> PipelineResultDict:
         d = asdict(self)
         d["stages"] = [s.to_dict() for s in self.stages]
         return d

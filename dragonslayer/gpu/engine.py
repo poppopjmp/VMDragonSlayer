@@ -27,7 +27,11 @@ class GPUEngine:
         self._initialised = False
 
     def initialise(self) -> None:
-        """Initialise the GPU device context."""
+        """Initialise the GPU device context.
+
+        Raises:
+            NotImplementedError: Always — no GPU backend is installed.
+        """
         raise NotImplementedError(
             "GPUEngine requires a CUDA/OpenCL backend — "
             "install cupy or pycuda to enable GPU acceleration"
@@ -38,16 +42,37 @@ class GPUEngine:
         data: bytes,
         patterns: List[bytes],
     ) -> List[Dict[str, Any]]:
-        """Run parallel pattern matching on the GPU."""
+        """Run parallel pattern matching on the GPU.
+
+        Args:
+            data: Raw binary data to scan.
+            patterns: Byte-string patterns to search for in *data*.
+
+        Returns:
+            List of match dicts with ``offset`` and ``pattern_index`` keys.
+
+        Raises:
+            NotImplementedError: Always — no GPU backend is installed.
+        """
         raise NotImplementedError("GPU pattern matching not implemented")
 
     def symbolic_evaluate_batch(
         self,
         expressions: List[Any],
     ) -> List[Any]:
-        """Batch-evaluate symbolic expressions on the GPU."""
+        """Batch-evaluate symbolic expressions on the GPU.
+
+        Args:
+            expressions: Symbolic expression trees to evaluate.
+
+        Returns:
+            Concrete results corresponding to each input expression.
+
+        Raises:
+            NotImplementedError: Always — no GPU backend is installed.
+        """
         raise NotImplementedError("GPU symbolic evaluation not implemented")
 
     def shutdown(self) -> None:
-        """Release GPU resources."""
+        """Release GPU resources and mark the engine as uninitialised."""
         self._initialised = False

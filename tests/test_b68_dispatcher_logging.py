@@ -171,7 +171,7 @@ class TestConfigureLogging:
 
     def test_json_format_uses_json_formatter(self):
         with patch.dict(os.environ, {"VMDS_LOG_FORMAT": "json"}):
-            _configure_logging()
+            _configure_logging(_force=True)
         root = logging.getLogger()
         stream_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)]
         assert any(isinstance(h.formatter, _JSONFormatter) for h in stream_handlers)
@@ -179,7 +179,7 @@ class TestConfigureLogging:
     def test_text_format_is_default(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VMDS_LOG_FORMAT", None)
-            _configure_logging()
+            _configure_logging(_force=True)
         root = logging.getLogger()
         stream_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)]
         assert not any(isinstance(h.formatter, _JSONFormatter) for h in stream_handlers)

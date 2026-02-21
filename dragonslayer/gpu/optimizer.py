@@ -26,9 +26,31 @@ class GPUOptimizer:
         self.target_occupancy = target_occupancy
 
     def recommend_block_size(self, kernel: Any) -> int:
-        """Return the recommended block/work-group size."""
+        """Return the recommended block/work-group size.
+
+        Args:
+            kernel: GPU kernel object to analyse.
+
+        Returns:
+            Optimal thread-block size for the given kernel.
+
+        Raises:
+            NotImplementedError: Always — no GPU backend is installed.
+        """
         raise NotImplementedError("GPU kernel optimisation not implemented")
 
     def auto_tune(self, kernel: Any, data_size: int) -> Dict[str, Any]:
-        """Run auto-tuning and return recommended parameters."""
+        """Run auto-tuning and return recommended parameters.
+
+        Args:
+            kernel: GPU kernel object to tune.
+            data_size: Size of the input data in bytes.
+
+        Returns:
+            Dict with ``block_size``, ``grid_size``, and
+            ``estimated_occupancy`` keys.
+
+        Raises:
+            NotImplementedError: Always — no GPU backend is installed.
+        """
         raise NotImplementedError("GPU auto-tuning not implemented")

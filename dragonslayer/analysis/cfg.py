@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 try:
     import networkx as nx
@@ -67,9 +67,31 @@ class BasicBlock:
         return 0
 
 
+class CFGStatsDict(TypedDict):
+    """Serialised shape of :meth:`CFGStats.to_dict`."""
+
+    node_count: int
+    edge_count: int
+    back_edge_count: int
+    loop_count: int
+    strongly_connected_components: int
+    entry_points: List[str]
+    exit_points: List[str]
+
+
 @dataclass
 class CFGStats:
-    """Summary statistics for a reconstructed CFG."""
+    """Summary statistics for a reconstructed CFG.
+
+    Attributes:
+        node_count: Number of nodes (basic blocks or instructions).
+        edge_count: Number of edges in the CFG.
+        back_edge_count: Number of back-edges (loop indicators).
+        loop_count: Number of natural loops detected.
+        strongly_connected_components: Count of SCCs.
+        entry_points: Addresses of CFG entry nodes.
+        exit_points: Addresses of CFG exit nodes.
+    """
 
     node_count: int = 0
     edge_count: int = 0
@@ -79,7 +101,7 @@ class CFGStats:
     entry_points: List[int] = field(default_factory=list)
     exit_points: List[int] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> CFGStatsDict:
         return {
             "node_count": self.node_count,
             "edge_count": self.edge_count,

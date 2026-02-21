@@ -34,7 +34,7 @@ class Match:
     matched_bytes: str
     context: Dict[str, Any] = None
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.context is None:
             self.context = {}
 

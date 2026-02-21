@@ -24,14 +24,43 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, TypedDict
 
 logger = logging.getLogger(__name__)
 
 
+class PhaseMetricDict(TypedDict):
+    """Serialised shape of :meth:`PhaseMetric.to_dict`."""
+
+    name: str
+    elapsed_s: float
+    item_count: int
+    error_count: int
+    metadata: Dict[str, Any]
+
+
+class AnalysisMetricsDict(TypedDict):
+    """Serialised shape of :meth:`AnalysisMetrics.to_dict`."""
+
+    run_id: str
+    total_elapsed_s: float
+    phase_count: int
+    phases: List[PhaseMetricDict]
+
+
 @dataclass
 class PhaseMetric:
-    """Timing + counters for one analysis phase."""
+    """Timing + counters for one analysis phase.
+
+    Attributes:
+        name: Human-readable phase name (e.g. ``"vm_discovery"``).
+        start_ts: Monotonic start timestamp (from ``time.perf_counter``).
+        end_ts: Monotonic end timestamp.
+        elapsed_s: Computed wall-clock duration in seconds.
+        item_count: Number of items processed during this phase.
+        error_count: Number of recoverable errors encountered.
+        metadata: Arbitrary key-value pairs attached by the caller.
+    """
 
     name: str
     start_ts: float = 0.0
@@ -41,7 +70,7 @@ class PhaseMetric:
     error_count: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> PhaseMetricDict:
         return {
             "name": self.name,
             "elapsed_s": round(self.elapsed_s, 4),
@@ -144,7 +173,7 @@ class AnalysisMetrics:
 
     # -- serialisation -------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> AnalysisMetricsDict:
         return {
             "run_id": self.run_id,
             "total_elapsed_s": round(self.total_elapsed_s, 4),

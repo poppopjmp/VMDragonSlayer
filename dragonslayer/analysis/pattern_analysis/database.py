@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, Iterator, List, Optional, Set, Any
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ class Pattern:
     variants: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate pattern after initialization."""
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
@@ -363,6 +363,6 @@ class PatternDatabase:
         """Check if pattern_id exists in database."""
         return pattern_id in self.patterns
     
-    def __iter__(self):
+    def __iter__(self) -> "Iterator[Pattern]":
         """Iterate over all patterns."""
         return iter(self.patterns.values())

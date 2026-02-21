@@ -141,7 +141,15 @@ class AnalysisType(str, Enum):
 
 @dataclass
 class FileInfo:
-    """Metadata about the binary under analysis."""
+    """Metadata about the binary under analysis.
+
+    Attributes:
+        path: Filesystem path of the sample (if available).
+        size: File size in bytes.
+        md5: MD5 hex digest.
+        sha1: SHA-1 hex digest.
+        sha256: SHA-256 hex digest.
+    """
     path: Optional[str] = None
     size: int = 0
     md5: str = ""

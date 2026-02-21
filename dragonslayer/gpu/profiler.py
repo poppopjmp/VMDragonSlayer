@@ -54,7 +54,12 @@ class GPUProfiler:
         return list(self._entries)
 
     def summary(self) -> Dict[str, Any]:
-        """Return aggregate profiling statistics."""
+        """Return aggregate profiling statistics.
+
+        Returns:
+            Dict with ``total_ms`` (float), ``count`` (int), and
+            ``entries`` (list of name/duration dicts).
+        """
         total = sum(e.duration_ms for e in self._entries)
         return {
             "total_ms": round(total, 3),

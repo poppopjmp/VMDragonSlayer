@@ -69,8 +69,23 @@ class _JSONFormatter(logging.Formatter):
         return _json.dumps(payload, default=str)
 
 
-def _configure_logging() -> None:
-    """Set up root handler with text or JSON formatting based on env."""
+_logging_configured = False
+
+
+def _configure_logging(*, _force: bool = False) -> None:
+    """Set up root handler with text or JSON formatting based on env.
+
+    Idempotent — subsequent calls are no-ops unless *_force* is ``True``.
+    The guard prevents import-time mutation of the root logger from
+    polluting test collection.
+
+    Args:
+        _force: When ``True``, reconfigure even if already done
+            (used by tests that need to switch format).
+    """
+    global _logging_configured  # noqa: PLW0603
+    if _logging_configured and not _force:
+        return
     log_format = _os.environ.get("VMDS_LOG_FORMAT", "text").lower()
     handler = logging.StreamHandler()
     if log_format == "json":
@@ -84,6 +99,7 @@ def _configure_logging() -> None:
     root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)]
     root.addHandler(handler)
     root.setLevel(logging.INFO)
+    _logging_configured = True
 
 
 _configure_logging()
@@ -378,11 +394,13 @@ class CircuitBreaker:
         return self._state
 
     async def record_success(self) -> None:
+        """Record a successful request and reset the failure counter."""
         async with self._lock:
             self._failure_count = 0
             self._state = CircuitState.CLOSED
 
     async def record_failure(self) -> None:
+        """Record a failed request; opens the circuit after *failure_threshold*."""
         async with self._lock:
             self._failure_count += 1
             self._last_failure_time = time.time()
@@ -394,6 +412,13 @@ class CircuitBreaker:
                 )
 
     async def allow_request(self) -> bool:
+        """Return ``True`` if a new request may proceed.
+
+        Returns:
+            ``True`` when the circuit is closed or half-open,
+            ``False`` when the circuit is open and the recovery
+            timeout has not elapsed.
+        """
         async with self._lock:
             if self._state == CircuitState.CLOSED:
                 return True
@@ -462,7 +487,15 @@ RATE_LIMIT_WINDOW = 60  # seconds
 
 
 async def check_rate_limit(request: Request) -> bool:
-    """Check if request exceeds rate limit (async-safe).
+    """Check if *request* exceeds the per-IP rate limit.
+
+    Args:
+        request: Incoming Starlette/FastAPI request.
+
+    Returns:
+        ``True`` if the request is within the rate limit and a
+        timestamp has been recorded, ``False`` if the limit is
+        exceeded and the request should be rejected.
 
     B57: Also evicts stale IPs that have no recent requests to prevent
     unbounded memory growth in ``server_state['rate_limiter']``.

@@ -33,7 +33,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,29 @@ class Stage(IntEnum):
     REPORTING = 6
 
 
+class PluginResultDict(TypedDict):
+    """Serialised shape of :meth:`PluginResult.to_dict`."""
+
+    plugin: str
+    success: bool
+    data: Dict[str, Any]
+    error: Optional[str]
+    duration: float
+    confidence: float
+
+
 @dataclass
 class PluginResult:
-    """Uniform output envelope for every plugin."""
+    """Uniform output envelope for every plugin.
+
+    Attributes:
+        plugin: Name of the plugin that produced this result.
+        success: Whether the plugin completed without errors.
+        data: Arbitrary output payload (JSON-serialisable).
+        error: Error message if the plugin failed, else ``None``.
+        duration: Wall-clock seconds the plugin took.
+        confidence: Confidence score in the range ``[0, 1]``.
+    """
     plugin: str
     success: bool
     data: Dict[str, Any] = field(default_factory=dict)
@@ -74,7 +94,7 @@ class PluginResult:
     duration: float = 0.0
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> PluginResultDict:
         return asdict(self)
 
 
@@ -291,6 +311,7 @@ def register_plugin(cls: Type[Plugin]) -> Type[Plugin]:
 
 def get_plugin(name: str) -> Plugin | None:
     """Instantiate a registered plugin by name, or ``None``."""
+    _ensure_discovered()
     cls = _REGISTRY.get(name)
     if cls is None:
         return None
@@ -301,6 +322,7 @@ def get_plugin(name: str) -> Plugin | None:
 
 def list_plugins(stage: Stage | None = None, available_only: bool = True) -> List[str]:
     """Return names of registered plugins, optionally filtered by stage."""
+    _ensure_discovered()
     out: list[str] = []
     for name, cls in sorted(_REGISTRY.items()):
         if stage is not None and cls.stage != stage:
@@ -326,7 +348,12 @@ def get_all_plugins(stage: Stage | None = None, available_only: bool = True) -> 
 # ---------------------------------------------------------------------------
 
 def _auto_discover() -> None:
-    """Best-effort import of all plugin modules in sub-packages."""
+    """Best-effort import of all plugin modules in sub-packages.
+
+    Called lazily on the first :func:`get_plugin` / :func:`list_plugins`
+    invocation, **not** at import time.  This avoids import-time side
+    effects and makes the discovery step testable.
+    """
     import importlib
     import pkgutil
     from pathlib import Path
@@ -363,4 +390,12 @@ def _auto_discover() -> None:
                 )
 
 
-_auto_discover()
+_discovered = False
+
+
+def _ensure_discovered() -> None:
+    """Run :func:`_auto_discover` once on first access."""
+    global _discovered  # noqa: PLW0603
+    if not _discovered:
+        _auto_discover()
+        _discovered = True
