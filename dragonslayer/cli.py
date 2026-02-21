@@ -263,6 +263,101 @@ def patterns_list(arch: Optional[str], handler_type: Optional[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# export — export trace or analysis results
+# ---------------------------------------------------------------------------
+
+@cli.command("export")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["json", "text", "csv", "ida", "ghidra"], case_sensitive=False),
+    default="json",
+    help="Output format.",
+)
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Output file path (default: <file>.<format>).")
+@click.option("--type", "-t", "analysis_type", default="hybrid",
+              help="Analysis type to run before export.")
+@click.pass_context
+def export_cmd(
+    ctx: click.Context,
+    file: str,
+    fmt: str,
+    output: Optional[str],
+    analysis_type: str,
+) -> None:
+    """Analyze a binary and export results in the specified format.
+
+    Supported formats: json, text (FORMAT.md), csv, ida (IDA annotations),
+    ghidra (Ghidra Jython script).
+    """
+    from dragonslayer.core.orchestrator import Orchestrator
+    from dragonslayer.analysis.trace_export import (
+        OutputFormat,
+        export_trace as do_export,
+    )
+    from dragonslayer.analysis.trace_ingestion import (
+        ExecutionTrace,
+        HandlerMarker,
+    )
+
+    binary_data = Path(file).read_bytes()
+    click.echo(f"[*] Analyzing {file} ({len(binary_data):,} bytes) "
+               f"type={analysis_type}...\n")
+
+    t0 = time.perf_counter()
+    orch = Orchestrator()
+    try:
+        result = orch.analyze_binary(binary_data, analysis_type=analysis_type)
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, ImportError) as exc:
+        click.secho(f"Analysis failed: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    elapsed = time.perf_counter() - t0
+
+    # Build an ExecutionTrace from analysis results for export
+    result_dict = result.to_dict()
+    results = result_dict.get("results", {})
+    vm_info = results.get("vm_discovery", {})
+
+    handlers_list: list = []
+    for i, h in enumerate(vm_info.get("handlers", [])):
+        addr = h.get("address", 0) if isinstance(h, dict) else 0
+        htype = h.get("type", "unknown") if isinstance(h, dict) else "unknown"
+        handlers_list.append(HandlerMarker(
+            handler_id=i, address=addr, handler_type=htype,
+        ))
+
+    trace = ExecutionTrace(
+        handlers=handlers_list,
+        metadata={
+            **result_dict.get("metadata", {}),
+            "analysis_type": analysis_type,
+            "source_file": file,
+        },
+        source="cli_export",
+    )
+
+    # Resolve output format
+    fmt_map = {
+        "json": OutputFormat.JSON, "text": OutputFormat.TEXT,
+        "csv": OutputFormat.CSV, "ida": OutputFormat.IDA,
+        "ghidra": OutputFormat.GHIDRA,
+    }
+    output_format = fmt_map[fmt.lower()]
+
+    # Resolve output path
+    if output is None:
+        ext_map = {
+            "json": ".json", "text": ".trace", "csv": ".csv",
+            "ida": ".ida.json", "ghidra": ".ghidra.py",
+        }
+        output = file + ext_map.get(fmt.lower(), ".json")
+
+    do_export(trace, output, format=output_format)
+    click.echo(f"[+] Exported to {output} (format={fmt}, elapsed={elapsed:.2f}s)")
+
+
+# ---------------------------------------------------------------------------
 # main entry point
 # ---------------------------------------------------------------------------
 
