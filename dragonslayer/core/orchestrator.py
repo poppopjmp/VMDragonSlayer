@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypedDict
 
 from .config import get_config
 from .exceptions import (
@@ -43,6 +43,47 @@ _ENGINE_ERRORS = (
     AnalysisError, AnalysisTimeoutError, ConfigurationError, InvalidDataError,
     ValueError, TypeError, KeyError, IndexError, RuntimeError, OSError,
 )
+
+# ---------------------------------------------------------------------------
+# TypedDicts for public API boundary precision
+# ---------------------------------------------------------------------------
+
+
+class AnalysisOptionsDict(TypedDict, total=False):
+    """Typed options accepted by :class:`AnalysisRequest`."""
+
+    timeout: float
+    engines: List[str]
+    depth: int
+    enable_gpu: bool
+    scoring_config: Dict[str, float]
+
+
+class AnalysisMetadataDict(TypedDict, total=False):
+    """Typed metadata accompanying an analysis request."""
+
+    filename: str
+    content_type: str
+    size: int
+    source: str
+    tags: List[str]
+
+
+class AnalysisResultDict(TypedDict):
+    """Shape of the dict returned by :meth:`VMDragonSlayerAPI.analyze_binary_data`."""
+
+    success: bool
+    analysis_id: str
+    timestamp: str
+    file_info: Dict[str, Any]
+    analysis_type: str
+    results: Dict[str, Any]
+    engine_results: List[Dict[str, Any]]
+    execution_time: float
+    errors: List[str]
+    confidence_scores: Dict[str, float]
+    metrics: Dict[str, Any]
+
 
 # ---------------------------------------------------------------------------
 # Public enums & data classes (imported by core/__init__.py and api/server.py)
@@ -902,7 +943,19 @@ class VMDragonSlayerAPI:
         analysis_type: str = "hybrid",
         metadata: Dict[str, Any] | None = None,
         **options: Any,
-    ) -> Dict[str, Any]:
+    ) -> AnalysisResultDict:
+        """Analyse *binary_data* and return a structured result dict.
+
+        Args:
+            binary_data: Raw bytes of the sample to analyse.
+            analysis_type: One of the :class:`AnalysisType` values.
+            metadata: Optional file metadata (filename, source, etc.).
+            **options: Forwarded to the orchestrator as analysis options.
+
+        Returns:
+            An :class:`AnalysisResultDict` with success status, engine
+            results, execution time, and confidence scores.
+        """
         result = self._orchestrator.analyze_binary(
             binary_data,
             analysis_type=analysis_type,

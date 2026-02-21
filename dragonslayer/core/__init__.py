@@ -3,7 +3,15 @@ VMDragonSlayer Core Module
 
 """
 
-from .orchestrator import Orchestrator, AnalysisType, AnalysisRequest, AnalysisResult
+from .orchestrator import (
+    Orchestrator,
+    AnalysisType,
+    AnalysisRequest,
+    AnalysisResult,
+    AnalysisOptionsDict,
+    AnalysisMetadataDict,
+    AnalysisResultDict,
+)
 from .config import get_config, Config
 from .exceptions import (
     AnalysisError,
@@ -31,6 +39,9 @@ __all__ = [
     'AnalysisType',
     'AnalysisRequest',
     'AnalysisResult',
+    'AnalysisOptionsDict',
+    'AnalysisMetadataDict',
+    'AnalysisResultDict',
       
     # Configuration
     'get_config',

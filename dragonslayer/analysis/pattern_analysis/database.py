@@ -1,6 +1,9 @@
 """
 Pattern Database Module
 
+Provides persistent storage, indexing, and search for VM handler
+byte-signature patterns.  Patterns are indexed by handler type,
+architecture, and operation for fast multi-filter queries.
 """
 
 import json
@@ -38,9 +41,19 @@ class HandlerType(Enum):
 
 @dataclass
 class Pattern:
-    """
-    Represents a VM handler pattern.
-    
+    """A single VM handler byte-signature pattern.
+
+    Attributes:
+        pattern_id: Unique identifier for this pattern.
+        name: Human-readable label (e.g. ``"vmp3_add_32"``).
+        signature: Hex byte string, ``??`` for wildcards.
+        architecture: Target arch (``x86``, ``x64``, ``arm``, …).
+        handler_type: Semantic category (``arithmetic``, ``memory``, …).
+        operation: Specific VM operation (``add``, ``load``, …).
+        confidence: Match confidence weight in ``[0, 1]``.
+        wildcards: Whether ``??`` wildcards are present.
+        variants: Alternative byte signatures for the same handler.
+        metadata: Arbitrary extra info (protector version, notes, …).
     """
     pattern_id: str
     name: str
@@ -107,15 +120,18 @@ class Pattern:
 
 
 class PatternDatabase:
-    """
-    Manages a collection of VM handler patterns.
+    """Indexed collection of VM handler patterns with JSON persistence.
 
+    Maintains three secondary indices (by type, architecture, and
+    operation) so that :meth:`search` can combine filters efficiently.
     """
-    
-    def __init__(self, database_path: Optional[Path] = None):
-        """
-        Initialize pattern database.
-        
+
+    def __init__(self, database_path: Optional[Path] = None) -> None:
+        """Create a new database, optionally loading from *database_path*.
+
+        Args:
+            database_path: Path to a JSON file.  If it exists the
+                patterns are loaded immediately.
         """
         self.patterns: Dict[str, Pattern] = {}
         self.database_path = database_path
@@ -127,9 +143,10 @@ class PatternDatabase:
             self.load(database_path)
     
     def add_pattern(self, pattern: Pattern) -> None:
-        """
-        Add a pattern to the database.
-        
+        """Insert *pattern* into the database.
+
+        Raises:
+            ValueError: If a pattern with the same ``pattern_id`` already exists.
         """
         if pattern.pattern_id in self.patterns:
             raise ValueError(f"Pattern ID '{pattern.pattern_id}' already exists")
@@ -140,16 +157,14 @@ class PatternDatabase:
         logger.info("Added pattern: %s (%s)", pattern.pattern_id, pattern.name)
     
     def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
-        """
-        Retrieve a pattern by ID.
-        
-        """
+        """Return the :class:`Pattern` with *pattern_id*, or ``None``."""
         return self.patterns.get(pattern_id)
     
     def update_pattern(self, pattern: Pattern) -> None:
-        """
-        Update an existing pattern.
-        
+        """Replace the pattern with the same ``pattern_id``.
+
+        Raises:
+            KeyError: If *pattern.pattern_id* is not in the database.
         """
         if pattern.pattern_id not in self.patterns:
             raise KeyError(f"Pattern ID '{pattern.pattern_id}' not found")
@@ -165,9 +180,10 @@ class PatternDatabase:
         logger.info("Updated pattern: %s", pattern.pattern_id)
     
     def delete_pattern(self, pattern_id: str) -> bool:
-        """
-        Delete a pattern from the database.
-        
+        """Remove the pattern with *pattern_id*.
+
+        Returns:
+            ``True`` if the pattern was found and removed, ``False`` otherwise.
         """
         if pattern_id not in self.patterns:
             return False
@@ -180,37 +196,37 @@ class PatternDatabase:
         return True
     
     def search_by_type(self, handler_type: str) -> List[Pattern]:
-        """
-        Find all patterns of a specific handler type.
-        
-        """
+        """Return all patterns matching *handler_type* (case-insensitive)."""
         pattern_ids = self._index_by_type.get(handler_type.lower(), set())
         return [self.patterns[pid] for pid in pattern_ids]
     
     def search_by_architecture(self, architecture: str) -> List[Pattern]:
-        """
-        Find all patterns for a specific architecture.
-        
-        """
+        """Return all patterns matching *architecture* (case-insensitive)."""
         pattern_ids = self._index_by_arch.get(architecture.lower(), set())
         return [self.patterns[pid] for pid in pattern_ids]
     
     def search_by_operation(self, operation: str) -> List[Pattern]:
-        """
-        Find all patterns for a specific operation.
-        
-        """
+        """Return all patterns matching *operation* (case-insensitive)."""
         pattern_ids = self._index_by_operation.get(operation.lower(), set())
         return [self.patterns[pid] for pid in pattern_ids]
     
-    def search(self, 
-               handler_type: Optional[str] = None,
-               architecture: Optional[str] = None,
-               operation: Optional[str] = None,
-               min_confidence: float = 0.0) -> List[Pattern]:
-        """
-        Search patterns with multiple filters.
+    def search(
+        self,
+        handler_type: Optional[str] = None,
+        architecture: Optional[str] = None,
+        operation: Optional[str] = None,
+        min_confidence: float = 0.0,
+    ) -> List[Pattern]:
+        """Multi-filter search across indexed fields.
 
+        Args:
+            handler_type: Filter by handler type (e.g. ``"arithmetic"``).
+            architecture: Filter by architecture (e.g. ``"x64"``).
+            operation: Filter by VM operation (e.g. ``"add"``).
+            min_confidence: Exclude patterns below this threshold.
+
+        Returns:
+            List of :class:`Pattern` objects matching **all** active filters.
         """
         # Start with all patterns
         results = set(self.patterns.keys())
@@ -240,10 +256,7 @@ class PatternDatabase:
         return list(self.patterns.values())
     
     def get_statistics(self) -> Dict[str, Any]:
-        """
-        Get database statistics.
-
-        """
+        """Return a summary dict with counts by type, architecture, and operation."""
         return {
             'total_patterns': len(self.patterns),
             'by_type': {k: len(v) for k, v in self._index_by_type.items()},

@@ -446,9 +446,10 @@ async def check_rate_limit(request: Request) -> bool:
     now = time.time()
 
     async with _rate_lock:
-        # Clean old entries for this IP
+        # Ensure the IP has an entry before filtering
+        timestamps = server_state['rate_limiter'].get(client_ip, [])
         server_state['rate_limiter'][client_ip] = [
-            t for t in server_state['rate_limiter'][client_ip]
+            t for t in timestamps
             if now - t < RATE_LIMIT_WINDOW
         ]
 
