@@ -77,3 +77,23 @@ jobs:
 
       - name: Mypy
         run: mypy dragonslayer/ --ignore-missing-imports --warn-return-any --warn-unused-configs --disallow-untyped-defs
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+
+      - name: Install security tools
+        run: pip install bandit pip-audit
+
+      - name: Bandit (SAST)
+        run: bandit -r dragonslayer/ -c pyproject.toml -ll
+
+      - name: pip-audit (dependency scan)
+        run: pip-audit -r requirements.txt

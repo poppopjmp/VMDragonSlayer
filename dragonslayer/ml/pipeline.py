@@ -93,6 +93,7 @@ _MEM_MNEMS = {"mov", "movzx", "movsx", "movsxd", "lea", "xchg", "bswap", "cmova"
 _BRANCH_MNEMS = {"jmp", "je", "jne", "jz", "jnz", "jg", "jge", "jl", "jle", "ja", "jae",
                  "jb", "jbe", "call", "ret", "loop", "loope", "loopne", "jcxz", "jecxz"}
 _NOP_MNEMS = {"nop", "fnop", "pause", "ud2"}
+_CMP_MNEMS = {"cmp", "test"}
 
 HANDLER_FEATURE_NAMES: List[str] = [
     "instruction_count",
@@ -110,6 +111,8 @@ HANDLER_FEATURE_NAMES: List[str] = [
     "has_indirect_branch",
     "max_operand_width",
     "block_count",
+    "has_cmp_insn",
+    "has_test_insn",
 ]
 
 
@@ -171,6 +174,10 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
     operand_width = float(handler.get("operand_width", 8))
     block_count = float(handler.get("block_count", 1))
 
+    # B80: explicit comparison-instruction features
+    has_cmp_insn = 1.0 if any(m == "cmp" for m in mnemonics) else 0.0
+    has_test_insn = 1.0 if any(m == "test" for m in mnemonics) else 0.0
+
     values = [
         float(len(mnemonics)),
         float(unique),
@@ -182,6 +189,8 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
         has_indirect,
         operand_width,
         block_count,
+        has_cmp_insn,
+        has_test_insn,
     ]
 
     return FeatureVector(

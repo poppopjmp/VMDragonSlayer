@@ -466,12 +466,12 @@ class TestEndToEndIntegration:
         }
 
         fv = extract_handler_features(handler)
-        assert fv.dimension == 15
-        assert len(fv.values) == 15
+        assert fv.dimension == 17
+        assert len(fv.values) == 17
         assert all(isinstance(v, (int, float)) for v in fv.values)
 
         efv = extract_extended_features(handler)
-        assert efv.dimension >= 100  # 130 expected
+        assert efv.dimension >= 100  # 132 expected
         assert len(efv.values) == efv.dimension
 
     def test_orchestrator_hybrid_analysis(self):

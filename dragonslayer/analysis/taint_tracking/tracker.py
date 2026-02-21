@@ -32,6 +32,14 @@ _RE_ADDR_SPLIT = re.compile(r"(?=[+\-])")
 _RE_MUL = re.compile(r"(\w+)\s*\*\s*(\w+)")  # B75: handles both reg*scale and scale*reg
 _RE_NUM = re.compile(r"(?:0x)?([0-9a-fA-F]+)")
 
+# B80: Volatile / non-pointer registers that should NOT be tracked as pointers.
+_VOLATILE_REGS: frozenset[str] = frozenset({
+    "rsp", "esp", "sp", "spl",
+    "rip", "eip", "ip",
+    "eflags", "rflags", "flags",
+    "cs", "ds", "es", "fs", "gs", "ss",
+})
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # x86 sub-register family map  (Batch 31)
@@ -860,12 +868,6 @@ class TaintTracker:
         # so that MemoryAliasTracker can detect must-alias relationships
         # during live instruction processing.
         # Filter out volatile / non-pointer registers (rsp, rip, eflags, etc.)
-        _VOLATILE_REGS = frozenset({
-            "rsp", "esp", "sp", "spl",
-            "rip", "eip", "ip",
-            "eflags", "rflags", "flags",
-            "cs", "ds", "es", "fs", "gs", "ss",
-        })
         if reg_values:
             for rname, rval in reg_values.items():
                 if isinstance(rval, int) and rname.lower() not in _VOLATILE_REGS:

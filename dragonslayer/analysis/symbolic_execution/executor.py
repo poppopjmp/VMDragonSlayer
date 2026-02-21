@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import logging
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -1662,495 +1663,568 @@ class SymbolicExecutor:
 
     # -- Instruction semantics engine ----------------------------------------
 
-    def _apply_instruction(self, state: SymbolicState, insn: LiftedInstruction) -> None:
-        """
-        Apply the effect of *insn* to *state* — updating registers,
-        memory, and potentially adding constraints.
+    # ── B80: dispatch table — maps mnemonic → handler method ──────
+    _DISPATCH_MAP: dict[str, str] = {
+        # data movement
+        "mov": "_exec_mov",
+        "lea": "_exec_lea",
+        "movzx": "_exec_mov_extend", "movsx": "_exec_mov_extend", "movsxd": "_exec_mov_extend",
+        "xchg": "_exec_xchg",
+        # arithmetic
+        "add": "_exec_arith", "sub": "_exec_arith", "adc": "_exec_arith", "sbb": "_exec_arith",
+        "inc": "_exec_inc_dec", "dec": "_exec_inc_dec",
+        "neg": "_exec_neg",
+        "imul": "_exec_imul", "mul": "_exec_mul",
+        "div": "_exec_div", "idiv": "_exec_div",
+        # logic / shift
+        "and": "_exec_logic", "or": "_exec_logic", "xor": "_exec_logic",
+        "not": "_exec_not",
+        "shl": "_exec_shift", "shr": "_exec_shift", "sar": "_exec_shift",
+        "rol": "_exec_shift", "ror": "_exec_shift",
+        # comparison
+        "cmp": "_exec_cmp_test", "test": "_exec_cmp_test",
+        # stack
+        "push": "_exec_push", "pop": "_exec_pop",
+        "pushf": "_exec_pushf", "pushfq": "_exec_pushf", "pushfd": "_exec_pushf",
+        "popf": "_exec_popf", "popfq": "_exec_popf", "popfd": "_exec_popf",
+        # sign extension
+        "cdq": "_exec_cdq", "cqo": "_exec_cqo",
+        "cdqe": "_exec_cdqe",
+        "cwde": "_exec_cwde_cwd", "cwd": "_exec_cwde_cwd",
+        # byte swap
+        "bswap": "_exec_bswap",
+        # bit test
+        "bt": "_exec_bit_test", "bts": "_exec_bit_test",
+        "btr": "_exec_bit_test", "btc": "_exec_bit_test",
+        # no-ops
+        "nop": "_exec_nop", "endbr32": "_exec_nop", "endbr64": "_exec_nop",
+        "pause": "_exec_nop", "fnop": "_exec_nop", "fwait": "_exec_nop",
+        "mfence": "_exec_nop", "lfence": "_exec_nop", "sfence": "_exec_nop",
+        "ud2": "_exec_nop",
+        # control flow
+        "call": "_exec_call",
+        "ret": "_exec_ret", "retn": "_exec_ret",
+    }
 
-        This is a simplified semantic model sufficient for VM handler
-        classification; it covers mov, arithmetic, logic, stack, and
-        memory operations.
+    def _apply_instruction(self, state: SymbolicState, insn: LiftedInstruction) -> None:
+        """Apply *insn*'s effect to *state* via dispatch table.
+
+        Updates registers, memory, and constraints.  Uses
+        :attr:`_DISPATCH_MAP` for O(1) mnemonic lookup, falling back to
+        prefix matching for ``cmov*`` and ``set*`` families.
         """
         mnemonic = insn.mnemonic
         ops = [o.strip() for o in insn.operands.split(",")]  if insn.operands else []
 
         try:
-            if mnemonic == "mov" and len(ops) == 2:
-                val = self._resolve_operand(state, ops[1])
-                self._write_operand(state, ops[0], val)
-
-            elif mnemonic in ("add", "sub", "adc", "sbb") and len(ops) == 2:
-                left = self._resolve_operand(state, ops[0])
-                right = self._resolve_operand(state, ops[1])
-                if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
-                    left = self._ensure_bv(left, state.bit_width)
-                    right = self._ensure_bv(right, state.bit_width)
-                    result = (left + right) if mnemonic in ("add", "adc") else (left - right)
-                else:
-                    result = (left + right) if mnemonic in ("add", "adc") else (left - right)
-                self._write_operand(state, ops[0], result)
-                _opsz = self._infer_operand_bits(ops[0], state.bit_width)
-                state.update_flags_arith(result, left, right, is_sub=mnemonic in ("sub", "sbb"), operand_size=_opsz)
-
-            elif mnemonic in ("and", "or", "xor") and len(ops) == 2:
-                left = self._resolve_operand(state, ops[0])
-                right = self._resolve_operand(state, ops[1])
-                if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
-                    left = self._ensure_bv(left, state.bit_width)
-                    right = self._ensure_bv(right, state.bit_width)
-                    if mnemonic == "and":
-                        result = left & right
-                    elif mnemonic == "or":
-                        result = left | right
-                    else:
-                        result = left ^ right
-                else:
-                    if mnemonic == "and":
-                        result = left & right
-                    elif mnemonic == "or":
-                        result = left | right
-                    else:
-                        result = left ^ right
-                self._write_operand(state, ops[0], result)
-                _opsz = self._infer_operand_bits(ops[0], state.bit_width)
-                state.update_flags_logic(result, operand_size=_opsz)
-
-            elif mnemonic in ("shl", "shr", "sar", "rol", "ror") and len(ops) == 2:
-                val = self._resolve_operand(state, ops[0])
-                amount = self._resolve_operand(state, ops[1])
-                if Z3Solver.available() and hasattr(val, "sort"):
-                    amount = self._ensure_bv(amount, state.bit_width)
-                    if mnemonic == "shl":
-                        result = val << amount
-                    elif mnemonic == "shr":
-                        result = _z3.LShR(val, amount)
-                    elif mnemonic == "sar":
-                        result = val >> amount
-                    else:
-                        result = _z3.RotateLeft(val, amount) if mnemonic == "rol" else _z3.RotateRight(val, amount)
-                else:
-                    sa = amount if isinstance(amount, int) else 0
-                    if mnemonic == "shl":
-                        result = val << sa
-                    elif mnemonic in ("shr", "sar"):
-                        result = val >> sa
-                    else:
-                        result = val  # skip rotation in concrete mode
-                self._write_operand(state, ops[0], result)
-
-            elif mnemonic in ("inc", "dec") and len(ops) == 1:
-                val = self._resolve_operand(state, ops[0])
-                if Z3Solver.available() and hasattr(val, "sort"):
-                    one = _z3.BitVecVal(1, state.bit_width)
-                    result = val + one if mnemonic == "inc" else val - one
-                else:
-                    result = (val + 1) if mnemonic == "inc" else (val - 1)
-                self._write_operand(state, ops[0], result)
-                # update_flags_inc_dec properly saves/restores CF
-                _opsz = self._infer_operand_bits(ops[0], state.bit_width)
-                state.update_flags_inc_dec(result, val, is_dec=(mnemonic == "dec"), operand_size=_opsz)
-
-            elif mnemonic == "neg" and len(ops) == 1:
-                val = self._resolve_operand(state, ops[0])
-                if Z3Solver.available() and hasattr(val, "sort"):
-                    result = -val
-                else:
-                    result = -val
-                self._write_operand(state, ops[0], result)
-                # NEG sets CF = (val != 0), updates ZF/SF/OF for 0 - val
-                zero: Any = 0
-                if Z3Solver.available() and hasattr(val, "sort"):
-                    zero = _z3.BitVecVal(0, state.bit_width)
-                _opsz = self._infer_operand_bits(ops[0], state.bit_width)
-                state.update_flags_arith(result, zero, val, is_sub=True, operand_size=_opsz)
-
-            elif mnemonic == "not" and len(ops) == 1:
-                val = self._resolve_operand(state, ops[0])
-                if Z3Solver.available() and hasattr(val, "sort"):
-                    result = ~val
-                else:
-                    result = ~val
-                self._write_operand(state, ops[0], result)
-
-            elif mnemonic == "push" and len(ops) == 1:
-                val = self._resolve_operand(state, ops[0])
-                sp_reg = "rsp" if state.bit_width == 64 else "esp"
-                sp = state.get_register(sp_reg)
-                word_size = state.bit_width // 8
-                if isinstance(sp, int):
-                    sp -= word_size
-                    state.set_register(sp_reg, sp)
-                    state.write_memory(sp, val, word_size)
-                elif Z3Solver.available() and hasattr(sp, "sort"):
-                    dec = _z3.BitVecVal(word_size, state.bit_width)
-                    new_sp = sp - dec
-                    state.set_register(sp_reg, new_sp)
-                    # Try to concretise the address for the memory write
-                    try:
-                        solver = _z3.Solver()
-                        solver.add(*state.constraints)
-                        if solver.check() == _z3.sat:
-                            addr_val = solver.model().eval(new_sp, model_completion=True)
-                            state.write_memory(addr_val.as_long(), val, word_size)
-                        else:
-                            state.write_memory(0, val, word_size)
-                    except Exception:
-                        state.write_memory(0, val, word_size)
-
-            elif mnemonic == "pop" and len(ops) == 1:
-                sp_reg = "rsp" if state.bit_width == 64 else "esp"
-                sp = state.get_register(sp_reg)
-                word_size = state.bit_width // 8
-                if isinstance(sp, int):
-                    val = state.read_memory(sp, word_size)
-                    self._write_operand(state, ops[0], val)
-                    sp += word_size
-                    state.set_register(sp_reg, sp)
-                elif Z3Solver.available() and hasattr(sp, "sort"):
-                    # Can't read from symbolic address — create fresh symbolic
-                    val = _z3.BitVec(f"pop_{state.depth}", state.bit_width)
-                    self._write_operand(state, ops[0], val)
-                    inc = _z3.BitVecVal(word_size, state.bit_width)
-                    state.set_register(sp_reg, sp + inc)
-
-            elif mnemonic == "lea" and len(ops) == 2:
-                # LEA computes effective address WITHOUT dereferencing
-                addr = self._resolve_effective_address(state, ops[1])
-                self._write_operand(state, ops[0], addr)
-
-            elif mnemonic in ("movzx", "movsx", "movsxd") and len(ops) == 2:
-                val = self._resolve_operand(state, ops[1])
-                self._write_operand(state, ops[0], val)
-
-            elif mnemonic in ("cmp", "test") and len(ops) == 2:
-                # These only set flags, not destination.
-                left = self._resolve_operand(state, ops[0])
-                right = self._resolve_operand(state, ops[1])
-                if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
-                    left = self._ensure_bv(left, state.bit_width)
-                    right = self._ensure_bv(right, state.bit_width)
-                _opsz = self._infer_operand_bits(ops[0], state.bit_width)
-                if mnemonic == "cmp":
-                    diff = left - right if hasattr(left, '__sub__') else 0
-                    state.update_flags_arith(diff, left, right, is_sub=True, operand_size=_opsz)
-                else:  # test
-                    anded = left & right if hasattr(left, '__and__') else 0
-                    state.update_flags_logic(anded, operand_size=_opsz)
-                # Legacy compat: keep _last_cmp for callers
-                state._last_cmp = (mnemonic, left, right)
-
-            elif mnemonic == "xchg" and len(ops) == 2:
-                a = self._resolve_operand(state, ops[0])
-                b = self._resolve_operand(state, ops[1])
-                self._write_operand(state, ops[0], b)
-                self._write_operand(state, ops[1], a)
-
-            # ── IMUL (signed multiply) ──────────────────────────────
-            elif mnemonic == "imul":
-                if len(ops) == 1:
-                    # One-operand: RDX:RAX = RAX * ops[0]
-                    src = self._resolve_operand(state, ops[0])
-                    ax_reg = "rax" if state.bit_width == 64 else "eax"
-                    dx_reg = "rdx" if state.bit_width == 64 else "edx"
-                    ax_val = state.get_register(ax_reg)
-                    if Z3Solver.available() and (hasattr(ax_val, "sort") or hasattr(src, "sort")):
-                        a = self._ensure_bv(ax_val, state.bit_width)
-                        b = self._ensure_bv(src, state.bit_width)
-                        full = _z3.SignExt(state.bit_width, a) * _z3.SignExt(state.bit_width, b)
-                        state.set_register(ax_reg, _z3.Extract(state.bit_width - 1, 0, full))
-                        state.set_register(dx_reg, _z3.Extract(2 * state.bit_width - 1, state.bit_width, full))
-                    else:
-                        product = ax_val * src
-                        mask = (1 << state.bit_width) - 1
-                        state.set_register(ax_reg, product & mask)
-                        state.set_register(dx_reg, (product >> state.bit_width) & mask)
-                elif len(ops) == 2:
-                    # Two-operand: dst *= src
-                    dst_val = self._resolve_operand(state, ops[0])
-                    src = self._resolve_operand(state, ops[1])
-                    if Z3Solver.available() and (hasattr(dst_val, "sort") or hasattr(src, "sort")):
-                        result = self._ensure_bv(dst_val, state.bit_width) * self._ensure_bv(src, state.bit_width)
-                    else:
-                        result = dst_val * src
-                    self._write_operand(state, ops[0], result)
-                elif len(ops) == 3:
-                    # Three-operand: dst = src1 * imm
-                    src = self._resolve_operand(state, ops[1])
-                    imm = self._resolve_operand(state, ops[2])
-                    if Z3Solver.available() and (hasattr(src, "sort") or hasattr(imm, "sort")):
-                        result = self._ensure_bv(src, state.bit_width) * self._ensure_bv(imm, state.bit_width)
-                    else:
-                        result = src * imm
-                    self._write_operand(state, ops[0], result)
-
-            elif mnemonic == "mul" and len(ops) == 1:
-                # Unsigned multiply: RDX:RAX = RAX * src
-                src = self._resolve_operand(state, ops[0])
-                ax_reg = "rax" if state.bit_width == 64 else "eax"
-                dx_reg = "rdx" if state.bit_width == 64 else "edx"
-                ax_val = state.get_register(ax_reg)
-                if Z3Solver.available() and (hasattr(ax_val, "sort") or hasattr(src, "sort")):
-                    a = self._ensure_bv(ax_val, state.bit_width)
-                    b = self._ensure_bv(src, state.bit_width)
-                    full = _z3.ZeroExt(state.bit_width, a) * _z3.ZeroExt(state.bit_width, b)
-                    state.set_register(ax_reg, _z3.Extract(state.bit_width - 1, 0, full))
-                    state.set_register(dx_reg, _z3.Extract(2 * state.bit_width - 1, state.bit_width, full))
-                else:
-                    product = ax_val * src
-                    mask = (1 << state.bit_width) - 1
-                    state.set_register(ax_reg, product & mask)
-                    state.set_register(dx_reg, (product >> state.bit_width) & mask)
-
-            # ── DIV / IDIV ──────────────────────────────────────────
-            elif mnemonic in ("div", "idiv") and len(ops) == 1:
-                divisor = self._resolve_operand(state, ops[0])
-                ax_reg = "rax" if state.bit_width == 64 else "eax"
-                dx_reg = "rdx" if state.bit_width == 64 else "edx"
-                ax_val = state.get_register(ax_reg)
-                dx_val = state.get_register(dx_reg)
-                if Z3Solver.available() and (
-                    hasattr(ax_val, "sort") or hasattr(dx_val, "sort") or hasattr(divisor, "sort")
-                ):
-                    bw = state.bit_width
-                    hi = _z3.ZeroExt(bw, self._ensure_bv(dx_val, bw))
-                    lo = _z3.ZeroExt(bw, self._ensure_bv(ax_val, bw))
-                    dividend = (hi << bw) | lo
-                    d = _z3.ZeroExt(bw, self._ensure_bv(divisor, bw))
-                    if mnemonic == "div":
-                        quot = _z3.Extract(bw - 1, 0, _z3.UDiv(dividend, d))
-                        rem = _z3.Extract(bw - 1, 0, _z3.URem(dividend, d))
-                    else:
-                        quot = _z3.Extract(bw - 1, 0, dividend / d)
-                        rem = _z3.Extract(bw - 1, 0, _z3.SRem(dividend, d))
-                    state.set_register(ax_reg, quot)
-                    state.set_register(dx_reg, rem)
-                else:
-                    if isinstance(divisor, int) and divisor != 0:
-                        mask = (1 << state.bit_width) - 1
-                        hi = (dx_val if isinstance(dx_val, int) else 0) & mask
-                        lo = (ax_val if isinstance(ax_val, int) else 0) & mask
-                        dividend = (hi << state.bit_width) | lo
-                        state.set_register(ax_reg, (dividend // divisor) & mask)
-                        state.set_register(dx_reg, (dividend % divisor) & mask)
-
-            # ── CMOVcc (conditional move) ───────────────────────────
-            elif mnemonic.startswith("cmov") and len(ops) == 2:
-                cond = self._evaluate_condition(state, mnemonic[4:])
-                src = self._resolve_operand(state, ops[1])
-                if cond is True:
-                    self._write_operand(state, ops[0], src)
-                elif Z3Solver.available() and hasattr(cond, '__bool__') is False or (
-                    hasattr(cond, 'sort') if Z3Solver.available() else False
-                ):
-                    # Symbolic condition → use z3 If
-                    dst = self._resolve_operand(state, ops[0])
-                    dst_bv = self._ensure_bv(dst, state.bit_width)
-                    src_bv = self._ensure_bv(src, state.bit_width)
-                    result = _z3.If(cond, src_bv, dst_bv)
-                    self._write_operand(state, ops[0], result)
-                # else cond is False → no-op (destination unchanged)
-
-            # ── SETcc (set byte on condition) ───────────────────────
-            elif mnemonic.startswith("set") and len(ops) == 1:
-                cc = mnemonic[3:]
-                cond = self._evaluate_condition(state, cc)
-                if Z3Solver.available() and hasattr(cond, 'sort'):
-                    result = _z3.If(cond, _z3.BitVecVal(1, state.bit_width),
-                                    _z3.BitVecVal(0, state.bit_width))
-                else:
-                    result = 1 if cond else 0
-                self._write_operand(state, ops[0], result)
-
-            # ── BSWAP ──────────────────────────────────────────────
-            elif mnemonic == "bswap" and len(ops) == 1:
-                val = self._resolve_operand(state, ops[0])
-                if Z3Solver.available() and hasattr(val, "sort"):
-                    bw = val.sort().size()
-                    byte_count = bw // 8
-                    bytes_list = [_z3.Extract(i * 8 + 7, i * 8, val)
-                                  for i in range(byte_count)]
-                    result = _z3.Concat(*bytes_list)  # reversed order
-                    self._write_operand(state, ops[0], result)
-                else:
-                    result = int.from_bytes(
-                        val.to_bytes(state.bit_width // 8, "little"), "big"
-                    ) if isinstance(val, int) else val
-                    self._write_operand(state, ops[0], result)
-
-            # ── PUSHF / POPF (save/restore EFLAGS) ─────────────────
-            elif mnemonic in ("pushf", "pushfq", "pushfd"):
-                # Build a symbolic EFLAGS value from individual flags
-                if Z3Solver.available():
-                    bw = state.bit_width
-                    eflags = _z3.BitVecVal(0x202, bw)  # reserved bits
-                    for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
-                        fv = state.flags.get(flag, False)
-                        if hasattr(fv, "sort"):
-                            eflags = eflags | _z3.If(fv, _z3.BitVecVal(1 << bit_pos, bw),
-                                                     _z3.BitVecVal(0, bw))
-                        elif fv:
-                            eflags = eflags | _z3.BitVecVal(1 << bit_pos, bw)
-                else:
-                    eflags = 0x202
-                    for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
-                        if state.flags.get(flag, False):
-                            eflags |= (1 << bit_pos)
-                # Push EFLAGS onto stack
-                sp_reg = "rsp" if state.bit_width == 64 else "esp"
-                sp = state.get_register(sp_reg)
-                word_size = state.bit_width // 8
-                if isinstance(sp, int):
-                    sp -= word_size
-                    state.set_register(sp_reg, sp)
-                    state.write_memory(sp, eflags, word_size)
-
-            elif mnemonic in ("popf", "popfq", "popfd"):
-                # Pop EFLAGS from stack and restore individual flags
-                sp_reg = "rsp" if state.bit_width == 64 else "esp"
-                sp = state.get_register(sp_reg)
-                word_size = state.bit_width // 8
-                if isinstance(sp, int):
-                    eflags = state.read_memory(sp, word_size)
-                    state.set_register(sp_reg, sp + word_size)
-                    # Try to concretize z3 constants so flags stay plain bool
-                    if Z3Solver.available() and hasattr(eflags, "sort"):
-                        try:
-                            val = _z3.simplify(eflags)
-                            if val.as_long is not None:
-                                eflags = val.as_long()
-                        except Exception:
-                            pass
-                    if Z3Solver.available() and hasattr(eflags, "sort"):
-                        one = _z3.BitVecVal(1, 1)
-                        state.flags["CF"] = _z3.Extract(0, 0, eflags) == one
-                        state.flags["ZF"] = _z3.Extract(6, 6, eflags) == one
-                        state.flags["SF"] = _z3.Extract(7, 7, eflags) == one
-                        state.flags["OF"] = _z3.Extract(11, 11, eflags) == one
-                    elif isinstance(eflags, int):
-                        state.flags["CF"] = bool(eflags & 1)
-                        state.flags["ZF"] = bool(eflags & (1 << 6))
-                        state.flags["SF"] = bool(eflags & (1 << 7))
-                        state.flags["OF"] = bool(eflags & (1 << 11))
-
-            # ── CDQ / CWD / CDQE / CWDE (sign-extend) ─────────────
-            elif mnemonic == "cdq":
-                # CDQ: sign-extend EAX (32-bit) into EDX:EAX
-                eax_val = state.get_register("eax")  # lower 32 bits of rax
-                dx_reg = "rdx" if state.bit_width == 64 else "edx"
-                if Z3Solver.available() and hasattr(eax_val, "sort"):
-                    bw = eax_val.sort().size()
-                    sign = _z3.Extract(31, 31, self._ensure_bv(eax_val, 32)) if bw >= 32 else _z3.Extract(bw - 1, bw - 1, eax_val)
-                    allones = _z3.BitVecVal((1 << state.bit_width) - 1, state.bit_width)
-                    zero = _z3.BitVecVal(0, state.bit_width)
-                    state.set_register(dx_reg, _z3.If(sign == _z3.BitVecVal(1, 1), allones, zero))
-                else:
-                    eax = eax_val if isinstance(eax_val, int) else 0
-                    sign = (eax >> 31) & 1
-                    mask = (1 << state.bit_width) - 1
-                    state.set_register(dx_reg, mask if sign else 0)
-
-            elif mnemonic == "cqo":
-                # CQO: sign-extend RAX (64-bit) into RDX:RAX
-                ax_val = state.get_register("rax")
-                if Z3Solver.available() and hasattr(ax_val, "sort"):
-                    sign = _z3.Extract(63, 63, self._ensure_bv(ax_val, 64))
-                    allones = _z3.BitVecVal((1 << 64) - 1, 64)
-                    zero = _z3.BitVecVal(0, 64)
-                    state.set_register("rdx", _z3.If(sign == _z3.BitVecVal(1, 1), allones, zero))
-                else:
-                    ax_int = ax_val if isinstance(ax_val, int) else 0
-                    sign = (ax_int >> 63) & 1
-                    mask = (1 << 64) - 1
-                    state.set_register("rdx", mask if sign else 0)
-
-            elif mnemonic == "cdqe":
-                # Sign-extend EAX into RAX (64-bit mode)
-                if state.bit_width == 64:
-                    eax_val = state.get_register("eax")
-                    if Z3Solver.available() and hasattr(eax_val, "sort"):
-                        if eax_val.sort().size() == 32:
-                            state.set_register("rax", _z3.SignExt(32, eax_val))
-                        else:
-                            state.set_register("rax", _z3.SignExt(32, _z3.Extract(31, 0, eax_val)))
-                    elif isinstance(eax_val, int):
-                        if eax_val & 0x80000000:
-                            state.set_register("rax", eax_val | 0xFFFFFFFF00000000)
-                        else:
-                            state.set_register("rax", eax_val & 0xFFFFFFFF)
-
-            elif mnemonic in ("cwde", "cwd"):
-                if mnemonic == "cwde":
-                    # Sign-extend AX into EAX
-                    ax_val = state.get_register("ax") if "ax" in state.registers else state.get_register("eax")
-                    if isinstance(ax_val, int):
-                        if ax_val & 0x8000:
-                            state.set_register("eax", ax_val | 0xFFFF0000)
-                        else:
-                            state.set_register("eax", ax_val & 0xFFFF)
-                else:
-                    # CWD: sign-extend AX into DX:AX
-                    ax_val = state.get_register("ax") if "ax" in state.registers else state.get_register("eax")
-                    if isinstance(ax_val, int):
-                        state.set_register("edx" if state.bit_width == 32 else "rdx",
-                                           0xFFFF if ax_val & 0x8000 else 0)
-
-            # ── BT / BTS / BTR / BTC (bit test) ───────────────────
-            elif mnemonic in ("bt", "bts", "btr", "btc") and len(ops) == 2:
-                base = self._resolve_operand(state, ops[0])
-                bit_pos = self._resolve_operand(state, ops[1])
-                if Z3Solver.available() and (hasattr(base, "sort") or hasattr(bit_pos, "sort")):
-                    base_bv = self._ensure_bv(base, state.bit_width)
-                    pos_bv = self._ensure_bv(bit_pos, state.bit_width)
-                    tested = _z3.LShR(base_bv, pos_bv) & _z3.BitVecVal(1, state.bit_width)
-                    state.flags["CF"] = tested == _z3.BitVecVal(1, state.bit_width)
-                    if mnemonic == "bts":
-                        self._write_operand(state, ops[0], base_bv | (_z3.BitVecVal(1, state.bit_width) << pos_bv))
-                    elif mnemonic == "btr":
-                        self._write_operand(state, ops[0], base_bv & ~(_z3.BitVecVal(1, state.bit_width) << pos_bv))
-                    elif mnemonic == "btc":
-                        self._write_operand(state, ops[0], base_bv ^ (_z3.BitVecVal(1, state.bit_width) << pos_bv))
-                else:
-                    b = base if isinstance(base, int) else 0
-                    p = bit_pos if isinstance(bit_pos, int) else 0
-                    state.flags["CF"] = bool((b >> p) & 1)
-                    if mnemonic == "bts":
-                        self._write_operand(state, ops[0], b | (1 << p))
-                    elif mnemonic == "btr":
-                        self._write_operand(state, ops[0], b & ~(1 << p))
-                    elif mnemonic == "btc":
-                        self._write_operand(state, ops[0], b ^ (1 << p))
-
-            # ── NOP / ENDBR / PAUSE (no-ops) ──────────────────────
-            elif mnemonic in ("nop", "endbr32", "endbr64", "pause",
-                              "fnop", "fwait", "mfence", "lfence",
-                              "sfence", "ud2"):
-                pass  # no-op
-
-            # ── CALL (model as push return address) ────────────────
-            elif mnemonic == "call" and len(ops) == 1:
-                sp_reg = "rsp" if state.bit_width == 64 else "esp"
-                sp = state.get_register(sp_reg)
-                word_size = state.bit_width // 8
-                return_addr = insn.address + insn.size if hasattr(insn, 'size') else insn.address + 5
-                if isinstance(sp, int):
-                    sp -= word_size
-                    state.set_register(sp_reg, sp)
-                    state.write_memory(sp, return_addr, word_size)
-
-            # ── RET (model as pop into PC) ─────────────────────────
-            elif mnemonic in ("ret", "retn"):
-                sp_reg = "rsp" if state.bit_width == 64 else "esp"
-                sp = state.get_register(sp_reg)
-                word_size = state.bit_width // 8
-                if isinstance(sp, int):
-                    ret_addr = state.read_memory(sp, word_size)
-                    state.set_register(sp_reg, sp + word_size)
-                    if isinstance(ret_addr, int):
-                        state.pc = ret_addr
-
+            method_name = self._DISPATCH_MAP.get(mnemonic)
+            if method_name is None:
+                # Prefix-based families
+                if mnemonic.startswith("cmov"):
+                    method_name = "_exec_cmovcc"
+                elif mnemonic.startswith("set"):
+                    method_name = "_exec_setcc"
+            if method_name is not None:
+                getattr(self, method_name)(state, ops, insn, mnemonic)
         except Exception as exc:
             # Non-fatal: log for debugging, but continue execution
             logger.debug("Could not model '%s %s': %s", mnemonic, insn.operands, exc)
+
+    # ── B80: extracted instruction handler methods ────────────────
+
+    def _exec_mov(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        val = self._resolve_operand(state, ops[1])
+        self._write_operand(state, ops[0], val)
+
+    def _exec_arith(self, state: SymbolicState, ops: list[str],
+                    insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        left = self._resolve_operand(state, ops[0])
+        right = self._resolve_operand(state, ops[1])
+        if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
+            left = self._ensure_bv(left, state.bit_width)
+            right = self._ensure_bv(right, state.bit_width)
+            result = (left + right) if mnemonic in ("add", "adc") else (left - right)
+        else:
+            result = (left + right) if mnemonic in ("add", "adc") else (left - right)
+        self._write_operand(state, ops[0], result)
+        _opsz = self._infer_operand_bits(ops[0], state.bit_width)
+        state.update_flags_arith(result, left, right, is_sub=mnemonic in ("sub", "sbb"), operand_size=_opsz)
+
+    def _exec_logic(self, state: SymbolicState, ops: list[str],
+                    insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        left = self._resolve_operand(state, ops[0])
+        right = self._resolve_operand(state, ops[1])
+        if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
+            left = self._ensure_bv(left, state.bit_width)
+            right = self._ensure_bv(right, state.bit_width)
+        if mnemonic == "and":
+            result = left & right
+        elif mnemonic == "or":
+            result = left | right
+        else:
+            result = left ^ right
+        self._write_operand(state, ops[0], result)
+        _opsz = self._infer_operand_bits(ops[0], state.bit_width)
+        state.update_flags_logic(result, operand_size=_opsz)
+
+    def _exec_shift(self, state: SymbolicState, ops: list[str],
+                    insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        val = self._resolve_operand(state, ops[0])
+        amount = self._resolve_operand(state, ops[1])
+        if Z3Solver.available() and hasattr(val, "sort"):
+            amount = self._ensure_bv(amount, state.bit_width)
+            if mnemonic == "shl":
+                result = val << amount
+            elif mnemonic == "shr":
+                result = _z3.LShR(val, amount)
+            elif mnemonic == "sar":
+                result = val >> amount
+            else:
+                result = _z3.RotateLeft(val, amount) if mnemonic == "rol" else _z3.RotateRight(val, amount)
+        else:
+            sa = amount if isinstance(amount, int) else 0
+            if mnemonic == "shl":
+                result = val << sa
+            elif mnemonic in ("shr", "sar"):
+                result = val >> sa
+            else:
+                result = val  # skip rotation in concrete mode
+        self._write_operand(state, ops[0], result)
+
+    def _exec_inc_dec(self, state: SymbolicState, ops: list[str],
+                      insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        val = self._resolve_operand(state, ops[0])
+        if Z3Solver.available() and hasattr(val, "sort"):
+            one = _z3.BitVecVal(1, state.bit_width)
+            result = val + one if mnemonic == "inc" else val - one
+        else:
+            result = (val + 1) if mnemonic == "inc" else (val - 1)
+        self._write_operand(state, ops[0], result)
+        _opsz = self._infer_operand_bits(ops[0], state.bit_width)
+        state.update_flags_inc_dec(result, val, is_dec=(mnemonic == "dec"), operand_size=_opsz)
+
+    def _exec_neg(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        val = self._resolve_operand(state, ops[0])
+        result = -val
+        self._write_operand(state, ops[0], result)
+        zero: Any = 0
+        if Z3Solver.available() and hasattr(val, "sort"):
+            zero = _z3.BitVecVal(0, state.bit_width)
+        _opsz = self._infer_operand_bits(ops[0], state.bit_width)
+        state.update_flags_arith(result, zero, val, is_sub=True, operand_size=_opsz)
+
+    def _exec_not(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        val = self._resolve_operand(state, ops[0])
+        self._write_operand(state, ops[0], ~val)
+
+    def _exec_push(self, state: SymbolicState, ops: list[str],
+                   insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        val = self._resolve_operand(state, ops[0])
+        sp_reg = "rsp" if state.bit_width == 64 else "esp"
+        sp = state.get_register(sp_reg)
+        word_size = state.bit_width // 8
+        if isinstance(sp, int):
+            sp -= word_size
+            state.set_register(sp_reg, sp)
+            state.write_memory(sp, val, word_size)
+        elif Z3Solver.available() and hasattr(sp, "sort"):
+            dec = _z3.BitVecVal(word_size, state.bit_width)
+            new_sp = sp - dec
+            state.set_register(sp_reg, new_sp)
+            try:
+                solver = _z3.Solver()
+                solver.add(*state.constraints)
+                if solver.check() == _z3.sat:
+                    addr_val = solver.model().eval(new_sp, model_completion=True)
+                    state.write_memory(addr_val.as_long(), val, word_size)
+                else:
+                    state.write_memory(0, val, word_size)
+            except Exception:
+                state.write_memory(0, val, word_size)
+
+    def _exec_pop(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        sp_reg = "rsp" if state.bit_width == 64 else "esp"
+        sp = state.get_register(sp_reg)
+        word_size = state.bit_width // 8
+        if isinstance(sp, int):
+            val = state.read_memory(sp, word_size)
+            self._write_operand(state, ops[0], val)
+            sp += word_size
+            state.set_register(sp_reg, sp)
+        elif Z3Solver.available() and hasattr(sp, "sort"):
+            val = _z3.BitVec(f"pop_{state.depth}", state.bit_width)
+            self._write_operand(state, ops[0], val)
+            inc = _z3.BitVecVal(word_size, state.bit_width)
+            state.set_register(sp_reg, sp + inc)
+
+    def _exec_lea(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        addr = self._resolve_effective_address(state, ops[1])
+        self._write_operand(state, ops[0], addr)
+
+    def _exec_mov_extend(self, state: SymbolicState, ops: list[str],
+                         insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        val = self._resolve_operand(state, ops[1])
+        self._write_operand(state, ops[0], val)
+
+    def _exec_cmp_test(self, state: SymbolicState, ops: list[str],
+                       insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        left = self._resolve_operand(state, ops[0])
+        right = self._resolve_operand(state, ops[1])
+        if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
+            left = self._ensure_bv(left, state.bit_width)
+            right = self._ensure_bv(right, state.bit_width)
+        _opsz = self._infer_operand_bits(ops[0], state.bit_width)
+        if mnemonic == "cmp":
+            diff = left - right if hasattr(left, '__sub__') else 0
+            state.update_flags_arith(diff, left, right, is_sub=True, operand_size=_opsz)
+        else:  # test
+            anded = left & right if hasattr(left, '__and__') else 0
+            state.update_flags_logic(anded, operand_size=_opsz)
+        state._last_cmp = (mnemonic, left, right)
+
+    def _exec_xchg(self, state: SymbolicState, ops: list[str],
+                   insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        a = self._resolve_operand(state, ops[0])
+        b = self._resolve_operand(state, ops[1])
+        self._write_operand(state, ops[0], b)
+        self._write_operand(state, ops[1], a)
+
+    def _exec_imul(self, state: SymbolicState, ops: list[str],
+                   insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) == 1:
+            src = self._resolve_operand(state, ops[0])
+            ax_reg = "rax" if state.bit_width == 64 else "eax"
+            dx_reg = "rdx" if state.bit_width == 64 else "edx"
+            ax_val = state.get_register(ax_reg)
+            if Z3Solver.available() and (hasattr(ax_val, "sort") or hasattr(src, "sort")):
+                a = self._ensure_bv(ax_val, state.bit_width)
+                b = self._ensure_bv(src, state.bit_width)
+                full = _z3.SignExt(state.bit_width, a) * _z3.SignExt(state.bit_width, b)
+                state.set_register(ax_reg, _z3.Extract(state.bit_width - 1, 0, full))
+                state.set_register(dx_reg, _z3.Extract(2 * state.bit_width - 1, state.bit_width, full))
+            else:
+                product = ax_val * src
+                mask = (1 << state.bit_width) - 1
+                state.set_register(ax_reg, product & mask)
+                state.set_register(dx_reg, (product >> state.bit_width) & mask)
+        elif len(ops) == 2:
+            dst_val = self._resolve_operand(state, ops[0])
+            src = self._resolve_operand(state, ops[1])
+            if Z3Solver.available() and (hasattr(dst_val, "sort") or hasattr(src, "sort")):
+                result = self._ensure_bv(dst_val, state.bit_width) * self._ensure_bv(src, state.bit_width)
+            else:
+                result = dst_val * src
+            self._write_operand(state, ops[0], result)
+        elif len(ops) == 3:
+            src = self._resolve_operand(state, ops[1])
+            imm = self._resolve_operand(state, ops[2])
+            if Z3Solver.available() and (hasattr(src, "sort") or hasattr(imm, "sort")):
+                result = self._ensure_bv(src, state.bit_width) * self._ensure_bv(imm, state.bit_width)
+            else:
+                result = src * imm
+            self._write_operand(state, ops[0], result)
+
+    def _exec_mul(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        src = self._resolve_operand(state, ops[0])
+        ax_reg = "rax" if state.bit_width == 64 else "eax"
+        dx_reg = "rdx" if state.bit_width == 64 else "edx"
+        ax_val = state.get_register(ax_reg)
+        if Z3Solver.available() and (hasattr(ax_val, "sort") or hasattr(src, "sort")):
+            a = self._ensure_bv(ax_val, state.bit_width)
+            b = self._ensure_bv(src, state.bit_width)
+            full = _z3.ZeroExt(state.bit_width, a) * _z3.ZeroExt(state.bit_width, b)
+            state.set_register(ax_reg, _z3.Extract(state.bit_width - 1, 0, full))
+            state.set_register(dx_reg, _z3.Extract(2 * state.bit_width - 1, state.bit_width, full))
+        else:
+            product = ax_val * src
+            mask = (1 << state.bit_width) - 1
+            state.set_register(ax_reg, product & mask)
+            state.set_register(dx_reg, (product >> state.bit_width) & mask)
+
+    def _exec_div(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        divisor = self._resolve_operand(state, ops[0])
+        ax_reg = "rax" if state.bit_width == 64 else "eax"
+        dx_reg = "rdx" if state.bit_width == 64 else "edx"
+        ax_val = state.get_register(ax_reg)
+        dx_val = state.get_register(dx_reg)
+        if Z3Solver.available() and (
+            hasattr(ax_val, "sort") or hasattr(dx_val, "sort") or hasattr(divisor, "sort")
+        ):
+            bw = state.bit_width
+            hi = _z3.ZeroExt(bw, self._ensure_bv(dx_val, bw))
+            lo = _z3.ZeroExt(bw, self._ensure_bv(ax_val, bw))
+            dividend = (hi << bw) | lo
+            d = _z3.ZeroExt(bw, self._ensure_bv(divisor, bw))
+            if mnemonic == "div":
+                quot = _z3.Extract(bw - 1, 0, _z3.UDiv(dividend, d))
+                rem = _z3.Extract(bw - 1, 0, _z3.URem(dividend, d))
+            else:
+                quot = _z3.Extract(bw - 1, 0, dividend / d)
+                rem = _z3.Extract(bw - 1, 0, _z3.SRem(dividend, d))
+            state.set_register(ax_reg, quot)
+            state.set_register(dx_reg, rem)
+        else:
+            if isinstance(divisor, int) and divisor != 0:
+                mask = (1 << state.bit_width) - 1
+                hi = (dx_val if isinstance(dx_val, int) else 0) & mask
+                lo = (ax_val if isinstance(ax_val, int) else 0) & mask
+                dividend = (hi << state.bit_width) | lo
+                state.set_register(ax_reg, (dividend // divisor) & mask)
+                state.set_register(dx_reg, (dividend % divisor) & mask)
+
+    def _exec_cmovcc(self, state: SymbolicState, ops: list[str],
+                     insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        cc = mnemonic[4:]  # strip 'cmov' prefix
+        cond = self._evaluate_condition(state, cc)
+        src = self._resolve_operand(state, ops[1])
+        if cond is True:
+            self._write_operand(state, ops[0], src)
+        elif Z3Solver.available() and hasattr(cond, "sort"):
+            # Symbolic condition -> z3 If
+            dst = self._resolve_operand(state, ops[0])
+            dst_bv = self._ensure_bv(dst, state.bit_width)
+            src_bv = self._ensure_bv(src, state.bit_width)
+            result = _z3.If(cond, src_bv, dst_bv)
+            self._write_operand(state, ops[0], result)
+        # else cond is False -> no-op (destination unchanged)
+
+    def _exec_setcc(self, state: SymbolicState, ops: list[str],
+                    insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        cc = mnemonic[3:]  # strip 'set' prefix
+        cond = self._evaluate_condition(state, cc)
+        if Z3Solver.available() and hasattr(cond, 'sort'):
+            result = _z3.If(cond, _z3.BitVecVal(1, state.bit_width),
+                            _z3.BitVecVal(0, state.bit_width))
+        else:
+            result = 1 if cond else 0
+        self._write_operand(state, ops[0], result)
+
+    def _exec_bswap(self, state: SymbolicState, ops: list[str],
+                    insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        val = self._resolve_operand(state, ops[0])
+        if Z3Solver.available() and hasattr(val, "sort"):
+            bw = val.sort().size()
+            byte_count = bw // 8
+            bytes_list = [_z3.Extract(i * 8 + 7, i * 8, val) for i in range(byte_count)]
+            result = _z3.Concat(*bytes_list)
+            self._write_operand(state, ops[0], result)
+        else:
+            result = int.from_bytes(
+                val.to_bytes(state.bit_width // 8, "little"), "big"
+            ) if isinstance(val, int) else val
+            self._write_operand(state, ops[0], result)
+
+    def _exec_pushf(self, state: SymbolicState, ops: list[str],
+                    insn: LiftedInstruction, mnemonic: str) -> None:
+        if Z3Solver.available():
+            bw = state.bit_width
+            eflags = _z3.BitVecVal(0x202, bw)
+            for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
+                fv = state.flags.get(flag, False)
+                if hasattr(fv, "sort"):
+                    eflags = eflags | _z3.If(fv, _z3.BitVecVal(1 << bit_pos, bw),
+                                             _z3.BitVecVal(0, bw))
+                elif fv:
+                    eflags = eflags | _z3.BitVecVal(1 << bit_pos, bw)
+        else:
+            eflags = 0x202
+            for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
+                if state.flags.get(flag, False):
+                    eflags |= (1 << bit_pos)
+        sp_reg = "rsp" if state.bit_width == 64 else "esp"
+        sp = state.get_register(sp_reg)
+        word_size = state.bit_width // 8
+        if isinstance(sp, int):
+            sp -= word_size
+            state.set_register(sp_reg, sp)
+            state.write_memory(sp, eflags, word_size)
+
+    def _exec_popf(self, state: SymbolicState, ops: list[str],
+                   insn: LiftedInstruction, mnemonic: str) -> None:
+        sp_reg = "rsp" if state.bit_width == 64 else "esp"
+        sp = state.get_register(sp_reg)
+        word_size = state.bit_width // 8
+        if isinstance(sp, int):
+            eflags = state.read_memory(sp, word_size)
+            state.set_register(sp_reg, sp + word_size)
+            if Z3Solver.available() and hasattr(eflags, "sort"):
+                try:
+                    val = _z3.simplify(eflags)
+                    if val.as_long is not None:
+                        eflags = val.as_long()
+                except Exception:
+                    pass
+            if Z3Solver.available() and hasattr(eflags, "sort"):
+                one = _z3.BitVecVal(1, 1)
+                state.flags["CF"] = _z3.Extract(0, 0, eflags) == one
+                state.flags["ZF"] = _z3.Extract(6, 6, eflags) == one
+                state.flags["SF"] = _z3.Extract(7, 7, eflags) == one
+                state.flags["OF"] = _z3.Extract(11, 11, eflags) == one
+            elif isinstance(eflags, int):
+                state.flags["CF"] = bool(eflags & 1)
+                state.flags["ZF"] = bool(eflags & (1 << 6))
+                state.flags["SF"] = bool(eflags & (1 << 7))
+                state.flags["OF"] = bool(eflags & (1 << 11))
+
+    def _exec_cdq(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        eax_val = state.get_register("eax")
+        dx_reg = "rdx" if state.bit_width == 64 else "edx"
+        if Z3Solver.available() and hasattr(eax_val, "sort"):
+            bw = eax_val.sort().size()
+            sign = _z3.Extract(31, 31, self._ensure_bv(eax_val, 32)) if bw >= 32 else _z3.Extract(bw - 1, bw - 1, eax_val)
+            allones = _z3.BitVecVal((1 << state.bit_width) - 1, state.bit_width)
+            zero = _z3.BitVecVal(0, state.bit_width)
+            state.set_register(dx_reg, _z3.If(sign == _z3.BitVecVal(1, 1), allones, zero))
+        else:
+            eax = eax_val if isinstance(eax_val, int) else 0
+            sign = (eax >> 31) & 1
+            mask = (1 << state.bit_width) - 1
+            state.set_register(dx_reg, mask if sign else 0)
+
+    def _exec_cqo(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        ax_val = state.get_register("rax")
+        if Z3Solver.available() and hasattr(ax_val, "sort"):
+            sign = _z3.Extract(63, 63, self._ensure_bv(ax_val, 64))
+            allones = _z3.BitVecVal((1 << 64) - 1, 64)
+            zero = _z3.BitVecVal(0, 64)
+            state.set_register("rdx", _z3.If(sign == _z3.BitVecVal(1, 1), allones, zero))
+        else:
+            ax_int = ax_val if isinstance(ax_val, int) else 0
+            sign = (ax_int >> 63) & 1
+            mask = (1 << 64) - 1
+            state.set_register("rdx", mask if sign else 0)
+
+    def _exec_cdqe(self, state: SymbolicState, ops: list[str],
+                   insn: LiftedInstruction, mnemonic: str) -> None:
+        if state.bit_width == 64:
+            eax_val = state.get_register("eax")
+            if Z3Solver.available() and hasattr(eax_val, "sort"):
+                if eax_val.sort().size() == 32:
+                    state.set_register("rax", _z3.SignExt(32, eax_val))
+                else:
+                    state.set_register("rax", _z3.SignExt(32, _z3.Extract(31, 0, eax_val)))
+            elif isinstance(eax_val, int):
+                if eax_val & 0x80000000:
+                    state.set_register("rax", eax_val | 0xFFFFFFFF00000000)
+                else:
+                    state.set_register("rax", eax_val & 0xFFFFFFFF)
+
+    def _exec_cwde_cwd(self, state: SymbolicState, ops: list[str],
+                       insn: LiftedInstruction, mnemonic: str) -> None:
+        if mnemonic == "cwde":
+            ax_val = state.get_register("ax") if "ax" in state.registers else state.get_register("eax")
+            if isinstance(ax_val, int):
+                if ax_val & 0x8000:
+                    state.set_register("eax", ax_val | 0xFFFF0000)
+                else:
+                    state.set_register("eax", ax_val & 0xFFFF)
+        else:
+            ax_val = state.get_register("ax") if "ax" in state.registers else state.get_register("eax")
+            if isinstance(ax_val, int):
+                state.set_register("edx" if state.bit_width == 32 else "rdx",
+                                   0xFFFF if ax_val & 0x8000 else 0)
+
+    def _exec_bit_test(self, state: SymbolicState, ops: list[str],
+                       insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 2:
+            return
+        base = self._resolve_operand(state, ops[0])
+        bit_pos = self._resolve_operand(state, ops[1])
+        if Z3Solver.available() and (hasattr(base, "sort") or hasattr(bit_pos, "sort")):
+            base_bv = self._ensure_bv(base, state.bit_width)
+            pos_bv = self._ensure_bv(bit_pos, state.bit_width)
+            tested = _z3.LShR(base_bv, pos_bv) & _z3.BitVecVal(1, state.bit_width)
+            state.flags["CF"] = tested == _z3.BitVecVal(1, state.bit_width)
+            if mnemonic == "bts":
+                self._write_operand(state, ops[0], base_bv | (_z3.BitVecVal(1, state.bit_width) << pos_bv))
+            elif mnemonic == "btr":
+                self._write_operand(state, ops[0], base_bv & ~(_z3.BitVecVal(1, state.bit_width) << pos_bv))
+            elif mnemonic == "btc":
+                self._write_operand(state, ops[0], base_bv ^ (_z3.BitVecVal(1, state.bit_width) << pos_bv))
+        else:
+            b = base if isinstance(base, int) else 0
+            p = bit_pos if isinstance(bit_pos, int) else 0
+            state.flags["CF"] = bool((b >> p) & 1)
+            if mnemonic == "bts":
+                self._write_operand(state, ops[0], b | (1 << p))
+            elif mnemonic == "btr":
+                self._write_operand(state, ops[0], b & ~(1 << p))
+            elif mnemonic == "btc":
+                self._write_operand(state, ops[0], b ^ (1 << p))
+
+    def _exec_nop(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        pass  # no-op
+
+    def _exec_call(self, state: SymbolicState, ops: list[str],
+                   insn: LiftedInstruction, mnemonic: str) -> None:
+        if len(ops) != 1:
+            return
+        sp_reg = "rsp" if state.bit_width == 64 else "esp"
+        sp = state.get_register(sp_reg)
+        word_size = state.bit_width // 8
+        return_addr = insn.address + insn.size if hasattr(insn, 'size') else insn.address + 5
+        if isinstance(sp, int):
+            sp -= word_size
+            state.set_register(sp_reg, sp)
+            state.write_memory(sp, return_addr, word_size)
+
+    def _exec_ret(self, state: SymbolicState, ops: list[str],
+                  insn: LiftedInstruction, mnemonic: str) -> None:
+        sp_reg = "rsp" if state.bit_width == 64 else "esp"
+        sp = state.get_register(sp_reg)
+        word_size = state.bit_width // 8
+        if isinstance(sp, int):
+            ret_addr = state.read_memory(sp, word_size)
+            state.set_register(sp_reg, sp + word_size)
+            if isinstance(ret_addr, int):
+                state.pc = ret_addr
+
 
     # ---- SIB address resolver ----
     _SIB_RE = None  # lazily compiled
@@ -2164,7 +2238,6 @@ class SymbolicExecutor:
           reg+reg+disp, reg+reg, disp (absolute), etc.
         """
         if cls._SIB_RE is None:
-            import re
             # Tokenize into identifiers, hex/dec numbers, +, -, *
             cls._SIB_RE = re.compile(
                 r"([A-Za-z_]\w*|0[xX][0-9A-Fa-f]+|\d+|[+\-*])"

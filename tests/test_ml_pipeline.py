@@ -89,7 +89,7 @@ def _logic_handler() -> Dict[str, Any]:
 
 class TestFeatureDimensions:
     def test_base_feature_count(self):
-        assert len(HANDLER_FEATURE_NAMES) == 15
+        assert len(HANDLER_FEATURE_NAMES) == 17
 
     def test_bigram_feature_count(self):
         assert len(BIGRAM_FEATURE_NAMES) == len(VMPROTECT_BIGRAMS)
@@ -102,12 +102,12 @@ class TestFeatureDimensions:
         assert len(OPERAND_PATTERN_NAMES) == 6
 
     def test_extended_total(self):
-        assert len(EXTENDED_FEATURE_NAMES) == 15 + 25 + 32 + 6 + 20 + 32  # 130
+        assert len(EXTENDED_FEATURE_NAMES) == 17 + 25 + 32 + 6 + 20 + 32  # 132
 
     def test_extended_extraction_dimension(self):
         fv = extract_extended_features(_arith_handler())
-        assert fv.dimension == 130
-        assert len(fv.feature_names) == 130
+        assert fv.dimension == 132
+        assert len(fv.feature_names) == 132
 
 
 # ===================================================================
@@ -226,12 +226,12 @@ class TestOperandPatterns:
 class TestExtendedFeatures:
     def test_arith_handler_features(self):
         fv = extract_extended_features(_arith_handler())
-        assert fv.dimension == 130
+        assert fv.dimension == 132
         assert fv.metadata["source"] == "handler_extended"
 
     def test_logic_handler_features(self):
         fv = extract_extended_features(_logic_handler())
-        assert fv.dimension == 130
+        assert fv.dimension == 132
         # The xor->shr bigram should be non-zero
         idx = fv.feature_names.index("bg_xor_shr")
         assert fv.values[idx] > 0.0
@@ -293,13 +293,13 @@ class TestTrainingDataPrep:
         features, labels = prepare_training_data(handlers, label_key="category")
         assert len(features) == len(labels)
         assert all(isinstance(fv, FeatureVector) for fv in features)
-        assert all(fv.dimension == 15 for fv in features)
+        assert all(fv.dimension == 17 for fv in features)
 
     def test_prepare_extended(self):
         handlers = generate_synthetic_handlers(n_per_category=5, seed=11)
         features, labels = prepare_extended_training_data(handlers, label_key="category")
         assert len(features) == len(labels)
-        assert all(fv.dimension == 130 for fv in features)
+        assert all(fv.dimension == 132 for fv in features)
 
     def test_heuristic_labelling(self):
         h = {"operation": "vm_add"}

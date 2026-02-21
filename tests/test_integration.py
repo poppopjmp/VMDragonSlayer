@@ -325,8 +325,8 @@ class TestMLClassifierIntegration:
             "instructions": [],
         }
         fv = extract_handler_features(handler)
-        assert fv.dimension == 15
-        assert len(fv.feature_names) == 15
+        assert fv.dimension == 17
+        assert len(fv.feature_names) == 17
 
     def test_label_from_heuristics(self):
         assert label_from_heuristics({"operation": "vm_add"}) == "arithmetic"

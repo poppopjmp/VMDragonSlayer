@@ -117,7 +117,7 @@ class TestExtendedFeatures:
 
     def test_feature_count(self):
         # 15 base + 25 bigram + 32 reg_effects + 6 operand + 20 trigram + 32 histogram
-        assert len(EXTENDED_FEATURE_NAMES) == 15 + 25 + 32 + 6 + len(VMPROTECT_TRIGRAMS) + len(OPCODE_VOCAB)
+        assert len(EXTENDED_FEATURE_NAMES) == 17 + 25 + 32 + 6 + len(VMPROTECT_TRIGRAMS) + len(OPCODE_VOCAB)
 
     def test_extract_extended_returns_correct_length(self):
         handler = {

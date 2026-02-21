@@ -124,6 +124,8 @@ _HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
         ("arith_ratio", 1.5, 0.10, "above"),
         ("logic_ratio", 1.5, 0.10, "above"),
         ("branch_ratio", 1.0, 0.10, "above"),
+        ("has_cmp_insn", 3.0, 0.5, "above"),   # B80: strong signal
+        ("has_test_insn", 3.0, 0.5, "above"),   # B80: strong signal
     ],
     "crypto": [
         ("logic_ratio", 2.5, 0.15, "above"),
