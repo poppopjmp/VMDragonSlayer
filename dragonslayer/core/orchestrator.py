@@ -65,7 +65,6 @@ class AnalysisOptionsDict(TypedDict, total=False):
     timeout: float
     engines: List[str]
     depth: int
-    enable_gpu: bool
     scoring_config: Dict[str, float]
 
 

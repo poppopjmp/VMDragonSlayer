@@ -134,61 +134,7 @@ class TestAnalysisMetricsTypedDict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. GPU module docstring quality
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestGPUEngineDocstrings:
-    @pytest.mark.parametrize("method", [
-        "initialise", "pattern_match_bulk", "symbolic_evaluate_batch",
-    ])
-    def test_has_raises(self, method: str) -> None:
-        from dragonslayer.gpu.engine import GPUEngine
-        doc = getattr(GPUEngine, method).__doc__ or ""
-        assert "Raises:" in doc
-
-    @pytest.mark.parametrize("method", [
-        "pattern_match_bulk", "symbolic_evaluate_batch",
-    ])
-    def test_has_args_returns(self, method: str) -> None:
-        from dragonslayer.gpu.engine import GPUEngine
-        doc = getattr(GPUEngine, method).__doc__ or ""
-        assert "Args:" in doc
-        assert "Returns:" in doc
-
-
-class TestGPUMemoryDocstrings:
-    @pytest.mark.parametrize("method", ["allocate", "free"])
-    def test_has_raises(self, method: str) -> None:
-        from dragonslayer.gpu.memory import GPUMemoryManager
-        doc = getattr(GPUMemoryManager, method).__doc__ or ""
-        assert "Raises:" in doc
-
-    def test_stats_returns(self) -> None:
-        from dragonslayer.gpu.memory import GPUMemoryManager
-        doc = GPUMemoryManager.stats.__doc__ or ""
-        assert "Returns:" in doc
-
-
-class TestGPUOptimizerDocstrings:
-    @pytest.mark.parametrize("method", ["recommend_block_size", "auto_tune"])
-    def test_has_args_returns_raises(self, method: str) -> None:
-        from dragonslayer.gpu.optimizer import GPUOptimizer
-        doc = getattr(GPUOptimizer, method).__doc__ or ""
-        assert "Args:" in doc
-        assert "Returns:" in doc
-        assert "Raises:" in doc
-
-
-class TestGPUProfilerDocstrings:
-    def test_summary_returns(self) -> None:
-        from dragonslayer.gpu.profiler import GPUProfiler
-        doc = GPUProfiler.summary.__doc__ or ""
-        assert "Returns:" in doc
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 3. Core/API docstring quality
+# 2. Core/API docstring quality  (GPU tests removed in B104)
 # ═══════════════════════════════════════════════════════════════════════════
 
 

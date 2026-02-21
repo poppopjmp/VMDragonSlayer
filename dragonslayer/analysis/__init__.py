@@ -40,6 +40,16 @@ __all__ = [
     "simplify_handler_operands", "verify_equivalence", "MBAResult", "MBAStats",
     # devirtualisation_result
     "DevirtualisationResult",
+    # themida_devirt (B104)
+    "ThemidaVariant", "ThemidaVMProfile", "ThemidaBytecodeDecoder",
+    "ThemidaOpcodeTable", "ThemidaDevirtResult",
+    "identify_themida_variant", "reconstruct_opcode_table",
+    "devirtualize_themida",
+    # cv_devirt (B104)
+    "CVVersion", "CVVMProfile", "CVBytecodeDecoder",
+    "CVOpcodeTable", "CVDevirtResult",
+    "identify_cv_version", "reconstruct_cv_handler_table",
+    "devirtualize_cv",
 ]
 
 from .binary_format import (  # noqa: F401
@@ -189,3 +199,45 @@ except (ImportError, AttributeError):
     backward_slice = None  # type: ignore[assignment,misc]
     compute_live_ranges = None  # type: ignore[assignment,misc]
     BackwardSliceResult = None  # type: ignore[assignment,misc]
+
+try:
+    from .themida_devirt import (  # noqa: F401
+        ThemidaVariant,
+        ThemidaVMProfile,
+        ThemidaBytecodeDecoder,
+        ThemidaOpcodeTable,
+        ThemidaDevirtResult,
+        identify_themida_variant,
+        reconstruct_opcode_table,
+        devirtualize_themida,
+    )
+except (ImportError, AttributeError):
+    ThemidaVariant = None  # type: ignore[assignment,misc]
+    ThemidaVMProfile = None  # type: ignore[assignment,misc]
+    ThemidaBytecodeDecoder = None  # type: ignore[assignment,misc]
+    ThemidaOpcodeTable = None  # type: ignore[assignment,misc]
+    ThemidaDevirtResult = None  # type: ignore[assignment,misc]
+    identify_themida_variant = None  # type: ignore[assignment,misc]
+    reconstruct_opcode_table = None  # type: ignore[assignment,misc]
+    devirtualize_themida = None  # type: ignore[assignment,misc]
+
+try:
+    from .cv_devirt import (  # noqa: F401
+        CVVersion,
+        CVVMProfile,
+        CVBytecodeDecoder,
+        CVOpcodeTable,
+        CVDevirtResult,
+        identify_cv_version,
+        reconstruct_cv_handler_table,
+        devirtualize_cv,
+    )
+except (ImportError, AttributeError):
+    CVVersion = None  # type: ignore[assignment,misc]
+    CVVMProfile = None  # type: ignore[assignment,misc]
+    CVBytecodeDecoder = None  # type: ignore[assignment,misc]
+    CVOpcodeTable = None  # type: ignore[assignment,misc]
+    CVDevirtResult = None  # type: ignore[assignment,misc]
+    identify_cv_version = None  # type: ignore[assignment,misc]
+    reconstruct_cv_handler_table = None  # type: ignore[assignment,misc]
+    devirtualize_cv = None  # type: ignore[assignment,misc]
