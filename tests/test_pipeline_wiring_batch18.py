@@ -213,17 +213,21 @@ class TestDevirtWiringFull:
 
     def test_vmprotect_dispatcher_result_attached(self):
         """When VMProtect dispatcher is found, result should contain it."""
-        from dragonslayer.analysis.vm_discovery.dispatcher import VMProtectDispatcherMatch
+        from dragonslayer.analysis.vm_discovery.dispatcher import GenericDispatcherMatch
 
-        fake_match = MagicMock()
-        fake_match.to_dict.return_value = {
+        # B100: pipeline now uses find_dispatcher (generic orchestrator).
+        fake_generic = MagicMock(spec=GenericDispatcherMatch)
+        fake_generic.protector = "vmprotect"
+        fake_generic.to_dict.return_value = {
+            "protector": "vmprotect",
             "dispatcher_address": 0x401000,
             "handler_table": [{"handler_address": 0x402000}],
-            "score": 0.95,
+            "handler_addresses": [],
+            "confidence": 0.95,
         }
 
         patches, *_ = self._patch_all()
-        patches["dragonslayer.analysis.vm_discovery.dispatcher.find_dispatcher_in_trace"] = MagicMock(return_value=fake_match)
+        patches["dragonslayer.analysis.vm_discovery.dispatcher.find_dispatcher"] = MagicMock(return_value=fake_generic)
         patches["dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher"] = MagicMock(return_value=None)
 
         ctx = _make_ctx()
@@ -451,21 +455,25 @@ class TestVMProtectAddressSupplement:
         self.pipe = AnalysisPipeline(config=MagicMock(_config={}))
 
     def test_handler_table_addresses_merged(self):
-        """Addresses from vmprotect_match.handler_table should be added."""
+        """Addresses from dispatcher_match.handler_table should be added."""
         trace = _make_trace()
         boundaries = [_FakeBoundary()]
         seg = _FakeSegResult(boundaries=boundaries)
         opcode_table = _FakeOpcodeTable(entries=[_FakeOpcodeEntry()])
         pseudo = _FakePseudoResult()
 
-        fake_disp_match = MagicMock()
-        fake_disp_match.to_dict.return_value = {
+        # B100: pipeline uses find_dispatcher (generic orchestrator)
+        fake_generic = MagicMock()
+        fake_generic.protector = "vmprotect"
+        fake_generic.to_dict.return_value = {
+            "protector": "vmprotect",
             "dispatcher_address": 0x401000,
             "handler_table": [
                 {"handler_address": 0x402000},
                 {"handler_address": 0x403000},
             ],
-            "score": 0.95,
+            "handler_addresses": [],
+            "confidence": 0.95,
         }
 
         # Track what dispatcher_addrs are passed to identify_vip_register
@@ -480,7 +488,7 @@ class TestVMProtectAddressSupplement:
              patch("dragonslayer.analysis.vm_discovery.handler_boundaries.segment_trace", return_value=seg), \
              patch("dragonslayer.analysis.handler_semantics.analyse_handler_semantics", return_value=opcode_table), \
              patch("dragonslayer.analysis.pseudocode.emit_pseudocode", return_value=pseudo), \
-             patch("dragonslayer.analysis.vm_discovery.dispatcher.find_dispatcher_in_trace", return_value=fake_disp_match), \
+             patch("dragonslayer.analysis.vm_discovery.dispatcher.find_dispatcher", return_value=fake_generic), \
              patch("dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher", return_value=None):
 
             ctx = _make_ctx()

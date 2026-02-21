@@ -6,35 +6,41 @@ Identifies the VM dispatcher (central fetch-decode-execute loop) and
 reconstructs the handler dispatch table by correlating:
 
 * Pattern-matching the VMProtect fetch-decode-dispatch cycle.
+* Pattern-matching Themida/Code Virtualizer dispatch styles.
+* Protector-agnostic trace heuristics for unknown VMs.
 * Raw byte-level dispatcher patterns from :mod:`detector`.
 * Control-flow information from lifted instructions.
 * Symbolic execution handler classifications from :mod:`symbolic_execution`.
 * Signature database matches from :mod:`database`.
 
-The core algorithm matches the canonical VMProtect dispatcher pattern::
+The module provides **three tiers** of dispatcher identification:
 
-    movzx  reg, byte ptr [vIP]        ; opcode fetch
-    {xor|not|add ...}                   ; optional opcode decode
-    {add|sub|inc|lea} vIP, delta       ; vIP advance
-    jmp    [table_base + reg * scale]  ; dispatch to handler
+1. **Protector-specific** — :func:`find_vmprotect_dispatcher`,
+   :func:`find_themida_dispatcher`, :func:`find_cv_dispatcher` use
+   per-protector pattern matching for maximum accuracy.
+2. **Generic trace-based** — :func:`find_generic_dispatcher` uses
+   protector-agnostic heuristics (hottest indirect branch + monotonic
+   vIP correlation) and works on *any* traced VM.
+3. **Orchestrator** — :func:`find_dispatcher` tries all finders in
+   priority order and returns the best match.
 
 Usage::
 
     from dragonslayer.analysis.vm_discovery.dispatcher import (
         DispatcherAnalyzer,
+        find_dispatcher,
         find_vmprotect_dispatcher,
+        find_themida_dispatcher,
+        find_cv_dispatcher,
+        find_generic_dispatcher,
         find_dispatcher_in_trace,
     )
 
-    # From lifted instructions
-    info = find_vmprotect_dispatcher(lifted_insns, bit_width=64)
+    # Best-effort: tries all protector-specific finders, falls back to generic
+    match = find_dispatcher(trace_records, bit_width=64)
 
-    # From execution traces
-    info = find_dispatcher_in_trace(trace_records, bit_width=64)
-
-    # Existing DispatcherAnalyzer API still works
-    analyzer = DispatcherAnalyzer()
-    result = analyzer.analyze(binary_data, shared_data=ctx.shared_data)
+    # Protector-specific
+    vmp = find_vmprotect_dispatcher(lifted_insns, bit_width=64)
 """
 
 from __future__ import annotations
@@ -1427,3 +1433,461 @@ class DispatcherAnalyzer:
             entries.append(addr)
 
         return entries
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Generic Dispatcher Framework — Multi-Protector Support (B100)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class GenericDispatcherMatch:
+    """Protector-agnostic dispatcher description.
+
+    Unifies the output of all protector-specific finders into a common
+    shape.  Any finder — VMProtect, Themida, Code Virtualizer, or the
+    generic heuristic — populates this structure.
+
+    Attributes:
+        protector: Identified protector name (``"vmprotect"``,
+            ``"themida"``, ``"code_virtualizer"``, ``"unknown"``).
+        entry_address: Address of the dispatcher loop entry.
+        dispatch_address: Address of the indirect branch instruction.
+        vip_register: Virtual instruction-pointer register name.
+        fetch_register: Register used for opcode fetches.
+        fetch_width: Bytes per opcode fetch (1, 2, or 4).
+        handler_addresses: Addresses reachable from the dispatch.
+        confidence: Overall match confidence in ``[0, 1]``.
+        dispatch_style: ``"jmp"`` | ``"push_ret"`` | ``"call"`` |
+            ``"lodsb_xlat"`` | ``"computed_goto"``.
+        decode_transforms: Assembly-like transform descriptors.
+        table_base: Handler-table base address (0 if unknown).
+        table_scale: Handler-table index scale factor.
+        nesting_depth: 0 for outermost VM, incremented for inner VMs.
+        inner_entries: Addresses of inner VM entry points found during
+            nested deobfuscation (populated by the pipeline).
+        extra: Arbitrary protector-specific metadata.
+    """
+
+    protector: str = "unknown"
+    entry_address: int = 0
+    dispatch_address: int = 0
+    vip_register: str = ""
+    fetch_register: str = ""
+    fetch_width: int = 1
+    handler_addresses: List[int] = field(default_factory=list)
+    confidence: float = 0.0
+    dispatch_style: str = "jmp"
+    decode_transforms: List[str] = field(default_factory=list)
+    table_base: int = 0
+    table_scale: int = 8
+    nesting_depth: int = 0
+    inner_entries: List[int] = field(default_factory=list)
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a JSON-compatible dict.
+
+        Returns:
+            Dict with all fields.  ``handler_addresses`` and
+            ``inner_entries`` are hex-formatted strings.
+        """
+        return {
+            "protector": self.protector,
+            "entry_address": self.entry_address,
+            "dispatch_address": self.dispatch_address,
+            "vip_register": self.vip_register,
+            "fetch_register": self.fetch_register,
+            "fetch_width": self.fetch_width,
+            "handler_addresses": [hex(a) for a in self.handler_addresses],
+            "confidence": round(self.confidence, 4),
+            "dispatch_style": self.dispatch_style,
+            "decode_transforms": self.decode_transforms,
+            "table_base": self.table_base,
+            "table_scale": self.table_scale,
+            "nesting_depth": self.nesting_depth,
+            "inner_entries": [hex(a) for a in self.inner_entries],
+            "extra": self.extra,
+        }
+
+    @classmethod
+    def from_vmprotect_match(
+        cls, match: VMProtectDispatcherMatch
+    ) -> "GenericDispatcherMatch":
+        """Wrap a VMProtect-specific match into the generic shape."""
+        return cls(
+            protector="vmprotect",
+            entry_address=match.entry_address,
+            dispatch_address=match.indirect_jump_address,
+            vip_register=match.vip_register,
+            fetch_register=match.fetch_register,
+            fetch_width=match.fetch_width,
+            handler_addresses=list(match.handler_addresses),
+            confidence=match.confidence,
+            dispatch_style=match.dispatch_style,
+            decode_transforms=list(match.decode_transforms),
+            table_base=match.table_base,
+            table_scale=match.table_scale,
+            extra={"context_registers": match.context_registers},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Themida / Code Virtualizer Dispatcher Finder (B100)
+# ---------------------------------------------------------------------------
+
+# Themida Dolphin/Tiger dispatch patterns:
+#   Dolphin: pushad → mov ebp, esp → ... → CALL [vtable+offset]
+#   Tiger:   pushad → lea esp, [context] → ... → JMP [table+reg*4]
+#   CV:      lodsb / xlat / jmp [table+reg*scale]
+
+_THEMIDA_PUSHAD_PROLOGUE = re.compile(
+    r"push(?:ad?)\b", re.IGNORECASE,
+)
+_CV_LODSB_XLAT = re.compile(
+    r"(lodsb|xlat)\b", re.IGNORECASE,
+)
+
+
+def find_themida_dispatcher(
+    trace_records: List[Dict[str, Any]],
+    *,
+    bit_width: int = 64,
+) -> Optional[GenericDispatcherMatch]:
+    """Identify a Themida/WinLicense dispatcher in a trace.
+
+    Themida VMs use ``pushad`` / ``pushfd`` prologues followed by a
+    context setup (``mov ebp, esp`` or equivalent), then dispatch via
+    ``CALL [vtable]`` or ``JMP [table+reg*scale]``.
+
+    Args:
+        trace_records: Execution trace (list of dicts with ``address``,
+            ``disassembly``, optionally ``registers``).
+        bit_width: 32 or 64.
+
+    Returns:
+        A :class:`GenericDispatcherMatch` with ``protector="themida"``
+        if found, else ``None``.
+    """
+    if not trace_records:
+        return None
+
+    addr_freq: Counter = Counter()
+    for rec in trace_records:
+        addr = rec.get("address", 0)
+        if addr:
+            addr_freq[addr] += 1
+
+    # Look for indirect CALL sites (Themida Dolphin uses call [vtable])
+    indirect_calls: List[Dict[str, Any]] = []
+    indirect_jumps: List[Dict[str, Any]] = []
+    pushad_addrs: Set[int] = set()
+
+    for rec in trace_records:
+        disasm = rec.get("disassembly", "").lower().strip()
+        mnem = disasm.split(None, 1)[0] if disasm else ""
+        if _THEMIDA_PUSHAD_PROLOGUE.match(mnem):
+            pushad_addrs.add(rec.get("address", 0))
+        if mnem == "call":
+            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
+            if ops and "[" in ops:
+                indirect_calls.append(rec)
+        elif mnem == "jmp":
+            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
+            if ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
+                indirect_jumps.append(rec)
+
+    if not pushad_addrs:
+        return None  # Themida requires pushad prologue
+
+    # Themida's dispatch is the hottest indirect call/jump near a pushad
+    all_dispatch = indirect_calls + indirect_jumps
+    if not all_dispatch:
+        return None
+
+    best = None
+    best_freq = 0
+    for rec in all_dispatch:
+        addr = rec.get("address", 0)
+        freq = addr_freq.get(addr, 0)
+        if freq > best_freq:
+            best_freq = freq
+            best = rec
+
+    if best is None or best_freq < 3:
+        return None
+
+    dispatch_addr = best["address"]
+    disasm = best.get("disassembly", "").lower()
+    style = "call" if disasm.startswith("call") else "jmp"
+
+    # Try to identify vIP from the most-monotonic register at dispatch
+    vip_reg = _identify_vip_from_trace_registers(trace_records, dispatch_addr)
+    handler_addrs = _extract_handlers_from_trace_visits(
+        trace_records, dispatch_addr,
+    )
+
+    return GenericDispatcherMatch(
+        protector="themida",
+        entry_address=min(pushad_addrs) if pushad_addrs else 0,
+        dispatch_address=dispatch_addr,
+        vip_register=vip_reg or "",
+        handler_addresses=sorted(handler_addrs) if handler_addrs else [],
+        confidence=min(0.5 + best_freq * 0.02, 0.9),
+        dispatch_style=style,
+    )
+
+
+def find_cv_dispatcher(
+    trace_records: List[Dict[str, Any]],
+    *,
+    bit_width: int = 64,
+) -> Optional[GenericDispatcherMatch]:
+    """Identify a Code Virtualizer dispatcher in a trace.
+
+    Code Virtualizer uses ``LODSB`` (or ``LODSW``/``LODSD``) to fetch
+    opcodes through ESI/RSI, optionally ``XLAT`` for table lookup, then
+    dispatches via an indirect jump.
+
+    Args:
+        trace_records: Execution trace.
+        bit_width: 32 or 64.
+
+    Returns:
+        A :class:`GenericDispatcherMatch` with
+        ``protector="code_virtualizer"`` if found, else ``None``.
+    """
+    if not trace_records:
+        return None
+
+    addr_freq: Counter = Counter()
+    lodsb_addrs: Set[int] = set()
+    xlat_addrs: Set[int] = set()
+
+    for rec in trace_records:
+        addr = rec.get("address", 0)
+        if addr:
+            addr_freq[addr] += 1
+        disasm = rec.get("disassembly", "").lower().strip()
+        mnem = disasm.split(None, 1)[0] if disasm else ""
+        if mnem in ("lodsb", "lodsw", "lodsd"):
+            lodsb_addrs.add(addr)
+        elif mnem == "xlat":
+            xlat_addrs.add(addr)
+
+    if not lodsb_addrs:
+        return None  # CV requires LODSB-style fetch
+
+    # Find the hottest indirect jump
+    indirect_jumps: List[Dict[str, Any]] = []
+    for rec in trace_records:
+        disasm = rec.get("disassembly", "").lower().strip()
+        mnem = disasm.split(None, 1)[0] if disasm else ""
+        if mnem == "jmp":
+            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
+            if ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
+                indirect_jumps.append(rec)
+
+    if not indirect_jumps:
+        return None
+
+    best = max(indirect_jumps, key=lambda r: addr_freq.get(r.get("address", 0), 0))
+    best_freq = addr_freq.get(best.get("address", 0), 0)
+    if best_freq < 3:
+        return None
+
+    dispatch_addr = best["address"]
+    # CV uses ESI/RSI as vIP (lodsb source)
+    vip_reg = "rsi" if bit_width == 64 else "esi"
+    handler_addrs = _extract_handlers_from_trace_visits(
+        trace_records, dispatch_addr,
+    )
+
+    return GenericDispatcherMatch(
+        protector="code_virtualizer",
+        entry_address=min(lodsb_addrs),
+        dispatch_address=dispatch_addr,
+        vip_register=vip_reg,
+        handler_addresses=sorted(handler_addrs) if handler_addrs else [],
+        confidence=min(0.55 + best_freq * 0.02, 0.9),
+        dispatch_style="lodsb_xlat" if xlat_addrs else "jmp",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Generic (protector-agnostic) Dispatcher Finder (B100)
+# ---------------------------------------------------------------------------
+
+
+def find_generic_dispatcher(
+    trace_records: List[Dict[str, Any]],
+    *,
+    bit_width: int = 64,
+    min_visit_frequency: int = 5,
+) -> Optional[GenericDispatcherMatch]:
+    """Identify a VM dispatcher using protector-agnostic trace heuristics.
+
+    Works on **any** traced VM by finding the hottest indirect branch and
+    correlating it with the register that changes most monotonically
+    (the virtual instruction pointer).
+
+    Algorithm:
+        1. Collect address frequencies and find all indirect branches.
+        2. The dispatcher is the most-visited indirect branch site.
+        3. Identify the vIP register via monotonic-change analysis at
+           the dispatch point.
+        4. Extract handler addresses from the trace transitions after
+           each dispatch visit.
+
+    Args:
+        trace_records: Execution trace (list of dicts with ``address``,
+            ``disassembly``, optionally ``registers``).
+        bit_width: 32 or 64.
+        min_visit_frequency: Minimum number of visits to the dispatch
+            address for a valid detection (default 5).
+
+    Returns:
+        A :class:`GenericDispatcherMatch` with ``protector="unknown"``
+        if a plausible dispatcher is found, else ``None``.
+    """
+    if not trace_records:
+        return None
+
+    addr_freq: Counter = Counter()
+    for rec in trace_records:
+        addr = rec.get("address", 0)
+        if addr:
+            addr_freq[addr] += 1
+
+    # Find all indirect branches (jmp/call with non-immediate targets)
+    indirect_branches: List[Dict[str, Any]] = []
+    for rec in trace_records:
+        disasm = rec.get("disassembly", "").lower().strip()
+        mnem = disasm.split(None, 1)[0] if disasm else ""
+        if mnem in ("jmp", "call"):
+            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
+            if ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
+                indirect_branches.append(rec)
+
+    if not indirect_branches:
+        return None
+
+    # Pick the hottest indirect branch
+    best = max(
+        indirect_branches,
+        key=lambda r: addr_freq.get(r.get("address", 0), 0),
+    )
+    best_freq = addr_freq.get(best.get("address", 0), 0)
+    if best_freq < min_visit_frequency:
+        return None
+
+    dispatch_addr = best["address"]
+    disasm = best.get("disassembly", "").lower()
+    style = "call" if disasm.startswith("call") else "jmp"
+
+    # Identify vIP via monotonic-change analysis
+    vip_reg = _identify_vip_from_trace_registers(trace_records, dispatch_addr)
+
+    # Extract handler addresses
+    handler_addrs = _extract_handlers_from_trace_visits(
+        trace_records, dispatch_addr,
+    )
+
+    # Confidence scales with visit frequency and handler diversity
+    handler_diversity = len(set(handler_addrs)) if handler_addrs else 0
+    raw_conf = 0.3 + min(best_freq * 0.01, 0.3) + min(handler_diversity * 0.03, 0.2)
+    confidence = min(raw_conf, 0.85)
+
+    return GenericDispatcherMatch(
+        protector="unknown",
+        entry_address=dispatch_addr,
+        dispatch_address=dispatch_addr,
+        vip_register=vip_reg or "",
+        handler_addresses=sorted(set(handler_addrs)) if handler_addrs else [],
+        confidence=confidence,
+        dispatch_style=style,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator: try all finders in priority order (B100)
+# ---------------------------------------------------------------------------
+
+
+def find_dispatcher(
+    trace_records: List[Dict[str, Any]],
+    *,
+    bit_width: int = 64,
+    protector_hint: Optional[str] = None,
+) -> Optional[GenericDispatcherMatch]:
+    """Identify the VM dispatcher using all available strategies.
+
+    Tries protector-specific finders first (VMProtect, Themida, Code
+    Virtualizer), then falls back to the generic heuristic.  Returns
+    the match with the highest confidence, or ``None`` if no dispatcher
+    is found.
+
+    Args:
+        trace_records: Execution trace (list of dicts).
+        bit_width: 32 or 64.
+        protector_hint: Optional protector name to try first
+            (``"vmprotect"``, ``"themida"``, ``"code_virtualizer"``).
+
+    Returns:
+        The best :class:`GenericDispatcherMatch` across all strategies,
+        or ``None`` if no dispatcher is found.
+    """
+    if not trace_records:
+        return None
+
+    candidates: List[GenericDispatcherMatch] = []
+
+    # --- Protector-specific finders ----------------------------------------
+
+    # 1. VMProtect (highest accuracy when applicable)
+    try:
+        vmp = find_dispatcher_in_trace(trace_records, bit_width=bit_width)
+        if vmp is not None:
+            candidates.append(GenericDispatcherMatch.from_vmprotect_match(vmp))
+    except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
+        logger.debug("VMProtect dispatcher finder raised", exc_info=True)
+
+    # 2. Themida / WinLicense
+    try:
+        thm = find_themida_dispatcher(trace_records, bit_width=bit_width)
+        if thm is not None:
+            candidates.append(thm)
+    except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
+        logger.debug("Themida dispatcher finder raised", exc_info=True)
+
+    # 3. Code Virtualizer
+    try:
+        cv = find_cv_dispatcher(trace_records, bit_width=bit_width)
+        if cv is not None:
+            candidates.append(cv)
+    except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
+        logger.debug("CV dispatcher finder raised", exc_info=True)
+
+    # --- Generic fallback ---------------------------------------------------
+    try:
+        gen = find_generic_dispatcher(
+            trace_records, bit_width=bit_width, min_visit_frequency=5,
+        )
+        if gen is not None:
+            candidates.append(gen)
+    except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
+        logger.debug("Generic dispatcher finder raised", exc_info=True)
+
+    if not candidates:
+        return None
+
+    # If caller specified a hint, prefer that protector
+    if protector_hint:
+        hint_lower = protector_hint.lower()
+        hinted = [c for c in candidates if c.protector == hint_lower]
+        if hinted:
+            return max(hinted, key=lambda c: c.confidence)
+
+    # Otherwise return the highest-confidence match
+    return max(candidates, key=lambda c: c.confidence)
+

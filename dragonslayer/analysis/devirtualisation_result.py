@@ -59,6 +59,16 @@ class DevirtualisationResult:
     ml_classifications: Optional[Dict[str, str]] = None
     """Maps handler address (hex-string) → ML-predicted label."""
 
+    # ── Multi-protector + nested VM fields (B100) ────────────────────
+    dispatcher_match: Optional[Dict[str, Any]] = None
+    """Generic dispatcher match dict (works for any protector)."""
+
+    detected_protector: str = "unknown"
+    """Name of the detected protector (vmprotect, themida, cv, unknown)."""
+
+    nested_layers: Optional[List[Dict[str, Any]]] = None
+    """Nested VM layers discovered by recursive deobfuscation."""
+
     # ── Convenience ──────────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,6 +82,7 @@ class DevirtualisationResult:
             "opcode_table": self.opcode_table,
             "pseudocode": self.pseudocode,
             "pseudocode_text": self.pseudocode_text,
+            "detected_protector": self.detected_protector,
         }
         if self.skipped:
             d["skip_reason"] = self.skip_reason
@@ -79,11 +90,12 @@ class DevirtualisationResult:
         # Attach optional sub-products
         _optional = [
             "anti_evasion_hooks", "vmprotect_dispatcher",
-            "handler_extraction", "vm_context_layout",
-            "handler_clustering", "handler_cfg",
-            "vm_entry_points", "decrypted_handler_table",
-            "bytecode_decryptor", "static_handler_cfg",
-            "ml_classifications",
+            "dispatcher_match", "handler_extraction",
+            "vm_context_layout", "handler_clustering",
+            "handler_cfg", "vm_entry_points",
+            "decrypted_handler_table", "bytecode_decryptor",
+            "static_handler_cfg", "ml_classifications",
+            "nested_layers",
         ]
         for key in _optional:
             val = getattr(self, key)
@@ -104,11 +116,12 @@ class DevirtualisationResult:
             "success", "skipped", "skip_reason", "vip_register",
             "handler_count", "unique_operations", "opcode_table",
             "pseudocode", "pseudocode_text", "anti_evasion_hooks",
-            "vmprotect_dispatcher", "handler_extraction",
+            "vmprotect_dispatcher", "dispatcher_match",
+            "detected_protector", "handler_extraction",
             "vm_context_layout", "handler_clustering", "handler_cfg",
             "vm_entry_points", "decrypted_handler_table",
             "bytecode_decryptor", "static_handler_cfg",
-            "ml_classifications",
+            "ml_classifications", "nested_layers",
         }
         kwargs = {k: v for k, v in d.items() if k in known}
         return cls(**kwargs)

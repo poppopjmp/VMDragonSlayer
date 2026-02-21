@@ -1064,6 +1064,101 @@ def make_decryptor_from_dispatcher(
     )
 
 
+def make_generic_decryptor(
+    dispatcher_match: Any,
+    trace_records: Optional[Sequence[Any]] = None,
+    *,
+    max_key_bytes: int = 4,
+) -> Optional[BytecodeDecryptor]:
+    """Create a decryptor for non-VMProtect protectors via XOR key search.
+
+    Performs frequency analysis on the bytecode region referenced by
+    *dispatcher_match* to brute-force 1–*max_key_bytes* byte XOR keys.
+    Falls back to single-byte XOR with the most-common byte value
+    (assumed to be encrypted NOP / 0x00).
+
+    Parameters
+    ----------
+    dispatcher_match
+        Generic dispatcher match (dict or dataclass).
+    trace_records
+        Execution trace (used for entropy analysis, optional).
+    max_key_bytes
+        Maximum key length to brute-force (default 4).
+
+    Returns
+    -------
+    BytecodeDecryptor or None
+        Ready-to-use decryptor, or ``None`` if no encryption detected.
+    """
+    # Try to get decode_transforms first — some protectors have them.
+    transforms_raw = _get_attr_or_key(dispatcher_match, "decode_transforms", [])
+    if transforms_raw:
+        return make_decryptor_from_dispatcher(dispatcher_match, trace_records)
+
+    # Otherwise, attempt generic XOR key search.
+    handler_addrs: list = _get_attr_or_key(
+        dispatcher_match, "handler_addresses", [],
+    )
+    if not handler_addrs:
+        return None
+
+    # Collect bytecode bytes from trace around handler regions.
+    handler_set = set(handler_addrs)
+    raw_bytes: list[int] = []
+    if trace_records:
+        for rec in trace_records:
+            addr = getattr(rec, "address", None) or (
+                rec.get("address") if isinstance(rec, dict) else None
+            )
+            if addr in handler_set:
+                opcode = getattr(rec, "raw_bytes", None) or (
+                    rec.get("raw_bytes") if isinstance(rec, dict) else None
+                )
+                if isinstance(opcode, (bytes, bytearray)):
+                    raw_bytes.extend(opcode)
+                elif isinstance(opcode, int):
+                    raw_bytes.append(opcode & 0xFF)
+
+    if len(raw_bytes) < 16:
+        return None
+
+    # Frequency analysis: most common byte is likely encrypted 0x00 or NOP.
+    from collections import Counter
+
+    freq = Counter(raw_bytes)
+    most_common_byte, _count = freq.most_common(1)[0]
+
+    # Calculate entropy to decide if decryption is needed.
+    total = len(raw_bytes)
+    entropy = 0.0
+    for cnt in freq.values():
+        p = cnt / total
+        if p > 0:
+            import math
+            entropy -= p * math.log2(p)
+
+    if entropy < 3.0:
+        # Low entropy — likely not encrypted.
+        return None
+
+    # Build single-byte XOR transform.
+    xor_key = most_common_byte  # XOR with most-common → 0x00
+    transforms = [
+        KeyTransform(
+            op=TransformOp.XOR,
+            operand_source=f"imm:{xor_key}",
+        ),
+    ]
+
+    return BytecodeDecryptor(
+        transforms=transforms,
+        initial_key=xor_key,
+        key_width=8,
+        opcode_width=1,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------

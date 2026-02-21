@@ -180,6 +180,76 @@ class PipelineResult:
 
 
 # ---------------------------------------------------------------------------
+# Nested VM helpers (B100)
+# ---------------------------------------------------------------------------
+
+def _detect_inner_vm_entries(
+    opcode_table: Any,
+    handler_cfg: Any,
+    shared_data: Dict[str, Any],
+) -> list[int]:
+    """Scan opcode table / handler CFG for inner VM entry points.
+
+    Heuristic: look for handler semantics labelled ``vm_call``,
+    ``vm_enter``, ``vm_jmp``, or ``nested_dispatch``.  Also look for
+    handlers whose pseudocode contains indirect control-flow to a
+    known VM entry signature (pushad; pushfd style).
+
+    Returns:
+        List of candidate inner VM entry addresses.
+    """
+    inner: list[int] = []
+    vm_ops = {"vm_call", "vm_enter", "vm_jmp", "nested_dispatch", "VM_ENTER"}
+    if opcode_table is None:
+        return inner
+    entries = getattr(opcode_table, "entries", ())
+    for entry in entries:
+        sem = getattr(entry, "semantic", None)
+        if sem is None:
+            continue
+        op = getattr(sem, "operation", "")
+        if op in vm_ops:
+            # The target address is either in the semantic detail
+            # or we fall back to the handler's own address.
+            target = getattr(sem, "target_address", None)
+            if target is None:
+                target = getattr(entry, "handler_address", 0)
+            if target:
+                inner.append(int(target))
+    return inner
+
+
+def _extract_inner_trace(
+    trace: list,
+    entry_address: int,
+    boundaries: list,
+) -> list:
+    """Extract a sub-trace starting at *entry_address*.
+
+    The inner trace is sliced from the first occurrence of
+    *entry_address* in the trace until the next occurrence of one of
+    the existing (outer) boundary addresses, or end of trace.
+    """
+    outer_addrs = {
+        getattr(b, "handler_address", 0) for b in boundaries
+    }
+    outer_addrs.discard(entry_address)
+
+    start_idx: int | None = None
+    for i, insn in enumerate(trace):
+        addr = getattr(insn, "address", None) or (
+            insn.get("address") if isinstance(insn, dict) else None
+        )
+        if addr == entry_address and start_idx is None:
+            start_idx = i
+        elif start_idx is not None and addr in outer_addrs:
+            return trace[start_idx:i]
+    if start_idx is not None:
+        return trace[start_idx:]
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Analysis Pipeline
 # ---------------------------------------------------------------------------
 
@@ -1136,23 +1206,45 @@ class AnalysisPipeline:
             except _STAGE_ERRORS as exc:
                 logger.debug("VM entry locator skipped: %s", exc)
 
-            # ── 3. VMProtect dispatcher identification (Batch 13) ────────
+            # ── 3. Dispatcher identification (B100: multi-protector) ────
+            dispatcher_match: Optional[Dict[str, Any]] = None
+            detected_protector: str = "unknown"
             vmprotect_match: Optional[Dict[str, Any]] = None
             try:
                 from ..analysis.vm_discovery.dispatcher import (
+                    find_dispatcher,
                     find_vmprotect_dispatcher,
                     find_dispatcher_in_trace,
                 )
 
-                # Try trace-based first (more reliable), fall back to binary
-                disp_match = find_dispatcher_in_trace(trace)
-                if disp_match is None:
-                    disp_match = find_vmprotect_dispatcher(binary_data)
+                # B100: Use the generic orchestrator which tries
+                # VMProtect → Themida → Code Virtualizer → generic.
+                protector_hint = ctx.shared_data.get("detected_protector")
+                generic_match = find_dispatcher(
+                    trace, bit_width=64,
+                    protector_hint=protector_hint,
+                )
 
-                if disp_match is not None:
-                    vmprotect_match = disp_match.to_dict()
-                    # Inject handler addresses into dispatcher_addrs pool
-                    ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
+                if generic_match is not None:
+                    dispatcher_match = generic_match.to_dict()
+                    detected_protector = generic_match.protector
+                    ctx.shared_data["dispatcher_match"] = dispatcher_match
+                    ctx.shared_data["detected_protector"] = detected_protector
+
+                    # Backwards compat: if VMProtect, also store as vmprotect_dispatcher
+                    if detected_protector == "vmprotect":
+                        vmprotect_match = dispatcher_match
+                        ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
+                else:
+                    # Legacy fallback: try VMProtect-specific binary scan
+                    disp_match = find_vmprotect_dispatcher(binary_data)
+                    if disp_match is not None:
+                        vmprotect_match = disp_match.to_dict()
+                        dispatcher_match = vmprotect_match
+                        detected_protector = "vmprotect"
+                        ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
+                        ctx.shared_data["dispatcher_match"] = dispatcher_match
+                        ctx.shared_data["detected_protector"] = detected_protector
             except _STAGE_ERRORS as exc:
                 logger.debug("VMProtect dispatcher identification skipped: %s", exc)
 
@@ -1162,22 +1254,31 @@ class AnalysisPipeline:
                 from ..analysis.bytecode_decrypt import (
                     make_decryptor_from_dispatcher,
                     decrypt_handler_table,
+                    make_generic_decryptor,
                 )
                 if vmprotect_match is not None:
                     bytecode_decryptor = make_decryptor_from_dispatcher(
                         vmprotect_match, trace,
                     )
-                    if bytecode_decryptor is not None:
-                        ctx.shared_data["bytecode_decryptor"] = {
-                            "initial_key": bytecode_decryptor.initial_key,
-                            "key_width": bytecode_decryptor.key_width,
-                            "transform_count": len(bytecode_decryptor.transforms),
-                        }
+                elif dispatcher_match is not None:
+                    # B100: generic XOR key search for non-VMP protectors
+                    bytecode_decryptor = make_generic_decryptor(
+                        dispatcher_match, trace,
+                    )
 
-                    # Decrypt handler table if table_base is available
-                    tbl_base = vmprotect_match.get("table_base", 0)
+                if bytecode_decryptor is not None:
+                    ctx.shared_data["bytecode_decryptor"] = {
+                        "initial_key": bytecode_decryptor.initial_key,
+                        "key_width": bytecode_decryptor.key_width,
+                        "transform_count": len(bytecode_decryptor.transforms),
+                    }
+
+                # Decrypt handler table if table_base is available
+                src_match = vmprotect_match or dispatcher_match
+                if src_match is not None:
+                    tbl_base = src_match.get("table_base", 0)
                     if tbl_base and binary_data and len(binary_data) > 64:
-                        known_addrs = vmprotect_match.get(
+                        known_addrs = src_match.get(
                             "handler_addresses", [],
                         )
                         dec_table = decrypt_handler_table(
@@ -1209,10 +1310,11 @@ class AnalysisPipeline:
                         dispatcher_addrs.append(addr)
                         ht_addrs.add(addr)
 
-            # Also supplement from the VMProtect dispatcher match.
-            if vmprotect_match is not None:
+            # Also supplement from the dispatcher match (generic or VMP).
+            src_disp = dispatcher_match or vmprotect_match
+            if src_disp is not None:
                 ht_addrs = set(dispatcher_addrs)
-                for ht_entry in vmprotect_match.get("handler_table", []):
+                for ht_entry in src_disp.get("handler_table", []):
                     addr = ht_entry.get("handler_address") if isinstance(ht_entry, dict) else getattr(ht_entry, "handler_address", None)
                     if addr and addr not in ht_addrs:
                         dispatcher_addrs.append(addr)
@@ -1415,6 +1517,71 @@ class AnalysisPipeline:
                 clustering=ctx.shared_data.get("handler_clustering"),
             )
 
+            # ── 9. Nested VM detection + recursive deobfuscation (B100) ──
+            nested_layers: list[Dict[str, Any]] = []
+            max_nesting = int(
+                ctx.shared_data.get("max_nesting_depth", 3)
+            )
+            try:
+                inner_entries = _detect_inner_vm_entries(
+                    opcode_table, handler_cfg, ctx.shared_data,
+                )
+                nesting_depth = 0
+                while inner_entries and nesting_depth < max_nesting:
+                    nesting_depth += 1
+                    logger.info(
+                        "Nested VM layer %d: %d inner entry points detected",
+                        nesting_depth, len(inner_entries),
+                    )
+                    for inner_entry in inner_entries:
+                        inner_trace = _extract_inner_trace(
+                            trace, inner_entry, boundaries,
+                        )
+                        if not inner_trace:
+                            continue
+                        inner_match = find_dispatcher(
+                            inner_trace, bit_width=64,
+                        )
+                        if inner_match is None:
+                            continue
+                        inner_disp_addrs = inner_match.to_dict().get(
+                            "handler_addresses", [],
+                        )
+                        inner_vip = identify_vip_register(
+                            inner_trace, inner_disp_addrs,
+                        )
+                        if inner_vip is None:
+                            continue
+                        inner_seg = segment_trace(
+                            inner_trace, inner_vip, inner_disp_addrs,
+                        )
+                        if not inner_seg.boundaries:
+                            continue
+                        inner_opcode = analyse_handler_semantics(
+                            inner_trace, inner_seg.boundaries,
+                        )
+                        inner_pseudo = emit_pseudocode(
+                            inner_opcode, inner_seg.boundaries, None,
+                            style="c_like",
+                        )
+                        nested_layers.append({
+                            "depth": nesting_depth,
+                            "entry_address": inner_entry,
+                            "protector": inner_match.protector,
+                            "handler_count": len(inner_seg.boundaries),
+                            "unique_operations": inner_opcode.unique_operations,
+                            "pseudocode": inner_pseudo.text,
+                        })
+                    # Check for deeper nesting in the last layer
+                    if nested_layers:
+                        inner_entries = _detect_inner_vm_entries(
+                            inner_opcode, None, ctx.shared_data,
+                        )
+                    else:
+                        break
+            except _STAGE_ERRORS as exc:
+                logger.debug("Nested VM detection skipped: %s", exc)
+
             # ── Assemble result ──────────────────────────────────────────
             result = DevirtualisationResult(
                 success=True,
@@ -1426,6 +1593,8 @@ class AnalysisPipeline:
                 pseudocode_text=pseudocode_result.text,
                 anti_evasion_hooks=hook_set_data,
                 vmprotect_dispatcher=vmprotect_match,
+                dispatcher_match=dispatcher_match,
+                detected_protector=detected_protector,
                 handler_extraction=extraction_data,
                 vm_context_layout=context_layout_data,
                 handler_clustering=clustering_data,
@@ -1435,6 +1604,7 @@ class AnalysisPipeline:
                 bytecode_decryptor=ctx.shared_data.get("bytecode_decryptor"),
                 static_handler_cfg=ctx.shared_data.get("static_handler_cfg"),
                 ml_classifications=ml_labels,
+                nested_layers=nested_layers or None,
             )
 
             # Store boundaries for downstream stages.
