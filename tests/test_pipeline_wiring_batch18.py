@@ -431,7 +431,7 @@ class TestAntiEvasionHookSetWiring:
         ctx = _make_ctx()
 
         with patch("dragonslayer.analysis.anti_evasion.environment_normalizer.EnvironmentNormalizer") as mock_cls, \
-             patch("dragonslayer.analysis.anti_evasion.runtime_hooks.build_hook_set_from_report", side_effect=Exception("boom")):
+             patch("dragonslayer.analysis.anti_evasion.runtime_hooks.build_hook_set_from_report", side_effect=RuntimeError("boom")):
             mock_cls.return_value.analyze.return_value = fake_report
             result = self.pipe._run_anti_evasion(b"\x00" * 64, ctx)
 

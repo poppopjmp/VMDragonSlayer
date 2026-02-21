@@ -264,7 +264,7 @@ class ModelTrainer:
                     cal_clf.fit(X, y)
                     clf = cal_clf
                     logger.info("Applied isotonic confidence calibration (cv=%d)", cal_cv)
-            except Exception as exc:
+            except (ValueError, TypeError, ImportError, AttributeError, RuntimeError) as exc:
                 logger.debug("Calibration failed, using raw probabilities: %s", exc)
 
         # B67: Stratified cross-validation — preserves class distribution.
@@ -293,7 +293,7 @@ class ModelTrainer:
                     per_class[cls_name] = {
                         k: round(v, 4) for k, v in cls_metrics.items()
                     }
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError):
             pass
 
         # Attach to the model.

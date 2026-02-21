@@ -218,7 +218,7 @@ def evaluate_model(
             pred: PredictionResult = model.predict(features)
             pred_label = canonicalize(pred.label)
             conf = pred.confidence
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
             logger.debug("Model prediction failed for %s: %s", entry.id, exc)
             pred_label = "unknown"
             conf = 0.0

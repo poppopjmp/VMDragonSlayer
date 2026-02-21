@@ -41,6 +41,12 @@ import shutil as _shutil
 
 logger = logging.getLogger(__name__)
 
+# B88: Named exception tuple for stage-level fault tolerance.
+_STAGE_ERRORS = (
+    ValueError, TypeError, KeyError, IndexError, RuntimeError,
+    OSError, ImportError, AttributeError, ArithmeticError,
+)
+
 
 # ---------------------------------------------------------------------------
 # Pipeline configuration
@@ -149,7 +155,7 @@ class AnalysisPipeline:
         try:
             from ..core.config import get_config
             self._cfg = config or get_config()
-        except Exception:
+        except (ImportError, AttributeError, KeyError):
             self._cfg = config
 
     # -- public API ---------------------------------------------------------
@@ -271,7 +277,7 @@ class AnalysisPipeline:
                 if stage_name.startswith("llm_") and sr.data:
                     llm_insights[stage_name] = sr.data
 
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.exception("Pipeline stage %s failed", stage_name)
                 stage_results.append(StageResult(
                     stage=stage_name,
@@ -335,7 +341,7 @@ class AnalysisPipeline:
             if ctx is not None:
                 ctx.shared_data[stage_name] = data
             return StageResult(stage=stage_name, success=True, data=data, duration=elapsed)
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("%s stage failed", stage_name)
             return StageResult(
                 stage=stage_name, success=False, error=str(exc),
@@ -388,7 +394,7 @@ class AnalysisPipeline:
                 stage="binary_parse", success=True, data=data,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.debug("Binary parse stage failed: %s", exc)
             return StageResult(
                 stage="binary_parse", success=False, error=str(exc),
@@ -459,7 +465,7 @@ class AnalysisPipeline:
                 duration=time.monotonic() - t0,
             )
 
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Pattern analysis stage failed")
             return StageResult(
                 stage="pattern_analysis",
@@ -508,7 +514,7 @@ class AnalysisPipeline:
                 duration=time.monotonic() - t0,
             )
 
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("VM discovery stage failed")
             return StageResult(
                 stage="vm_discovery",
@@ -561,7 +567,7 @@ class AnalysisPipeline:
                 for future in concurrent.futures.as_completed(futures):
                     try:
                         name, pr = future.result()
-                    except Exception as exc:
+                    except _STAGE_ERRORS as exc:
                         plugin = futures[future]
                         name = plugin.name
                         logger.warning("Plugin %s raised: %s", name, exc)
@@ -597,7 +603,7 @@ class AnalysisPipeline:
                 plugins_succeeded=successes,
             )
 
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Plugin stage %s failed", label)
             return StageResult(
                 stage=label,
@@ -641,7 +647,7 @@ class AnalysisPipeline:
                     "hook_names": [h.name for h in hook_set.hooks],
                 }
                 ctx.shared_data["runtime_hook_set"] = hook_set
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Runtime hook-set generation skipped: %s", exc)
 
             return StageResult(
@@ -650,7 +656,7 @@ class AnalysisPipeline:
                 data=result_data,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Anti-evasion stage failed")
             return StageResult(
                 stage="anti_evasion",
@@ -690,7 +696,7 @@ class AnalysisPipeline:
                 data=result_data,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Classification stage failed")
             return StageResult(
                 stage="classify",
@@ -751,7 +757,7 @@ class AnalysisPipeline:
                             "Taint stage: using %d instructions from %s",
                             len(instructions), trace_source,
                         )
-                except Exception:
+                except _STAGE_ERRORS:
                     logger.debug(
                         "Taint stage: plugin trace ingestion failed, "
                         "falling back to binary lift",
@@ -814,7 +820,7 @@ class AnalysisPipeline:
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Taint analysis stage failed")
             return StageResult(
                 stage="taint_analysis",
@@ -897,7 +903,7 @@ class AnalysisPipeline:
                                 "_triton_path_constraints",
                                 path_constraints,
                             )
-                except Exception:
+                except _STAGE_ERRORS:
                     logger.debug(
                         "Symbolic stage: plugin trace ingestion failed, "
                         "falling back to raw binary",
@@ -934,7 +940,7 @@ class AnalysisPipeline:
                 data=result_data,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Symbolic execution stage failed")
             return StageResult(
                 stage="symbolic_execution",
@@ -972,7 +978,7 @@ class AnalysisPipeline:
                 data=result_data,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("Dispatcher analysis stage failed")
             return StageResult(
                 stage="dispatcher_analysis",
@@ -1030,7 +1036,7 @@ class AnalysisPipeline:
             trace: ExecutionTrace | None = None
             try:
                 trace = from_shared_data(ctx.shared_data)
-            except Exception:
+            except _STAGE_ERRORS:
                 pass
 
             if trace is None or not trace.instructions:
@@ -1061,7 +1067,7 @@ class AnalysisPipeline:
                         "categories": list({h.category.value for h in hook_set.hooks}),
                         "hook_names": [h.name for h in hook_set.hooks],
                     }
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Anti-evasion hook-set skipped: %s", exc)
 
             # ── 2b. VM entry point locator (Batch 21) ────────────────────
@@ -1083,7 +1089,7 @@ class AnalysisPipeline:
                 if entry_report is not None and entry_report.count > 0:
                     vm_entry_data = entry_report.to_dict()
                     ctx.shared_data["vm_entry_points"] = vm_entry_data
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("VM entry locator skipped: %s", exc)
 
             # ── 3. VMProtect dispatcher identification (Batch 13) ────────
@@ -1103,7 +1109,7 @@ class AnalysisPipeline:
                     vmprotect_match = disp_match.to_dict()
                     # Inject handler addresses into dispatcher_addrs pool
                     ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("VMProtect dispatcher identification skipped: %s", exc)
 
             # ── 3b. Rolling-key decryptor + handler table decrypt (B24/25) ─
@@ -1139,7 +1145,7 @@ class AnalysisPipeline:
                             ctx.shared_data["decrypted_handler_table"] = (
                                 dec_table.to_dict()
                             )
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Bytecode decryptor / table decrypt skipped: %s", exc)
 
             # ── 4. Identify vIP and segment into handler boundaries ──────
@@ -1192,7 +1198,7 @@ class AnalysisPipeline:
                 extraction = extract_handler_bodies(trace, boundaries)
                 extraction_data = extraction.to_dict()
                 ctx.shared_data["handler_extraction"] = extraction_data
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Handler extraction skipped: %s", exc)
 
             # ── 6. VM context register identification (Batch 15) ─────────
@@ -1204,7 +1210,7 @@ class AnalysisPipeline:
                 context_layout = identify_vm_context(trace, boundaries)
                 context_layout_data = context_layout.to_dict()
                 ctx.shared_data["vm_context_layout"] = context_layout_data
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("VM context register identification skipped: %s", exc)
 
             # ── 7. Semantic analysis + clustering (Batch 16 + 22) ────────
@@ -1225,7 +1231,7 @@ class AnalysisPipeline:
                     bit_width=64,
                     run_fresh=True,
                 ) or None
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Symbolic depth collection skipped: %s", exc)
                 sym_summaries = ctx.shared_data.get(
                     "symbolic_execution", {},
@@ -1254,7 +1260,7 @@ class AnalysisPipeline:
                 opcode_table = refine_opcode_table(
                     opcode_table, clustering_result,
                 )
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Handler clustering skipped: %s", exc)
 
             # ── 7c. ML ensemble classification (Batch 39) ────────────────
@@ -1311,7 +1317,7 @@ class AnalysisPipeline:
                         and pred.confidence > 0.7
                     ):
                         sem.confidence = min(sem.confidence + 0.05, 1.0)
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("ML ensemble classification skipped: %s", exc)
 
             # ── 7b. Handler-level CFG construction (Batch 19 + B24) ────
@@ -1354,7 +1360,7 @@ class AnalysisPipeline:
                                 ctx.shared_data["handler_cfg"] = (
                                     handler_cfg_data
                                 )
-            except Exception as exc:
+            except _STAGE_ERRORS as exc:
                 logger.debug("Handler CFG construction skipped: %s", exc)
 
             # ── 8. Pseudocode emission ───────────────────────────────────
@@ -1493,7 +1499,7 @@ class AnalysisPipeline:
                 duration=time.monotonic() - t0,
             )
 
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("LLM analysis stage failed")
             return StageResult(
                 stage="llm_analysis",
@@ -1542,7 +1548,7 @@ class AnalysisPipeline:
                 duration=time.monotonic() - t0,
             )
 
-        except Exception as exc:
+        except _STAGE_ERRORS as exc:
             logger.exception("LLM summary stage failed")
             return StageResult(
                 stage="llm_summary",

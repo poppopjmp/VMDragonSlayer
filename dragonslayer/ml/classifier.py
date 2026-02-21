@@ -70,7 +70,7 @@ class VMClassifier:
         for i, h in enumerate(handlers):
             try:
                 results.append(self.classify(h))
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 logger.debug("classify_batch: item %d failed: %s", i, exc)
                 results.append(PredictionResult(
                     label="unknown", confidence=0.0,
@@ -236,7 +236,7 @@ class FeatureExplainer:
                         drops.append(base_conf - pert_pred.confidence)
                     else:
                         drops.append(base_conf)  # label changed → full contribution
-                except Exception:
+                except (ValueError, TypeError, KeyError, AttributeError, IndexError):
                     drops.append(0.0)
             contributions[fname] = sum(drops) / len(drops) if drops else 0.0
 

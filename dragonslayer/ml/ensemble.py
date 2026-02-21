@@ -64,7 +64,7 @@ class EnsembleClassifier:
         for mdl in self._models:
             try:
                 results.append(mdl.predict(features))
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 failures.append(f"{getattr(mdl, 'name', type(mdl).__name__)}: {exc}")
                 logger.debug("Ensemble model failed: %s", failures[-1])
 
@@ -226,7 +226,7 @@ class StackedEnsemble(EnsembleClassifier):
                 if failures:
                     meta_result.metadata["failures"] = failures
                 return meta_result
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 logger.debug("Meta-model failed, falling back to vote: %s", exc)
         # Fallback to majority vote
         return super()._aggregate(results, failures=failures)
