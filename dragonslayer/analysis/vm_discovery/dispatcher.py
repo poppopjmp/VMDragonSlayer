@@ -89,18 +89,89 @@ class TraceRecord(TypedDict, total=False):
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Maximum trace length processed; longer traces are uniformly sampled.
+# Configurable via ``dispatcher.max_trace_length`` in vmdragonslayer.yml.
 _MAX_TRACE_LEN = 500_000
+
+
+def _get_max_trace_len() -> int:
+    """Return the dispatcher max-trace-length from config, or the default."""
+    try:
+        from dragonslayer.core.config import get_config
+        cfg = get_config()
+        val = cfg.get("dispatcher.max_trace_length", _MAX_TRACE_LEN)
+        return int(val) if val else _MAX_TRACE_LEN
+    except (ImportError, RuntimeError, ValueError, TypeError):
+        return _MAX_TRACE_LEN
+
+
+def _get_early_exit_confidence() -> float:
+    """Return the dispatcher early-exit confidence from config, or default."""
+    try:
+        from dragonslayer.core.config import get_config
+        cfg = get_config()
+        val = cfg.get("dispatcher.early_exit_confidence", 0.9)
+        return float(val) if val else 0.9
+    except (ImportError, RuntimeError, ValueError, TypeError):
+        return 0.9
 
 
 def _subsample_trace(
     trace: List[Dict[str, Any]],
-    max_len: int = _MAX_TRACE_LEN,
+    max_len: int = 0,
 ) -> List[Dict[str, Any]]:
-    """Return *trace* or a uniformly-spaced subsample of *max_len* entries."""
+    """Return *trace* or a uniformly-spaced subsample of *max_len* entries.
+
+    When *max_len* is 0 (default), the limit is read from config
+    (``dispatcher.max_trace_length``) or falls back to
+    :data:`_MAX_TRACE_LEN`.
+    """
+    if max_len <= 0:
+        max_len = _get_max_trace_len()
     if len(trace) <= max_len:
         return trace
-    step = len(trace) / max_len
-    return [trace[int(i * step)] for i in range(max_len)]
+    orig_len = len(trace)
+    step = orig_len / max_len
+    result = [trace[int(i * step)] for i in range(max_len)]
+    logger.info(
+        "Subsampled trace from %d to %d records (ratio %.2f)",
+        orig_len, max_len, max_len / orig_len,
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Indirect-branch operand classification (B102)
+# ---------------------------------------------------------------------------
+
+
+def _is_indirect_operand(operands: str) -> bool:
+    """Return *True* if *operands* looks like an indirect branch target.
+
+    Direct branches use immediate hex addresses (``0x401000``) or
+    numeric offsets (``-42``).  Anything else — register operands
+    (``rax``), memory operands (``[rbx+rcx*8]``), or computed
+    expressions — is classified as indirect.
+
+    Examples::
+
+        >>> _is_indirect_operand("rax")
+        True
+        >>> _is_indirect_operand("[rbx+rcx*8]")
+        True
+        >>> _is_indirect_operand("0x401000")
+        False
+        >>> _is_indirect_operand("-42")
+        False
+        >>> _is_indirect_operand("")
+        False
+    """
+    if not operands:
+        return False
+    if operands.startswith("0x"):
+        return False
+    if operands.lstrip("-").isdigit():
+        return False
+    return True
 
 
 @dataclass
@@ -164,7 +235,7 @@ def _compute_trace_features(
         # Indirect branches
         if mnem == "call" and "[" in ops:
             f.indirect_calls.append(rec)
-        elif mnem == "jmp" and ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
+        elif mnem == "jmp" and _is_indirect_operand(ops):
             f.indirect_jumps.append(rec)
 
     return f
@@ -1929,7 +2000,8 @@ def _reset_finder_registry() -> None:
 # ---------------------------------------------------------------------------
 
 # Early-exit threshold — skip remaining finders if we already have a
-# high-confidence match.
+# high-confidence match.  Configurable via
+# ``dispatcher.early_exit_confidence`` in vmdragonslayer.yml.
 _EARLY_EXIT_CONFIDENCE = 0.9
 
 
@@ -1972,12 +2044,17 @@ def find_dispatcher(
     features = _compute_trace_features(trace_records)
 
     candidates: List[GenericDispatcherMatch] = []
+    exit_threshold = _get_early_exit_confidence()
 
     def _accept(match: Optional[GenericDispatcherMatch]) -> bool:
         """Append *match* and return True if early-exit threshold met."""
         if match is not None:
             candidates.append(match)
-            if match.confidence >= _EARLY_EXIT_CONFIDENCE:
+            if match.confidence >= exit_threshold:
+                logger.info(
+                    "Early-exit: %s finder produced confidence %.2f",
+                    match.protector, match.confidence,
+                )
                 return True
         return False
 

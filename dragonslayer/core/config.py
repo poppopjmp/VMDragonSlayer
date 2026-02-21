@@ -251,7 +251,7 @@ class Config:
 
         # --- Known top-level sections ---
         known_sections = set(self.DEFAULTS.keys()) | {
-            "data", "paths", "metroplex",
+            "data", "paths", "metroplex", "dispatcher",
         }
         for key in self._config:
             if key not in known_sections:

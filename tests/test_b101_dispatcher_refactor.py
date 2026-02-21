@@ -1,4 +1,4 @@
-"""B101 — Dispatcher refactor tests.
+"""B101/B102 — Dispatcher refactor tests.
 
 Tests for:
 * ``TraceRecord`` TypedDict.
@@ -7,6 +7,10 @@ Tests for:
 * ``register_dispatcher_finder`` / ``_reset_finder_registry`` registry.
 * Early-exit in ``find_dispatcher`` for high-confidence matches.
 * Nested-depth limits enforced by the pipeline.
+* ``_is_indirect_operand`` named helper (B102).
+* Hypothesis property-based ``_subsample_trace`` invariants (B102).
+* ``__all__`` completeness (B102).
+* Config-driven ``_MAX_TRACE_LEN`` / early-exit threshold (B102).
 """
 
 from __future__ import annotations
@@ -560,3 +564,157 @@ class TestTraceFeaturesDataclass:
         assert f.addr_freq[0x100] == 5
         assert 0x200 in f.pushad_addrs
         assert len(f.indirect_calls) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _is_indirect_operand (B102)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestIsIndirectOperand:
+    """Verify the named helper for indirect-branch classification."""
+
+    @pytest.mark.parametrize(
+        "ops, expected",
+        [
+            ("rax", True),
+            ("[rbx+rcx*8]", True),
+            ("[eax]", True),
+            ("r12", True),
+            ("0x401000", False),
+            ("0x0", False),
+            ("-42", False),
+            ("12345", False),
+            ("", False),
+        ],
+    )
+    def test_classification(self, ops: str, expected: bool):
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _is_indirect_operand,
+        )
+        assert _is_indirect_operand(ops) is expected
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Hypothesis — _subsample_trace invariants (B102)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSubsampleTraceHypothesis:
+    """Property-based tests for the trace subsampling logic."""
+
+    @pytest.mark.parametrize("max_len", [10, 50, 100, 500])
+    def test_length_invariant(self, max_len: int):
+        """Result length == min(input_len, max_len)."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _subsample_trace,
+        )
+
+        @given(n=st.integers(min_value=0, max_value=5000))
+        @settings(max_examples=50)
+        def check(n: int) -> None:
+            trace = [_make_rec(i, "nop") for i in range(n)]
+            result = _subsample_trace(trace, max_len=max_len)
+            assert len(result) == min(n, max_len)
+
+        check()
+
+    def test_preserves_identity_for_short(self):
+        """Short traces are returned as-is (identity)."""
+        from hypothesis import given, settings, assume
+        from hypothesis import strategies as st
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _subsample_trace,
+        )
+
+        @given(n=st.integers(min_value=0, max_value=100))
+        @settings(max_examples=30)
+        def check(n: int) -> None:
+            trace = [_make_rec(i, "nop") for i in range(n)]
+            result = _subsample_trace(trace, max_len=200)
+            assert result is trace
+
+        check()
+
+    def test_uniformity(self):
+        """Subsample spans the full range of the original trace."""
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _subsample_trace,
+        )
+        trace = [_make_rec(i, "nop") for i in range(10_000)]
+        result = _subsample_trace(trace, max_len=100)
+        addrs = [r["address"] for r in result]
+        # First element should be near start, last near end
+        assert addrs[0] == 0
+        assert addrs[-1] >= 9800
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# __all__ completeness (B102)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAllExports:
+    """Verify __all__ includes all B100/B101 public symbols."""
+
+    B100_B101_SYMBOLS = [
+        "GenericDispatcherMatch",
+        "find_dispatcher",
+        "find_themida_dispatcher",
+        "find_cv_dispatcher",
+        "find_generic_dispatcher",
+        "register_dispatcher_finder",
+        "TraceRecord",
+        "VMProtectDispatcherMatch",
+        "find_vmprotect_dispatcher",
+        "find_dispatcher_in_trace",
+    ]
+
+    @pytest.mark.parametrize("symbol", B100_B101_SYMBOLS)
+    def test_symbol_in_all(self, symbol: str):
+        from dragonslayer.analysis.vm_discovery import __all__
+        assert symbol in __all__, f"{symbol} missing from __all__"
+
+    @pytest.mark.parametrize("symbol", B100_B101_SYMBOLS)
+    def test_symbol_importable(self, symbol: str):
+        import importlib
+        mod = importlib.import_module("dragonslayer.analysis.vm_discovery")
+        assert hasattr(mod, symbol), f"{symbol} not importable from vm_discovery"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Config-driven thresholds (B102)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestConfigDrivenThresholds:
+    """Verify that config functions return sane defaults."""
+
+    def test_max_trace_len_default(self):
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _get_max_trace_len, _MAX_TRACE_LEN,
+        )
+        # Should return at least the module default (may read from config)
+        result = _get_max_trace_len()
+        assert isinstance(result, int)
+        assert result > 0
+
+    def test_early_exit_confidence_default(self):
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _get_early_exit_confidence,
+        )
+        result = _get_early_exit_confidence()
+        assert isinstance(result, float)
+        assert 0.0 < result <= 1.0
+
+    def test_subsample_reads_config(self):
+        """_subsample_trace with max_len=0 should read from config."""
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _subsample_trace,
+        )
+        trace = [_make_rec(i, "nop") for i in range(100)]
+        # With default config (500K), 100-record trace should pass through
+        result = _subsample_trace(trace, max_len=0)
+        assert result is trace

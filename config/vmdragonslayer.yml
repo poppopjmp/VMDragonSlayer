@@ -34,6 +34,11 @@ vmprotect:
   confidence_threshold: 0.8
   max_handler_size: 10000
 
+# Dispatcher finder configuration (B102)
+dispatcher:
+  max_trace_length: 500000   # Traces longer than this are subsampled
+  early_exit_confidence: 0.9 # Skip remaining finders above this threshold
+
 # Symbolic execution engine limits (B53)
 symbolic_execution:
   solver_timeout_ms: 10000   # Z3 per-query timeout
