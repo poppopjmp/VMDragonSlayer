@@ -38,6 +38,18 @@ except ImportError:
     _z3 = None  # type: ignore[assignment]
     _HAS_Z3 = False
 
+# B87: Named exception tuples — narrows former blanket ``except Exception``.
+if _HAS_Z3:
+    _Z3_EVAL_ERRORS: tuple = (_z3.Z3Exception, ValueError, TypeError, AttributeError)
+    _Z3_SOLVE_ERRORS: tuple = (_z3.Z3Exception, ValueError, ArithmeticError)
+    _INSN_ERRORS: tuple = (
+        _z3.Z3Exception, ValueError, TypeError, KeyError, IndexError, AttributeError,
+    )
+else:
+    _Z3_EVAL_ERRORS: tuple = (ValueError, TypeError, AttributeError)
+    _Z3_SOLVE_ERRORS: tuple = (ValueError, ArithmeticError)
+    _INSN_ERRORS: tuple = (ValueError, TypeError, KeyError, IndexError, AttributeError)
+
 logger = logging.getLogger(__name__)
 
 
@@ -214,7 +226,7 @@ class SymbolicExecutor:
             try:
                 from dragonslayer.core.config import get_config
                 config = get_config()
-            except Exception:
+            except (ImportError, AttributeError, KeyError):
                 return cls()
 
         return cls(
@@ -905,7 +917,7 @@ class SymbolicExecutor:
                 binary_data=code,
                 base_address=entry_point,
             )
-        except Exception as exc:
+        except (ImportError, ValueError, KeyError, TypeError, IndexError, AttributeError, RuntimeError) as exc:
             logger.debug("VMProtect dispatcher analysis failed: %s", exc)
             return None
 
@@ -1056,7 +1068,7 @@ class SymbolicExecutor:
                             "confidence": 0.85,
                             "source": "path_constraint",
                         })
-                except Exception:
+                except _Z3_EVAL_ERRORS:
                     pass
 
         # Track which addresses already flagged via path constraints.
@@ -1443,7 +1455,7 @@ class SymbolicExecutor:
                                     taken_feasible = self._solver.check_feasibility(
                                         branch_constraint
                                     )
-                                except Exception:
+                                except _Z3_SOLVE_ERRORS:
                                     taken_feasible = True  # conservative
                                 finally:
                                     self._solver.pop()
@@ -1475,7 +1487,7 @@ class SymbolicExecutor:
                                     fall_feasible = self._solver.check_feasibility(
                                         neg_constraint
                                     )
-                                except Exception:
+                                except _Z3_SOLVE_ERRORS:
                                     fall_feasible = True
                                 finally:
                                     self._solver.pop()
@@ -1659,7 +1671,7 @@ class SymbolicExecutor:
                             )
                             state.registers[reg] = fresh
                             widened_regs.append(reg)
-        except Exception:
+        except _Z3_EVAL_ERRORS:
             pass
 
         info.widened = True
@@ -1701,7 +1713,7 @@ class SymbolicExecutor:
                         state.pc, state.depth, candidate.depth, merged.depth,
                     )
                     return merged
-        except Exception:
+        except _Z3_EVAL_ERRORS:
             pass  # any merge failure → continue with original state
         return state
 
@@ -1787,7 +1799,7 @@ class SymbolicExecutor:
                     method_name = "_exec_setcc"
             if method_name is not None:
                 getattr(self, method_name)(state, ops, insn, mnemonic)
-        except Exception as exc:
+        except _INSN_ERRORS as exc:
             # Non-fatal: log for debugging, but continue execution
             logger.debug("Could not model '%s %s': %s", mnemonic, insn.operands, exc)
 
@@ -1917,7 +1929,7 @@ class SymbolicExecutor:
                     state.write_memory(addr_val.as_long(), val, word_size)
                 else:
                     state.write_memory(0, val, word_size)
-            except Exception:
+            except _Z3_SOLVE_ERRORS:
                 state.write_memory(0, val, word_size)
 
     def _exec_pop(self, state: SymbolicState, ops: list[str],
@@ -2154,7 +2166,7 @@ class SymbolicExecutor:
                     val = _z3.simplify(eflags)
                     if val.as_long is not None:
                         eflags = val.as_long()
-                except Exception:
+                except _Z3_EVAL_ERRORS:
                     pass
             if Z3Solver.available() and hasattr(eflags, "sort"):
                 one = _z3.BitVecVal(1, 1)
@@ -2869,7 +2881,7 @@ class SymbolicExecutor:
                     s_expr, rule = _mba_simplify(val, self.bit_width)
                     if rule is not None:
                         simplified_regs[rname] = str(s_expr)
-                except Exception:
+                except (ImportError, ValueError, TypeError, AttributeError):
                     pass
 
         # Collect path constraints.
@@ -3091,6 +3103,6 @@ class SymbolicExecutor:
             val = state.get_register(operands)
             if val is not None:
                 return val
-        except Exception:
+        except (ValueError, KeyError, TypeError, AttributeError):
             pass
         return None

@@ -63,7 +63,7 @@ class Z3Solver:
         if memory_limit_mb > 0:
             try:
                 z3.set_param("memory_max_size", memory_limit_mb)
-            except Exception:
+            except z3.Z3Exception:
                 logger.debug("Failed to set z3 memory limit to %d MB", memory_limit_mb)
         self._constraint_stack: List[int] = []  # indices for push/pop sync
         self._solver = z3.Solver()
@@ -133,7 +133,7 @@ class Z3Solver:
         try:
             core = self._solver.unsat_core()
             return [str(c) for c in core]
-        except Exception:
+        except (z3.Z3Exception, AttributeError):
             return []
 
     # -- B59: Incremental feasibility check ---------------------------------
@@ -155,7 +155,7 @@ class Z3Solver:
                 self._solver.add(*extra_constraints)
             result = self._solver.check()
             return result == z3.sat
-        except Exception:
+        except (z3.Z3Exception, ValueError):
             return False
         finally:
             self._solver.pop()
@@ -205,7 +205,7 @@ class Z3Solver:
                 return SolverResult(satisfiable=False, error=f"solver returned unknown: {reason}")
         except (ResourceLimitError, AnalysisTimeoutError):
             raise  # re-raise our own exceptions
-        except Exception as exc:
+        except (z3.Z3Exception, ValueError, TypeError) as exc:
             return SolverResult(satisfiable=False, error=str(exc))
 
     # -- Analysis helpers ---------------------------------------------------
@@ -266,7 +266,7 @@ class Z3Solver:
             for c in path_constraints:
                 try:
                     s.add(c)
-                except Exception:
+                except (z3.Z3Exception, ValueError, TypeError):
                     continue
 
         # Check if ¬condition is UNSAT under path → always true in context.
@@ -351,7 +351,7 @@ class Z3Solver:
                     satisfiable=True,
                     model={str(target_var): val.as_long() if hasattr(val, "as_long") else str(val)},
                 )
-            except Exception as exc:
+            except (z3.Z3Exception, ValueError, TypeError, AttributeError) as exc:
                 return SolverResult(satisfiable=True, error=f"Eval failed: {exc}")
 
         return SolverResult(satisfiable=False)

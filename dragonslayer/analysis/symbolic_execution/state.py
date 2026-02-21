@@ -26,6 +26,14 @@ except ImportError:
     z3 = None  # type: ignore[assignment]
     _Z3_AVAILABLE = False
 
+# B87: Named exception tuples — narrows former blanket ``except Exception``.
+if _Z3_AVAILABLE:
+    _Z3_EVAL_ERRORS: tuple = (z3.Z3Exception, ValueError, TypeError, AttributeError)
+    _Z3_SOLVE_ERRORS: tuple = (z3.Z3Exception, ValueError, ArithmeticError)
+else:
+    _Z3_EVAL_ERRORS: tuple = (ValueError, TypeError, AttributeError)
+    _Z3_SOLVE_ERRORS: tuple = (ValueError, ArithmeticError)
+
 
 # ---------------------------------------------------------------------------
 # Sub-register aliasing for x86/x86-64
@@ -669,7 +677,7 @@ class SymbolicState:
             if s2.check() == z3.unsat:
                 return concrete
             return None  # multiple concrete values possible
-        except Exception:
+        except _Z3_SOLVE_ERRORS:
             return None
 
     def query_alias(self, addr1: Any, addr2: Any) -> str:
@@ -724,7 +732,7 @@ class SymbolicState:
 
             self._alias_cache[cache_key] = AliasResult.MAY
             return AliasResult.MAY
-        except Exception:
+        except _Z3_SOLVE_ERRORS:
             return AliasResult.MAY
 
     def alias_analysis_batch(
@@ -762,7 +770,7 @@ class SymbolicState:
                 if write.size > size and _Z3_AVAILABLE and hasattr(write.value, "sort"):
                     try:
                         return z3.Extract(size * 8 - 1, 0, write.value)
-                    except Exception:
+                    except _Z3_EVAL_ERRORS:
                         pass
         return None
 
@@ -941,7 +949,7 @@ class SymbolicState:
                 result = inc_solver.check() == z3.sat
                 inc_solver.pop()
                 return result
-            except Exception:
+            except _Z3_SOLVE_ERRORS:
                 pass
         solver = z3.Solver()
         solver.add(*self.constraints)
@@ -998,7 +1006,7 @@ class SymbolicState:
             try:
                 if z3.is_expr(a) and z3.is_expr(b):
                     return z3.eq(a, b)
-            except Exception:
+            except _Z3_EVAL_ERRORS:
                 pass
         return False
 
@@ -1068,7 +1076,7 @@ class SymbolicState:
                     a = v_self if z3.is_expr(v_self) else z3.BitVecVal(int(v_self), bw)
                     b = v_other if z3.is_expr(v_other) else z3.BitVecVal(int(v_other), bw)
                     merged.registers[reg] = z3.simplify(z3.If(phi_cond, a, b))
-                except Exception:
+                except _Z3_EVAL_ERRORS:
                     merged.registers[reg] = v_self  # fallback
 
         # -- Merge flags --
@@ -1087,7 +1095,7 @@ class SymbolicState:
                     a = f_self if z3.is_expr(f_self) else z3.BoolVal(bool(f_self))
                     b = f_other if z3.is_expr(f_other) else z3.BoolVal(bool(f_other))
                     merged.flags[flag] = z3.simplify(z3.If(phi_cond, a, b))
-                except Exception:
+                except _Z3_EVAL_ERRORS:
                     merged.flags[flag] = f_self
 
         # -- Merge memory --
@@ -1103,7 +1111,7 @@ class SymbolicState:
                     a = v_self if z3.is_expr(v_self) else z3.BitVecVal(int(v_self), 8)
                     b = v_other if z3.is_expr(v_other) else z3.BitVecVal(int(v_other), 8)
                     merged.memory[addr] = z3.simplify(z3.If(phi_cond, a, b))
-                except Exception:
+                except _Z3_EVAL_ERRORS:
                     pass
 
         # -- Merge constraints --
@@ -1116,7 +1124,7 @@ class SymbolicState:
                     prefix_len = i + 1
                 else:
                     break
-            except Exception:
+            except _Z3_EVAL_ERRORS:
                 break
 
         merged.constraints = list(self.constraints[:prefix_len])

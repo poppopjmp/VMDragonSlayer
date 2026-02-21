@@ -685,7 +685,7 @@ class TaintTracker:
                 continue
             try:
                 result = self._alias_oracle(addr, tainted_addr)
-            except Exception:
+            except (ValueError, TypeError, AttributeError, RuntimeError):
                 continue
             if result in ("must", "may"):
                 combined |= tag
@@ -696,7 +696,7 @@ class TaintTracker:
                 continue
             try:
                 result = self._alias_oracle(addr, tainted_addr)
-            except Exception:
+            except (ValueError, TypeError, AttributeError, RuntimeError):
                 continue
             if result in ("must", "may"):
                 combined |= tag
@@ -847,7 +847,7 @@ class TaintTracker:
                 instructions_analyzed=len(instructions),
             )
 
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, IndexError, RuntimeError, AttributeError) as exc:
             logger.exception("Taint analysis failed")
             return TaintResult(success=False, error=str(exc))
 

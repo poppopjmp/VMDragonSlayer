@@ -38,6 +38,12 @@ from ..utils.metrics import AnalysisMetrics
 
 logger = logging.getLogger(__name__)
 
+# B87: Named exception tuple for engine fault-tolerance handlers.
+_ENGINE_ERRORS = (
+    AnalysisError, AnalysisTimeoutError, ConfigurationError, InvalidDataError,
+    ValueError, TypeError, KeyError, IndexError, RuntimeError, OSError,
+)
+
 # ---------------------------------------------------------------------------
 # Public enums & data classes (imported by core/__init__.py and api/server.py)
 # ---------------------------------------------------------------------------
@@ -392,7 +398,7 @@ class Orchestrator:
                     engine_results.append(er)
                     if not er.success and er.error:
                         errors.append(f"[{engine_name}] {er.error}")
-                except Exception as exc:
+                except _ENGINE_ERRORS as exc:
                     logger.exception("Engine %s raised an exception", engine_name)
                     engine_results.append(EngineResult(
                         engine=engine_name,
@@ -506,7 +512,7 @@ class Orchestrator:
                     "analysis_type": request.analysis_type.value,
                 },
             )
-        except Exception as exc:
+        except _ENGINE_ERRORS as exc:
             elapsed = time.monotonic() - t0
             logger.exception("Pipeline failed")
             return AnalysisResult(
@@ -644,7 +650,7 @@ class Orchestrator:
                 duration=elapsed,
                 confidence=avg_confidence,
             )
-        except Exception as exc:
+        except _ENGINE_ERRORS as exc:
             logger.exception("Pattern analysis failed")
             return EngineResult(
                 engine="pattern_analysis",
@@ -676,7 +682,7 @@ class Orchestrator:
                 duration=elapsed,
                 confidence=result.get("confidence", 0.0),
             )
-        except Exception as exc:
+        except _ENGINE_ERRORS as exc:
             logger.exception("VM discovery failed")
             return EngineResult(
                 engine="vm_discovery",
@@ -763,7 +769,7 @@ class Orchestrator:
             finally:
                 import shutil
                 shutil.rmtree(work_dir, ignore_errors=True)
-        except Exception as exc:
+        except _ENGINE_ERRORS as exc:
             logger.exception("Local plugin stage %s failed", label)
             return EngineResult(
                 engine=label,
@@ -842,7 +848,7 @@ class Orchestrator:
                 duration=elapsed,
                 confidence=round(confidence, 4),
             )
-        except Exception as exc:
+        except _ENGINE_ERRORS as exc:
             logger.warning("Gateway call (%s) failed: %s", label, exc)
             return EngineResult(
                 engine=label,

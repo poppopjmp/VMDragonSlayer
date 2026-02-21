@@ -25,8 +25,10 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from dragonslayer.ml.model import BaseModel, PredictionResult, VMHandlerModel
@@ -93,6 +95,22 @@ _HEURISTIC_RULES: List[Tuple[str, float, Any]] = [
     # (category, confidence, predicate(features_dict) -> bool)
 ]
 
+# B87: Default heuristic thresholds — can be overridden via JSON config.
+_DEFAULT_HEURISTIC_CONFIG: Dict[str, Any] = {
+    "rules": [
+        {"label": "nop",          "confidence": 0.70, "max_insn": 3},
+        {"label": "control_flow", "confidence": 0.50, "abs_delta_eq": 0},
+        {"label": "arithmetic",   "confidence": 0.60, "max_abs_delta": 2, "max_insn": 8},
+        {"label": "comparison",   "confidence": 0.50, "max_abs_delta": 2, "min_insn": 9},
+        {"label": "memory",       "confidence": 0.55, "min_abs_delta": 3, "max_abs_delta": 5, "max_insn": 12},
+        {"label": "control_flow", "confidence": 0.50, "min_abs_delta": 6, "min_insn": 16},
+        {"label": "bitwise",      "confidence": 0.45, "min_density": 0.8},
+        {"label": "system",       "confidence": 0.40, "min_insn": 21},
+    ],
+    "default_label": "unknown",
+    "default_confidence": 0.30,
+}
+
 
 class TrainedHandlerModel(VMHandlerModel):
     """VM handler model with scikit-learn backend and heuristic fallback.
@@ -108,6 +126,32 @@ class TrainedHandlerModel(VMHandlerModel):
         super().__init__()
         self._sklearn_model: Optional[Any] = None
         self._label_names: List[str] = HANDLER_CATEGORIES
+        self._heuristic_config: Dict[str, Any] = dict(_DEFAULT_HEURISTIC_CONFIG)
+
+    # ---- heuristic config -----------------------------------------------
+
+    def configure_heuristics(self, config: Dict[str, Any]) -> None:
+        """Override heuristic thresholds with a custom config dict.
+
+        The *config* dictionary should match the structure of
+        ``_DEFAULT_HEURISTIC_CONFIG`` (see module-level definition).
+        """
+        if "rules" in config:
+            self._heuristic_config["rules"] = config["rules"]
+        if "default_label" in config:
+            self._heuristic_config["default_label"] = config["default_label"]
+        if "default_confidence" in config:
+            self._heuristic_config["default_confidence"] = config["default_confidence"]
+
+    @classmethod
+    def load_heuristic_config(cls, path: str) -> Dict[str, Any]:
+        """Load heuristic config from a JSON file.
+
+        Returns the parsed dict (also usable with :meth:`configure_heuristics`).
+        Raises ``FileNotFoundError`` or ``json.JSONDecodeError`` on failure.
+        """
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
 
     # ---- load -----------------------------------------------------------
 
@@ -134,7 +178,7 @@ class TrainedHandlerModel(VMHandlerModel):
                 logger.info("Loaded sklearn model from %s", path)
             else:
                 logger.warning("Loaded object has no predict_proba; heuristic mode")
-        except Exception as exc:
+        except (OSError, IOError, ValueError, TypeError, pickle.UnpicklingError, EOFError) as exc:
             logger.warning("Failed to load model from %s: %s", path, exc)
 
     # ---- predict --------------------------------------------------------
@@ -171,7 +215,12 @@ class TrainedHandlerModel(VMHandlerModel):
     def _predict_heuristic(
         self, values: List[float], names: List[str],
     ) -> PredictionResult:
-        """Rule-based classification when no trained model is available."""
+        """Rule-based classification when no trained model is available.
+
+        B87: Thresholds are now driven by ``self._heuristic_config`` which
+        can be overridden via :meth:`configure_heuristics` or loaded from
+        a JSON file.
+        """
         feat = dict(zip(names, values))
 
         insn_count = feat.get("instruction_count", 0)
@@ -179,25 +228,30 @@ class TrainedHandlerModel(VMHandlerModel):
         abs_delta = feat.get("abs_vip_delta", abs(vip_delta))
         density = feat.get("insn_density", 0)
 
-        # Simple heuristic decision tree (canonical labels).
-        if insn_count <= 3:
-            label, conf = "nop", 0.7
-        elif abs_delta == 0:
-            label, conf = "control_flow", 0.5
-        elif abs_delta <= 2 and insn_count <= 8:
-            label, conf = "arithmetic", 0.6
-        elif abs_delta <= 2 and insn_count > 8:
-            label, conf = "comparison", 0.5
-        elif 3 <= abs_delta <= 5 and insn_count <= 12:
-            label, conf = "memory", 0.55
-        elif abs_delta > 5 and insn_count > 15:
-            label, conf = "control_flow", 0.5
-        elif density > 0.8:
-            label, conf = "bitwise", 0.45
-        elif insn_count > 20:
-            label, conf = "system", 0.4
-        else:
-            label, conf = "unknown", 0.3
+        cfg = self._heuristic_config
+        label = cfg.get("default_label", "unknown")
+        conf = cfg.get("default_confidence", 0.30)
+
+        for rule in cfg.get("rules", []):
+            # Each rule is a dict with threshold keys.  A rule matches if
+            # ALL specified thresholds are satisfied.
+            matched = True
+            if "max_insn" in rule and insn_count > rule["max_insn"]:
+                matched = False
+            if "min_insn" in rule and insn_count < rule["min_insn"]:
+                matched = False
+            if "abs_delta_eq" in rule and abs_delta != rule["abs_delta_eq"]:
+                matched = False
+            if "max_abs_delta" in rule and abs_delta > rule["max_abs_delta"]:
+                matched = False
+            if "min_abs_delta" in rule and abs_delta < rule["min_abs_delta"]:
+                matched = False
+            if "min_density" in rule and density < rule["min_density"]:
+                matched = False
+            if matched:
+                label = rule["label"]
+                conf = rule["confidence"]
+                break
 
         # Build probability distribution centred on the chosen label.
         probs = {c: 0.0 for c in HANDLER_CATEGORIES}
@@ -223,18 +277,27 @@ class TrainedHandlerModel(VMHandlerModel):
 
 def build_handler_classifier(
     model_path: Optional[str] = None,
+    heuristic_config_path: Optional[str] = None,
 ) -> VMClassifier:
     """Create a ready-to-use classifier for handler boundaries.
 
     Args:
         model_path: Optional path to a trained sklearn model pickle.
             If ``None`` or not found, falls back to heuristic mode.
+        heuristic_config_path: Optional path to a JSON file with
+            heuristic threshold overrides (B87).
 
     Returns:
         A :class:`VMClassifier` configured for handler classification.
     """
     extractor = FeatureExtractor(feature_spec=_handler_feature_spec())
     model = TrainedHandlerModel()
+    if heuristic_config_path:
+        try:
+            cfg = TrainedHandlerModel.load_heuristic_config(heuristic_config_path)
+            model.configure_heuristics(cfg)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load heuristic config from %s: %s", heuristic_config_path, exc)
     if model_path:
         model.load(model_path)
     return VMClassifier(model=model, extractor=extractor)
