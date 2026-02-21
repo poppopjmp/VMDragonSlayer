@@ -505,6 +505,62 @@ class PatternRecognizer:
 
         return normalised
 
+    # ── B81: version fingerprinting ──────────────────────────────────
+
+    # Protector prologue signatures — byte patterns that distinguish
+    # VMProtect and Themida/Code Virtualizer at version granularity.
+    _VERSION_SIGS: List[Dict[str, Any]] = [
+        # VMProtect 3.0.x: pushad + large immediate load
+        {"protector": "VMProtect", "version": "3.0.x", "confidence": 0.85,
+         "pattern": r"60.{0,8}B8[0-9A-Fa-f]{8}"},
+        # VMProtect 3.1.x: push reg + xor key + jmp dispatcher
+        {"protector": "VMProtect", "version": "3.1.x", "confidence": 0.85,
+         "pattern": r"5[0-7]81[F0-F7][0-9A-Fa-f]{8}(?:E9|EB)"},
+        # VMProtect 3.5.x+: push reg + lea-based context switch
+        {"protector": "VMProtect", "version": "3.5.x", "confidence": 0.80,
+         "pattern": r"5[0-7]48(?:8D|89)[0-9A-Fa-f]{2,8}"},
+        # VMProtect 3.8.x: extended handler table (64-bit specific)
+        {"protector": "VMProtect", "version": "3.8.x", "confidence": 0.75,
+         "pattern": r"4[89]8B[0-9A-Fa-f]{2}48[0-9A-Fa-f]{2,8}FF"},
+        # Themida / Code Virtualizer 2.x
+        {"protector": "Themida", "version": "2.x", "confidence": 0.80,
+         "pattern": r"9C60E8000000005[DE]"},
+        # Themida / Code Virtualizer 3.x
+        {"protector": "Themida", "version": "3.x", "confidence": 0.80,
+         "pattern": r"E8[0-9A-Fa-f]{8}(?:83|81)C4"},
+    ]
+
+    def version_fingerprint(
+        self,
+        instruction_bytes: str,
+    ) -> Dict[str, Any]:
+        """Identify the protector and version from prologue bytes.
+
+        Returns
+        -------
+        dict
+            ``{"protector": str, "version": str, "confidence": float}``
+            or ``{"protector": "unknown", "version": "unknown", "confidence": 0.0}``
+        """
+        best: Dict[str, Any] = {
+            "protector": "unknown",
+            "version": "unknown",
+            "confidence": 0.0,
+        }
+        normalised = instruction_bytes.replace(" ", "")
+        for sig in self._VERSION_SIGS:
+            try:
+                if re.search(sig["pattern"], normalised, re.IGNORECASE):
+                    if sig["confidence"] > best["confidence"]:
+                        best = {
+                            "protector": sig["protector"],
+                            "version": sig["version"],
+                            "confidence": sig["confidence"],
+                        }
+            except re.error:
+                continue
+        return best
+
 
 class SequenceRecognizer:
     """

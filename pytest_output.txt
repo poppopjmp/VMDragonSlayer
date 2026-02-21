@@ -1,0 +1,1139 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\github\VMDragonSlayer
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.12.0
+collected 2895 items
+
+tests\test_b63_hardening.py .......                                      [  0%]
+tests\test_b64_orchestrator_config.py ...........                        [  0%]
+tests\test_b66_polish.py .....................................           [  1%]
+tests\test_b67_ml_hardening.py ..................                        [  2%]
+tests\test_b68_dispatcher_logging.py ......................              [  3%]
+tests\test_b69_cfg_simd_decrypt.py ............................          [  4%]
+tests\test_b70_caching_taint_timeout.py ..............                   [  4%]
+tests\test_b71_decrypt_cfg_ml.py .........................               [  5%]
+tests\test_b72_explainer_taint_cipher.py ..........................      [  6%]
+tests\test_b73_byte_taint_cfg_ml.py ........................             [  7%]
+tests\test_b74_simd_ml_train_nop.py .......................              [  8%]
+tests\test_b75_simd_merge_hyperparam.py ...............                  [  8%]
+tests\test_b76_alias_tracker.py .................                        [  9%]
+tests\test_b77_auto_bind_integration.py ..........................       [ 10%]
+tests\test_b78_pointer_restore_ci.py ........................            [ 10%]
+tests\test_b79_executor_ml_ci.py ..........................              [ 11%]
+tests\test_b80_dispatch_ml_ci.py ...........................             [ 12%]
+tests\test_backward_slice.py ...............................             [ 13%]
+tests\test_binary_format.py .........................                    [ 14%]
+tests\test_byte_taint_implicit.py ..........................             [ 15%]
+tests\test_bytecode_cfg.py ............................................. [ 17%]
+....                                                                     [ 17%]
+tests\test_bytecode_decrypt.py ......................................... [ 18%]
+........                                                                 [ 18%]
+tests\test_bytecode_extract.py .............                             [ 19%]
+tests\test_cfg.py ...................                                    [ 20%]
+tests\test_cfg_graph.py ..............                                   [ 20%]
+tests\test_cifuentes_structuring.py .................................... [ 21%]
+.                                                                        [ 21%]
+tests\test_cli.py .......                                                [ 22%]
+tests\test_client.py ......                                              [ 22%]
+tests\test_config.py ..........                                          [ 22%]
+tests\test_context_registers.py .........................                [ 23%]
+tests\test_devirt_e2e_chain.py ....................                      [ 24%]
+tests\test_disasm_integration.py sss.........ssss...sss..s               [ 25%]
+tests\test_disassembler.py ....sssssssssssssssssssss...........ssss...s. [ 26%]
+..                                                                       [ 26%]
+tests\test_dispatcher.py ........                                        [ 26%]
+tests\test_eflags_taint.py ............................................. [ 28%]
+....................                                                     [ 29%]
+tests\test_ensemble_incremental.py .......................               [ 30%]
+tests\test_exceptions.py ...........                                     [ 30%]
+tests\test_expr_simplify.py ...........................................  [ 31%]
+tests\test_handler_boundaries.py ..................                      [ 32%]
+tests\test_handler_classifier.py ..........                              [ 32%]
+tests\test_handler_clustering.py ....................................... [ 34%]
+....................                                                     [ 34%]
+tests\test_handler_extraction.py ....................................... [ 36%]
+.....                                                                    [ 36%]
+tests\test_handler_semantics.py ........................                 [ 37%]
+tests\test_integration.py ....................                           [ 37%]
+tests\test_integration_e2e.py .............                              [ 38%]
+tests\test_inter_handler_flow.py ............................            [ 39%]
+tests\test_interprocedural_taint.py ......................               [ 40%]
+tests\test_key_recovery.py ................................              [ 41%]
+tests\test_loop_symexec.py ............................................. [ 42%]
+...                                                                      [ 42%]
+tests\test_mba_simplifier.py .................................           [ 44%]
+tests\test_ml_categories.py ....................................         [ 45%]
+tests\test_ml_deep_features.py ...............................           [ 46%]
+tests\test_ml_pipeline.py ..........................................     [ 47%]
+tests\test_mutation_resilient.py ....................................... [ 49%]
+                                                                         [ 49%]
+tests\test_new_modules.py .............................................. [ 50%]
+..........................................                               [ 52%]
+tests\test_obfuscated_dispatch.py ...................                    [ 52%]
+tests\test_orchestrator.py ................                              [ 53%]
+tests\test_path_merging.py ..............................                [ 54%]
+tests\test_pattern_database.py ................                          [ 54%]
+tests\test_pattern_database_v2.py ...................................... [ 56%]
+........................                                                 [ 57%]
+tests\test_pattern_matcher.py .......................................... [ 58%]
+..............                                                           [ 59%]
+tests\test_pattern_recognizer.py .....                                   [ 59%]
+tests\test_pe_integration.py ..............................              [ 60%]
+tests\test_phase10_subreg_sib.py ....................................... [ 61%]
+................                                                         [ 62%]
+tests\test_phase11_bytecode_fix.py .............                         [ 62%]
+tests\test_phase11_dataflow.py ...........................               [ 63%]
+tests\test_phase11_instructions.py ..................................... [ 64%]
+.................................                                        [ 65%]
+tests\test_phase11_integration.py .................                      [ 66%]
+tests\test_phase11_mba_deep.py .......................x................. [ 67%]
+...........                                                              [ 68%]
+tests\test_phase11_memory_aliasing.py ...............................    [ 69%]
+tests\test_phase11_opaque_path.py ....................                   [ 70%]
+tests\test_phase11_pipeline_wiring.py ..........                         [ 70%]
+tests\test_phase11_pseudocode_widths.py ............................     [ 71%]
+tests\test_phase11_symbolic_classify.py ......................           [ 72%]
+tests\test_phase12_plugin_integration.py ............................... [ 73%]
+..                                                                       [ 73%]
+tests\test_phase9_integration.py .....................                   [ 74%]
+tests\test_pipeline_devirt.py ..........                                 [ 74%]
+tests\test_pipeline_wiring_batch18.py ..............                     [ 74%]
+tests\test_plugins.py .................................                  [ 75%]
+tests\test_production_hardening.py ..................................... [ 77%]
+.                                                                        [ 77%]
+tests\test_production_hardening_b57.py ................................  [ 78%]
+tests\test_production_middleware.py .................                    [ 78%]
+tests\test_pseudocode.py .................                               [ 79%]
+tests\test_pseudocode_structuring.py .................................   [ 80%]
+tests\test_pseudocode_upgrade.py ..................                      [ 81%]
+tests\test_runtime_hooks.py ............................................ [ 82%]
+...                                                                      [ 82%]
+tests\test_subreg_taint.py ............................................. [ 84%]
+............                                                             [ 84%]
+tests\test_symbolic_classifier.py ..............................         [ 85%]
+tests\test_symbolic_depth.py ........................                    [ 86%]
+tests\test_symbolic_execution_b45.py ..............................      [ 87%]
+tests\test_symbolic_memory.py .......................................... [ 89%]
+.                                                                        [ 89%]
+tests\test_symbolic_vip.py .............                                 [ 89%]
+tests\test_symexec_depth.py .............................                [ 90%]
+tests\test_synthetic_vm_integration.py ...............................   [ 91%]
+tests\test_taxonomy_evaluation.py ...................................... [ 93%]
+..                                                                       [ 93%]
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 92 in test_nop_trace
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 100 in test_nop_trace_addresses
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 110 in test_register_capture
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 119 in test_mov_rax
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 132 in test_add_result
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 142 in test_max_insns_limit
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 148 in test_memory_access_capture
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 156 in test_metadata
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 164 in test_initial_regs
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a874c (most recent call first):
+  File "D:\github\VMDragonSlayer\tests\test_phase9_integration.py", line 234 in _sleepy
+  File "D:\github\VMDragonSlayer\dragonslayer\core\pipeline.py", line 213 in <lambda>
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 73 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 86 in run
+  File "C:\Python314\Lib\concurrent\futures\thread.py", line 119 in _worker
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 178 in test_nop_trace_32
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 185 in test_registers_32
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 198 in test_no_register_capture
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 206 in test_no_memory_capture
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 216 in test_stop_address
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 309 in trace_parsed
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 243 in test_trace_parsed
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+Windows fatal exception: access violation
+
+Thread 0x004a8c30 (most recent call first):
+  File "C:\Python314\Lib\threading.py", line 369 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\backend\queues.py", line 147 in _feed
+  File "C:\Python314\Lib\threading.py", line 1023 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x004a99ec (most recent call first):
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1045 in _exhaustive_wait
+  File "C:\Python314\Lib\multiprocessing\connection.py", line 1113 in wait
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 681 in wait_result_broken_or_wakeup
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\joblib\externals\loky\process_executor.py", line 623 in run
+  File "C:\Python314\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "C:\Python314\Lib\threading.py", line 1043 in _bootstrap
+
+Current thread 0x004a9524 (most recent call first):
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\unicorn\unicorn_py3\unicorn.py", line 831 in mem_map
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 328 in _map_region
+  File "D:\github\VMDragonSlayer\dragonslayer\analysis\trace_engine.py", line 228 in trace
+  File "D:\github\VMDragonSlayer\tests\test_trace_engine.py", line 254 in test_to_lifted
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 166 in pytest_pyfunc_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py", line 1720 in runtest
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 179 in pytest_runtest_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 245 in <lambda>
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 353 in from_call
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 244 in call_and_report
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 137 in runtestprotocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 396 in pytest_runtestloop
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 372 in _main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "C:\Users\agost\AppData\Roaming\Python\Python314\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>
+tests\test_trace_engine.py ..................                            [ 93%]
+tests\test_trace_ingestion.py .........................                  [ 94%]

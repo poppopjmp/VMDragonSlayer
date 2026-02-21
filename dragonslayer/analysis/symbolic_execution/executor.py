@@ -1704,6 +1704,23 @@ class SymbolicExecutor:
         # control flow
         "call": "_exec_call",
         "ret": "_exec_ret", "retn": "_exec_ret",
+        # B81: SIMD / SSE stubs (VMP 3.5+ obfuscation junk & crypto)
+        "movdqa": "_exec_simd_mov", "movdqu": "_exec_simd_mov",
+        "movaps": "_exec_simd_mov", "movups": "_exec_simd_mov",
+        "movd": "_exec_simd_mov", "movq": "_exec_simd_mov",
+        "pxor": "_exec_simd_logic", "por": "_exec_simd_logic",
+        "pand": "_exec_simd_logic", "pandn": "_exec_simd_logic",
+        "xorps": "_exec_simd_logic", "xorpd": "_exec_simd_logic",
+        "andps": "_exec_simd_logic", "andpd": "_exec_simd_logic",
+        "orps": "_exec_simd_logic", "orpd": "_exec_simd_logic",
+        "pshufd": "_exec_simd_shuffle", "shufps": "_exec_simd_shuffle",
+        "shufpd": "_exec_simd_shuffle",
+        "punpcklbw": "_exec_simd_shuffle", "punpckhbw": "_exec_simd_shuffle",
+        "punpckldq": "_exec_simd_shuffle", "punpckhdq": "_exec_simd_shuffle",
+        "paddb": "_exec_simd_arith", "paddw": "_exec_simd_arith",
+        "paddd": "_exec_simd_arith", "paddq": "_exec_simd_arith",
+        "psubb": "_exec_simd_arith", "psubw": "_exec_simd_arith",
+        "psubd": "_exec_simd_arith", "psubq": "_exec_simd_arith",
     }
 
     def _apply_instruction(self, state: SymbolicState, insn: LiftedInstruction) -> None:
@@ -1748,9 +1765,7 @@ class SymbolicExecutor:
         if Z3Solver.available() and (hasattr(left, "sort") or hasattr(right, "sort")):
             left = self._ensure_bv(left, state.bit_width)
             right = self._ensure_bv(right, state.bit_width)
-            result = (left + right) if mnemonic in ("add", "adc") else (left - right)
-        else:
-            result = (left + right) if mnemonic in ("add", "adc") else (left - right)
+        result = (left + right) if mnemonic in ("add", "adc") else (left - right)
         self._write_operand(state, ops[0], result)
         _opsz = self._infer_operand_bits(ops[0], state.bit_width)
         state.update_flags_arith(result, left, right, is_sub=mnemonic in ("sub", "sbb"), operand_size=_opsz)
@@ -2225,6 +2240,62 @@ class SymbolicExecutor:
             if isinstance(ret_addr, int):
                 state.pc = ret_addr
 
+    # ── B81: SIMD / SSE handler stubs ─────────────────────────────
+
+    # XMM register tracking: stored in state.registers["xmm0"] etc.
+    # as 128-bit integers (or z3 BitVec(128)) for simple data-flow.
+
+    def _exec_simd_mov(self, state: SymbolicState, ops: list[str],
+                       insn: LiftedInstruction, mnemonic: str) -> None:
+        """MOVDQA/MOVDQU/MOVAPS/MOVUPS/MOVD/MOVQ: XMM data movement."""
+        if len(ops) != 2:
+            return
+        val = self._resolve_operand(state, ops[1])
+        self._write_operand(state, ops[0], val)
+
+    def _exec_simd_logic(self, state: SymbolicState, ops: list[str],
+                         insn: LiftedInstruction, mnemonic: str) -> None:
+        """PXOR/POR/PAND/PANDN/XORPS/ANDPS/ORPS etc.: XMM bitwise logic."""
+        if len(ops) != 2:
+            return
+        left = self._resolve_operand(state, ops[0])
+        right = self._resolve_operand(state, ops[1])
+        base = mnemonic.rstrip("ps").rstrip("pd")  # xorps→xor, andpd→and
+        if base.startswith("p"):
+            base = base[1:]  # pxor→xor, pand→and, por→or, pandn→andn
+        if base in ("xor", "xorps", "xorpd"):
+            result = left ^ right if hasattr(left, "__xor__") else 0
+        elif base in ("and", "andps", "andpd"):
+            result = left & right if hasattr(left, "__and__") else 0
+        elif base in ("or", "orps", "orpd"):
+            result = left | right if hasattr(left, "__or__") else 0
+        elif base == "andn":
+            result = (~left) & right if hasattr(left, "__invert__") else 0
+        else:
+            result = left ^ right if hasattr(left, "__xor__") else 0
+        self._write_operand(state, ops[0], result)
+
+    def _exec_simd_shuffle(self, state: SymbolicState, ops: list[str],
+                           insn: LiftedInstruction, mnemonic: str) -> None:
+        """PSHUFD/SHUFPS/PUNPCK*: shuffle stubs — track data flow only."""
+        if len(ops) < 2:
+            return
+        # Approximate: destination gets value derived from source
+        val = self._resolve_operand(state, ops[1])
+        self._write_operand(state, ops[0], val)
+
+    def _exec_simd_arith(self, state: SymbolicState, ops: list[str],
+                         insn: LiftedInstruction, mnemonic: str) -> None:
+        """PADDB/PADDW/PADDD/PADDQ/PSUBB/PSUBW/PSUBD/PSUBQ."""
+        if len(ops) != 2:
+            return
+        left = self._resolve_operand(state, ops[0])
+        right = self._resolve_operand(state, ops[1])
+        if mnemonic.startswith("padd"):
+            result = left + right if hasattr(left, "__add__") else 0
+        else:
+            result = left - right if hasattr(left, "__sub__") else 0
+        self._write_operand(state, ops[0], result)
 
     # ---- SIB address resolver ----
     _SIB_RE = None  # lazily compiled

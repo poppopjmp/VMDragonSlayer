@@ -99,6 +99,97 @@ class KeyTransform:
 
 
 # ---------------------------------------------------------------------------
+# B81: Cipher-chain operations — multi-round decryption
+# ---------------------------------------------------------------------------
+
+
+class CipherOp(str, Enum):
+    """Operations used in the decryption cipher chain.
+
+    VMProtect 3.5+ may use 2-4 chained cipher operations per opcode
+    (e.g., XOR → ROL → SUB → XOR with a per-round key update).
+    """
+
+    XOR = "xor"
+    ADD = "add"
+    SUB = "sub"
+    ROL = "rol"
+    ROR = "ror"
+    NOT = "not"
+    BSWAP = "bswap"
+
+
+@dataclass
+class CipherStep:
+    """One step in a multi-round cipher chain.
+
+    Attributes
+    ----------
+    op : CipherOp
+        The cipher operation for this round.
+    operand_source : str
+        ``"key"`` — use current rolling key, ``"imm:N"`` — immediate,
+        ``""`` — unary (NOT, BSWAP).
+    """
+
+    op: CipherOp
+    operand_source: str = "key"
+
+
+def _apply_cipher_step(value: int, step: CipherStep, key: int, width: int) -> int:
+    """Apply a single cipher step to *value*."""
+    mask = (1 << width) - 1
+    operand = key
+    if step.operand_source.startswith("imm:"):
+        try:
+            operand = int(step.operand_source[4:])
+        except ValueError:
+            operand = 0
+    elif step.operand_source == "":
+        operand = 0
+
+    if step.op == CipherOp.XOR:
+        return (value ^ operand) & mask
+    if step.op == CipherOp.ADD:
+        return (value + operand) & mask
+    if step.op == CipherOp.SUB:
+        return (value - operand) & mask
+    if step.op == CipherOp.ROL:
+        shift = operand % width
+        return ((value << shift) | (value >> (width - shift))) & mask
+    if step.op == CipherOp.ROR:
+        shift = operand % width
+        return ((value >> shift) | (value << (width - shift))) & mask
+    if step.op == CipherOp.NOT:
+        return (~value) & mask
+    if step.op == CipherOp.BSWAP:
+        byte_count = width // 8
+        return int.from_bytes(value.to_bytes(byte_count, "little"), "big")
+    return value
+
+
+def auto_detect_cipher_chain(
+    decode_transforms: List[KeyTransform],
+) -> List[CipherStep]:
+    """Infer a cipher chain from existing decode transforms.
+
+    Simple heuristic: the first transform that operates on the opcode
+    is the primary cipher step.  Any additional opcode-sourced transforms
+    form extra rounds.  Falls back to a single XOR step (standard VMP).
+    """
+    chain: List[CipherStep] = []
+    for t in decode_transforms:
+        if t.operand_source == "opcode":
+            try:
+                chain.append(CipherStep(op=CipherOp(t.op.value), operand_source="key"))
+            except ValueError:
+                pass
+    if not chain:
+        chain.append(CipherStep(op=CipherOp.XOR, operand_source="key"))
+    return chain
+
+
+# ---------------------------------------------------------------------------
 # Parse dispatcher decode_transforms strings
 # ---------------------------------------------------------------------------
 
@@ -213,6 +304,7 @@ class BytecodeDecryptor:
     initial_key: int = 0
     key_width: int = 32
     opcode_width: int = 1
+    cipher_chain: List[CipherStep] = field(default_factory=list)  # B81: multi-round
 
     def __post_init__(self) -> None:
         self._mask = _WIDTH_MASK.get(self.key_width, 0xFFFFFFFF)
@@ -297,6 +389,63 @@ class BytecodeDecryptor:
         plain = (encrypted_opcode ^ current_key) & opcode_mask
         next_key = self._apply_transforms(current_key, plain)
         return plain, next_key
+
+    def decrypt_chained(
+        self,
+        encrypted: bytes,
+        *,
+        start_offset: int = 0,
+        max_opcodes: int = 50000,
+    ) -> Tuple[bytes, List[int]]:
+        """Decrypt using a multi-round cipher chain.
+
+        Like :meth:`decrypt`, but applies each :class:`CipherStep` in
+        ``self.cipher_chain`` sequentially instead of a single XOR.
+        Falls back to standard single-XOR if no cipher chain is set.
+
+        Returns
+        -------
+        (plaintext, keys)
+        """
+        chain = self.cipher_chain
+        if not chain:
+            return self.decrypt(encrypted, start_offset=start_offset, max_opcodes=max_opcodes)
+
+        key = self.initial_key & self._mask
+        ow = self.opcode_width
+        opcode_mask = (1 << (ow * 8)) - 1
+        out = bytearray(len(encrypted))
+        keys: List[int] = []
+        offset = start_offset
+        opcode_count = 0
+
+        while offset + ow <= len(encrypted) and opcode_count < max_opcodes:
+            keys.append(key)
+
+            if ow == 1:
+                enc_val = encrypted[offset]
+            else:
+                enc_val = int.from_bytes(encrypted[offset:offset + ow], "little")
+
+            # Multi-round decrypt: apply cipher chain sequentially
+            value = enc_val
+            for step in chain:
+                value = _apply_cipher_step(value, step, key, ow * 8)
+            plain_opcode = value & opcode_mask
+
+            if ow == 1:
+                out[offset] = plain_opcode & 0xFF
+            else:
+                out[offset:offset + ow] = plain_opcode.to_bytes(ow, "little")
+
+            key = self._apply_transforms(key, plain_opcode)
+            offset += ow
+            opcode_count += 1
+
+        for i in range(start_offset):
+            out[i] = encrypted[i]
+
+        return bytes(out), keys
 
     def _apply_transforms(self, key: int, opcode: int) -> int:
         """Apply the transform sequence to the key register."""
