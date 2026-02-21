@@ -458,7 +458,7 @@ def recover_key_from_bytes(
             binary_base=binary_base,
             bit_width=bit_width,
         )
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, RuntimeError, AttributeError) as exc:
         logger.debug("Lifter-based key recovery failed: %s", exc)
         return None
 

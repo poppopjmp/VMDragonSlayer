@@ -238,7 +238,7 @@ def extract_bytecode(
                         chunk = parsed_binary.read_va(binary_data, addr, 1)
                         if chunk is not None and len(chunk) == 1:
                             collected[addr] = chunk[0]
-                    except Exception:
+                    except (ValueError, TypeError, IndexError, OSError, RuntimeError):
                         pass
 
     # ---- 4. Build contiguous stream ------------------------------------
@@ -354,7 +354,7 @@ def _build_from_boundaries_only(
         if can_read_binary:
             try:
                 real_bytes = parsed_binary.read_va(binary_data, vip, width)
-            except Exception:
+            except (ValueError, TypeError, IndexError, OSError, RuntimeError):
                 real_bytes = None
 
         if real_bytes is not None and len(real_bytes) == width:

@@ -51,6 +51,13 @@ except ImportError:
     nx = None  # type: ignore[assignment]
     NX_AVAILABLE = False
 
+_GRAPH_ERRORS: tuple[type[Exception], ...] = (
+    ValueError, TypeError, KeyError, AttributeError, IndexError, RuntimeError,
+    ImportError,
+)
+if NX_AVAILABLE:
+    _GRAPH_ERRORS = (*_GRAPH_ERRORS, nx.NetworkXError)
+
 # ---------------------------------------------------------------------------
 # Data-classes
 # ---------------------------------------------------------------------------
@@ -434,7 +441,7 @@ def emit_structured(
                 if data.get("type") == "back_edge":
                     back_edge_target_indices.add(v)
                     back_edge_target_addrs.add(v)
-        except Exception:
+        except _GRAPH_ERRORS:
             pass
 
     # Map boundary index to handler address for back-edge matching
@@ -629,7 +636,7 @@ def _compute_immediate_postdominator(
     # Build the reverse graph
     try:
         rgraph = cfg_graph.reverse()
-    except Exception:
+    except _GRAPH_ERRORS:
         return None
 
     # Find all exits (sinks in the forward graph)
@@ -674,7 +681,7 @@ def _compute_immediate_postdominator(
         lengths = nx.single_source_shortest_path_length(cfg_graph, block_id)
         best = min(common, key=lambda n: lengths.get(n, 10**9))
         return best
-    except Exception:
+    except _GRAPH_ERRORS:
         return min(common) if common else None
 
 
@@ -854,14 +861,14 @@ def structure_cfg(
     topo: List[int] = []
     try:
         topo = cfg.topological_order()
-    except Exception:
+    except _GRAPH_ERRORS:
         topo = sorted(blocks_by_id.keys())
 
     # Loop headers
     loop_headers: set[int] = set()
     try:
         loop_headers = set(cfg.loop_headers())
-    except Exception:
+    except _GRAPH_ERRORS:
         pass
 
     # Natural loops: header → body set
@@ -874,14 +881,14 @@ def structure_cfg(
             body = lp.get("body") if isinstance(lp, dict) else getattr(lp, "body", set())
             if hdr is not None:
                 loop_bodies[hdr] = set(body)
-    except Exception:
+    except _GRAPH_ERRORS:
         pass
 
     # Exit blocks
     exit_ids: set[int] = set()
     try:
         exit_ids = {b for b in cfg.exit_blocks()}
-    except Exception:
+    except _GRAPH_ERRORS:
         for bid, blk in blocks_by_id.items():
             if getattr(blk, "is_exit", False):
                 exit_ids.add(bid)
@@ -1149,7 +1156,7 @@ def emit_cifuentes(
     try:
         region = structure_cfg(handler_cfg, opcode_table, boundaries)
         lines = emit_region(region)
-    except Exception as exc:
+    except _GRAPH_ERRORS as exc:
         logger.warning("Cifuentes structuring failed (%s), falling back", exc)
         return emit_structured(opcode_table, boundaries, handler_cfg)
 

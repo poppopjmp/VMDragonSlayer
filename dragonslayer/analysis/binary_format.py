@@ -37,6 +37,10 @@ except ImportError:
     lief = None  # type: ignore[assignment]
     LIEF_AVAILABLE = False
 
+_LIEF_ERRORS: tuple[type[Exception], ...] = (
+    ValueError, TypeError, AttributeError, RuntimeError, OSError, IndexError,
+)
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -263,7 +267,7 @@ def _parse_with_lief(data: bytes) -> ParsedBinary:
     """Parse using LIEF (preferred – supports PE, ELF, Mach-O)."""
     try:
         binary = lief.parse(data)
-    except Exception:
+    except _LIEF_ERRORS:
         logger.warning("LIEF parse failed – falling back to struct parser", exc_info=True)
         return _parse_with_struct(data)
 
@@ -305,7 +309,7 @@ def _lief_arch(binary: Any) -> Architecture:
             return Architecture.ARM64
         if "arm" in name:
             return Architecture.ARM
-    except Exception:
+    except _LIEF_ERRORS:
         pass
     return Architecture.UNKNOWN
 
@@ -316,7 +320,7 @@ def _lief_image_base(binary: Any, fmt: BinaryFormat) -> int:
             return binary.optional_header.imagebase
         if fmt == BinaryFormat.ELF:
             return binary.imagebase
-    except Exception:
+    except _LIEF_ERRORS:
         pass
     return 0
 
@@ -324,7 +328,7 @@ def _lief_image_base(binary: Any, fmt: BinaryFormat) -> int:
 def _lief_entry_point(binary: Any, fmt: BinaryFormat) -> int:
     try:
         return binary.entrypoint
-    except Exception:
+    except _LIEF_ERRORS:
         return 0
 
 
@@ -364,7 +368,7 @@ def _lief_sections(binary: Any, data: bytes) -> List[Section]:
                 executable=executable,
                 writable=writable,
             ))
-    except Exception:
+    except _LIEF_ERRORS:
         logger.debug("LIEF section extraction failed", exc_info=True)
     return result
 
@@ -381,7 +385,7 @@ def _lief_imports(binary: Any, fmt: BinaryFormat) -> List[ImportEntry]:
         elif fmt == BinaryFormat.ELF:
             for sym in getattr(binary, "imported_symbols", []):
                 result.append(ImportEntry(library="", name=sym.name))
-    except Exception:
+    except _LIEF_ERRORS:
         logger.debug("LIEF import extraction failed", exc_info=True)
     return result
 
@@ -402,7 +406,7 @@ def _lief_exports(binary: Any, fmt: BinaryFormat) -> List[ExportEntry]:
                     name=sym.name,
                     address=sym.value,
                 ))
-    except Exception:
+    except _LIEF_ERRORS:
         logger.debug("LIEF export extraction failed", exc_info=True)
     return result
 

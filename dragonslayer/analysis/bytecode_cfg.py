@@ -70,6 +70,12 @@ except ImportError:  # pragma: no cover
     nx = None  # type: ignore[assignment]
     NX_AVAILABLE = False
 
+_GRAPH_ERRORS: tuple[type[Exception], ...] = (
+    ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+)
+if NX_AVAILABLE:
+    _GRAPH_ERRORS = (*_GRAPH_ERRORS, nx.NetworkXError)
+
 
 # ---------------------------------------------------------------------------
 # Data-classes
@@ -270,7 +276,7 @@ class HandlerCFG:
                     dag.remove_edge(e.source_block, e.target_block)
             try:
                 return list(nx.topological_sort(dag))
-            except Exception:
+            except _GRAPH_ERRORS:
                 pass
         return [b.block_id for b in self.blocks]
 
@@ -655,7 +661,7 @@ def detect_natural_loops(
                     "back_edge_source": be.source_block,
                     "body": body,
                 })
-        except Exception:
+        except _GRAPH_ERRORS:
             pass
 
     if not loops and back_edges_list:

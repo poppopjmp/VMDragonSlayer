@@ -72,7 +72,7 @@ def _eval_binop(left: int, op: str, right: int) -> Optional[int]:
             return left << right
         if op == ">>" and 0 <= right <= 64:
             return left >> right
-    except Exception:
+    except (ValueError, TypeError, OverflowError, ZeroDivisionError, ArithmeticError):
         pass
     return None
 

@@ -72,7 +72,7 @@ class PatternRecognizer:
                 if n:
                     self._yara = engine
                     logger.info("YARA engine active – %d rules compiled", n)
-            except Exception:
+            except (ValueError, TypeError, AttributeError, RuntimeError, OSError):
                 logger.warning("YARA compilation failed – falling back to regex", exc_info=True)
     
     def recognize(self, 

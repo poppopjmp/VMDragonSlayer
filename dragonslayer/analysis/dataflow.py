@@ -48,6 +48,12 @@ except ImportError:
     nx = None  # type: ignore[assignment]
     _NX = False
 
+_GRAPH_ERRORS: tuple[type[Exception], ...] = (
+    ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+)
+if _NX:
+    _GRAPH_ERRORS = (*_GRAPH_ERRORS, nx.NetworkXError)
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -500,7 +506,7 @@ def _compute_phi_nodes(
                         handler_index=node if isinstance(node, int) else 0,
                         sources=[var] * len(preds),
                     ))
-    except Exception:
+    except _GRAPH_ERRORS:
         pass
 
     return phi_nodes

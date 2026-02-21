@@ -567,7 +567,7 @@ class PatternClassifier:
             llm = get_llm_analyzer()
             if not llm.available:
                 return results
-        except Exception:
+        except (ImportError, AttributeError, RuntimeError):
             return results
 
         refined: List[ClassificationResult] = []
@@ -596,7 +596,7 @@ class PatternClassifier:
                             metadata={"llm_response": llm_result},
                             llm_refined=True,
                         )
-                except Exception as exc:
+                except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                     logger.debug("LLM refinement failed for %s: %s", cr.pattern_id, exc)
             refined.append(cr)
 

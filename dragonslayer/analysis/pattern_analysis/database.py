@@ -275,7 +275,7 @@ class PatternDatabase:
             try:
                 pattern = Pattern.from_dict(pattern_dict)
                 self.add_pattern(pattern)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError) as e:
                 logger.warning(f"Failed to load pattern {pattern_dict.get('pattern_id', 'unknown')}: {e}")
         
         self.database_path = path

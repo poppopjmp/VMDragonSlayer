@@ -564,7 +564,7 @@ def simplify_mba(
 
     try:
         expr = _parse_expr(text, variables, bit_width)
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, z3.Z3Exception, SyntaxError) as exc:
         logger.debug("Failed to parse MBA expression %r: %s", text, exc)
         return MBAResult(original=text, simplified=text, proven=False, bit_width=bit_width)
 

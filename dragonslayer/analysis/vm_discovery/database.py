@@ -56,7 +56,7 @@ class VMSignatureDatabase:
             for entry in data if isinstance(data, list) else data.get("signatures", []):
                 sig = VMSignature(**entry)
                 self.add_signature(sig)
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             logger.warning("Failed to load VM signatures from %s: %s", path, exc)
             self._load_builtins()
 

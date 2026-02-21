@@ -421,7 +421,7 @@ def _refine_with_capstone(
                     elif _HAS_CAPSTONE:
                         # Fallback: capstone detail — kept for LEA
                         pass
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 pass
         elif mn in ("jmp", "call"):
             # Prefer the extracted branch_target from Disassembler

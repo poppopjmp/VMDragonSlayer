@@ -1053,7 +1053,7 @@ def make_decryptor_from_dispatcher(
                         "Recovered initial key 0x%x from entry stub (%s)",
                         initial_key, recovered.source,
                     )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, RuntimeError, AttributeError) as exc:
             logger.debug("Symbolic key recovery fallback failed: %s", exc)
 
     return BytecodeDecryptor(

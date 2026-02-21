@@ -191,7 +191,7 @@ def run_handler_symbolic_execution(
         try:
             summary = executor.execute_handler(raw, handler_address=addr)
             summaries[addr] = summary.to_dict()
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, RuntimeError, AttributeError, IndexError) as exc:
             logger.debug("Symbolic depth: handler %#x failed: %s", addr, exc)
             summaries[addr] = {"address": addr, "error": str(exc)}
 

@@ -128,7 +128,7 @@ class Config:
                             self._merge_config(yaml_config)
                             logger.info(f"Loaded config from {config_file}")
                             return
-                except Exception as e:
+                except (OSError, yaml.YAMLError, ValueError, TypeError, KeyError) as e:
                     logger.warning(f"Failed to load config from {config_file}: {e}")
 
         logger.warning(

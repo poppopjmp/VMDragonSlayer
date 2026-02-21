@@ -117,6 +117,48 @@ def _build_alias_map() -> Dict[str, Set[str]]:
 _REG_ALIASES = _build_alias_map()
 
 
+# -- Configurable scoring parameters ----------------------------------------
+
+@dataclass
+class DispatcherScoringConfig:
+    """Configurable weights and thresholds for dispatcher candidate scoring.
+
+    Each weight corresponds to a heuristic in :func:`_score_dispatcher_candidate`.
+    The *confidence_floor* is the minimum score required for a candidate to be
+    accepted.
+    """
+    # Phase 2 scoring weights
+    distance_close: float = 0.15         # fetch-dispatch distance <= 15
+    distance_far: float = 0.05           # fetch-dispatch distance 16-30
+    advance_match: float = 0.20          # vIP advance reg matches fetch
+    advance_partial: float = 0.05        # advance reg matches but order loose
+    dataflow_direct: float = 0.25        # fetch reg in dispatch expression
+    dataflow_decoded: float = 0.20       # decoded reg in dispatch expression
+    dataflow_partial: float = 0.08       # decoded reg exists, no direct match
+    table_full: float = 0.20             # base + index * scale pattern
+    table_scale_only: float = 0.10       # scale pattern in expression
+    table_memory_other: float = 0.05     # memory operand, no table pattern
+    table_binary_lea: float = 0.15       # table pattern in preceding lea/mov
+    table_binary_scale: float = 0.08     # scale pattern in preceding lea/mov
+    decode_present: float = 0.10         # decode transforms between fetch+dispatch
+    backedge_strong: float = 0.10        # >= 2 back edges
+    backedge_weak: float = 0.05          # 1 back edge
+    style_push_ret: float = 0.05         # push/ret or computed_goto dispatch
+    style_call: float = 0.02             # call dispatch
+
+    # Acceptance thresholds
+    confidence_floor: float = 0.30       # minimum confidence for acceptance
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "DispatcherScoringConfig":
+        """Create from dictionary, ignoring unknown keys."""
+        valid = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
+
+_DEFAULT_SCORING_CONFIG = DispatcherScoringConfig()
+
+
 def _reg_in_expr(reg_name: str, expr: str) -> bool:
     """Check if *reg_name* or any of its aliases appears in *expr*."""
     expr_lower = expr.lower()
@@ -222,6 +264,7 @@ def find_vmprotect_dispatcher(
     bit_width: int = 64,
     binary_data: Optional[bytes] = None,
     base_address: int = 0,
+    scoring_config: Optional[DispatcherScoringConfig] = None,
 ) -> Optional[VMProtectDispatcherMatch]:
     """Identify the VMProtect dispatcher loop in a lifted instruction stream.
 
@@ -239,6 +282,8 @@ def find_vmprotect_dispatcher(
         Raw binary for handler-table extraction.
     base_address : int
         Base address corresponding to ``binary_data[0]``.
+    scoring_config : DispatcherScoringConfig | None
+        Custom scoring weights and thresholds.  Uses defaults when ``None``.
 
     Returns
     -------
@@ -269,6 +314,7 @@ def find_vmprotect_dispatcher(
     # Phase 2: Score each (fetch, dispatch) pair for coherence
     best_score = 0.0
     best_info: Optional[VMProtectDispatcherMatch] = None
+    _scfg = scoring_config or _DEFAULT_SCORING_CONFIG
 
     for dispatch in dispatches:
         for fetch in fetches:
@@ -276,12 +322,13 @@ def find_vmprotect_dispatcher(
                 fetch, dispatch, advances, decodes,
                 instructions, gp_regs, bit_width,
                 binary_data, base_address,
+                scoring=_scfg,
             )
             if score > best_score:
                 best_score = score
                 best_info = info
 
-    if best_info is not None and best_info.confidence >= 0.3:
+    if best_info is not None and best_info.confidence >= _scfg.confidence_floor:
         # Phase 3: Extract handler table if binary data available
         if binary_data and best_info.table_base:
             handlers = _extract_handler_table_binary(
@@ -306,6 +353,7 @@ def find_dispatcher_in_trace(
     trace_records: List[Dict[str, Any]],
     *,
     bit_width: int = 64,
+    scoring_config: Optional[DispatcherScoringConfig] = None,
 ) -> Optional[VMProtectDispatcherMatch]:
     """Identify the dispatcher from an execution trace (list of dicts).
 
@@ -368,18 +416,20 @@ def find_dispatcher_in_trace(
 
     best_score = 0.0
     best_info: Optional[VMProtectDispatcherMatch] = None
+    _scfg = scoring_config or _DEFAULT_SCORING_CONFIG
 
     for disp in dispatches_list:
         for fetch in fetches:
             score, info = _score_dispatcher_candidate(
                 fetch, disp, advances, decodes,
                 pseudo_insns, gp_regs, bit_width, None, 0,
+                scoring=_scfg,
             )
             if score > best_score:
                 best_score = score
                 best_info = info
 
-    if best_info is None or best_info.confidence < 0.3:
+    if best_info is None or best_info.confidence < _scfg.confidence_floor:
         return None
 
     # Enhance with trace-derived handler addresses
@@ -651,8 +701,10 @@ def _score_dispatcher_candidate(
     bit_width: int,
     binary_data: Optional[bytes],
     base_address: int,
+    scoring: Optional[DispatcherScoringConfig] = None,
 ) -> Tuple[float, Optional[VMProtectDispatcherMatch]]:
     """Score how well a (fetch, dispatch) pair matches VMProtect's dispatcher."""
+    cfg = scoring or _DEFAULT_SCORING_CONFIG
     score = 0.0
 
     # 1. Fetch must precede dispatch in instruction order
@@ -662,21 +714,21 @@ def _score_dispatcher_candidate(
     # 2. Distance check: fetch and dispatch should be close
     distance = dispatch.insn_index - fetch.insn_index
     if distance <= 15:
-        score += 0.15
+        score += cfg.distance_close
     elif distance <= 30:
-        score += 0.05
+        score += cfg.distance_far
 
     # 3. vIP advance matches fetch register
     matching_advance: Optional[_AdvanceCandidate] = None
     for adv in advances:
         if adv.reg == fetch.vip_reg and fetch.insn_index < adv.insn_index <= dispatch.insn_index + 2:
             matching_advance = adv
-            score += 0.2
+            score += cfg.advance_match
             break
     if matching_advance is None:
         for adv in advances:
             if adv.reg == fetch.vip_reg:
-                score += 0.05
+                score += cfg.advance_partial
                 matching_advance = adv
                 break
 
@@ -684,15 +736,15 @@ def _score_dispatcher_candidate(
     fetch_reg = fetch.fetch_reg
     dispatch_expr = dispatch.table_base_expr.lower()
     if _reg_in_expr(fetch_reg, dispatch_expr):
-        score += 0.25
+        score += cfg.dataflow_direct
     else:
         for dec in decodes:
             if (dec.operand_reg == fetch_reg
                     and fetch.insn_index < dec.insn_index < dispatch.insn_index):
                 if _reg_in_expr(dec.operand_reg, dispatch_expr):
-                    score += 0.2
+                    score += cfg.dataflow_decoded
                     break
-                score += 0.08
+                score += cfg.dataflow_partial
                 break
 
     # 5. Table lookup pattern (base+index*scale)
@@ -701,13 +753,13 @@ def _score_dispatcher_candidate(
     if dispatch.uses_memory:
         tbl_match = _TABLE_LOOKUP_RE.search(dispatch_expr)
         if tbl_match:
-            score += 0.2
+            score += cfg.table_full
             try:
                 table_scale = int(tbl_match.group(3))
             except ValueError:
                 pass
         elif _SCALE_RE.search(dispatch_expr):
-            score += 0.1
+            score += cfg.table_scale_only
             scale_match = _SCALE_RE.search(dispatch_expr)
             if scale_match:
                 try:
@@ -715,7 +767,7 @@ def _score_dispatcher_candidate(
                 except ValueError:
                     pass
         else:
-            score += 0.05
+            score += cfg.table_memory_other
     else:
         for i in range(max(0, dispatch.insn_index - 5), dispatch.insn_index):
             insn = instructions[i]
@@ -727,10 +779,10 @@ def _score_dispatcher_candidate(
                     src = o[1].strip().lower()
                     if dst == dispatch.target_reg and "[" in src:
                         if _TABLE_LOOKUP_RE.search(src):
-                            score += 0.15
+                            score += cfg.table_binary_lea
                             break
                         elif _SCALE_RE.search(src):
-                            score += 0.08
+                            score += cfg.table_binary_scale
                             break
 
     # 6. Decode transforms between fetch and dispatch
@@ -740,7 +792,7 @@ def _score_dispatcher_candidate(
                 and fetch.insn_index < dec.insn_index < dispatch.insn_index):
             decode_detail.append(dec.detail)
     if decode_detail:
-        score += 0.1
+        score += cfg.decode_present
 
     # 7. Handler back-edges (handlers jump back to dispatcher)
     dispatch_addr = _get_address(instructions[dispatch.insn_index])
@@ -756,9 +808,9 @@ def _score_dispatcher_candidate(
             if insn_addr not in dispatcher_region:
                 back_edges += 1
     if back_edges >= 2:
-        score += 0.1
+        score += cfg.backedge_strong
     elif back_edges >= 1:
-        score += 0.05
+        score += cfg.backedge_weak
 
     # Build result
     confidence = min(score, 1.0)
@@ -770,9 +822,9 @@ def _score_dispatcher_candidate(
     # strong evidence of a VM dispatcher (rather than regular code).
     _style = dispatch.dispatch_style
     if _style in ("push_ret", "computed_goto"):
-        confidence = min(confidence + 0.05, 1.0)
+        confidence = min(confidence + cfg.style_push_ret, 1.0)
     elif _style == "call":
-        confidence = min(confidence + 0.02, 1.0)
+        confidence = min(confidence + cfg.style_call, 1.0)
 
     info = VMProtectDispatcherMatch(
         entry_address=fetch_addr,
@@ -1217,7 +1269,7 @@ class DispatcherAnalyzer:
                 protector=protector,
             )
 
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, IndexError) as exc:
             logger.exception("Dispatcher analysis failed")
             return DispatchTableResult(success=False, error=str(exc))
 
