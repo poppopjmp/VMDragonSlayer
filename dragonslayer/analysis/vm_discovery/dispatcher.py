@@ -50,9 +50,124 @@ import re
 import struct
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TraceRecord TypedDict (B101 — improves type safety at call sites)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TraceRecord(TypedDict, total=False):
+    """Minimal shape expected for execution-trace records.
+
+    All trace-consuming functions in this module accept
+    ``List[TraceRecord]`` (or ``List[Dict[str, Any]]`` where the dict
+    conforms to this shape).
+
+    Attributes:
+        address: Instruction virtual address.
+        disassembly: Full disassembly string (e.g. ``"jmp rax"``).
+        mnemonic: Instruction mnemonic alone.
+        operands: Operands string.
+        registers: Dict mapping register names to values at this step.
+        raw_bytes: Raw instruction bytes.
+    """
+
+    address: int
+    disassembly: str
+    mnemonic: str
+    operands: str
+    registers: Dict[str, int]
+    raw_bytes: bytes
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Trace feature cache (B101 — avoids triple O(n) iteration)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Maximum trace length processed; longer traces are uniformly sampled.
+_MAX_TRACE_LEN = 500_000
+
+
+def _subsample_trace(
+    trace: List[Dict[str, Any]],
+    max_len: int = _MAX_TRACE_LEN,
+) -> List[Dict[str, Any]]:
+    """Return *trace* or a uniformly-spaced subsample of *max_len* entries."""
+    if len(trace) <= max_len:
+        return trace
+    step = len(trace) / max_len
+    return [trace[int(i * step)] for i in range(max_len)]
+
+
+@dataclass
+class _TraceFeatures:
+    """Pre-computed features extracted from a single trace iteration.
+
+    Built by :func:`_compute_trace_features` so that all protector
+    finders can share the O(n) pass rather than repeating it.
+    """
+
+    addr_freq: Counter = field(default_factory=Counter)
+    """Address → visit count."""
+
+    pushad_addrs: Set[int] = field(default_factory=set)
+    """Addresses of ``pushad`` / ``pusha`` / ``pushfd`` instructions."""
+
+    lodsb_addrs: Set[int] = field(default_factory=set)
+    """Addresses of lodsb / lodsw / lodsd instructions."""
+
+    xlat_addrs: Set[int] = field(default_factory=set)
+    """Addresses of xlat instructions."""
+
+    indirect_calls: List[Dict[str, Any]] = field(default_factory=list)
+    """Trace records with indirect ``call [...]`` instructions."""
+
+    indirect_jumps: List[Dict[str, Any]] = field(default_factory=list)
+    """Trace records with indirect ``jmp`` instructions."""
+
+
+def _compute_trace_features(
+    trace_records: List[Dict[str, Any]],
+) -> _TraceFeatures:
+    """Single-pass extraction of all features needed by the finders.
+
+    This replaces the triple/quadruple O(n) iteration that previously
+    occurred when each finder separately scanned the trace.
+    """
+    f = _TraceFeatures()
+    for rec in trace_records:
+        addr = rec.get("address", 0)
+        if addr:
+            f.addr_freq[addr] += 1
+
+        disasm = rec.get("disassembly", "").lower().strip()
+        if not disasm:
+            continue
+        parts = disasm.split(None, 1)
+        mnem = parts[0]
+        ops = parts[1] if len(parts) > 1 else ""
+
+        # pushad / pushfd detection (Themida)
+        if mnem in ("pushad", "pusha", "pushfd"):
+            f.pushad_addrs.add(addr)
+
+        # LODSB / XLAT detection (Code Virtualizer)
+        if mnem in ("lodsb", "lodsw", "lodsd"):
+            f.lodsb_addrs.add(addr)
+        elif mnem == "xlat":
+            f.xlat_addrs.add(addr)
+
+        # Indirect branches
+        if mnem == "call" and "[" in ops:
+            f.indirect_calls.append(rec)
+        elif mnem == "jmp" and ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
+            f.indirect_jumps.append(rec)
+
+    return f
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1553,6 +1668,7 @@ def find_themida_dispatcher(
     trace_records: List[Dict[str, Any]],
     *,
     bit_width: int = 64,
+    _features: Optional[_TraceFeatures] = None,
 ) -> Optional[GenericDispatcherMatch]:
     """Identify a Themida/WinLicense dispatcher in a trace.
 
@@ -1564,6 +1680,8 @@ def find_themida_dispatcher(
         trace_records: Execution trace (list of dicts with ``address``,
             ``disassembly``, optionally ``registers``).
         bit_width: 32 or 64.
+        _features: Pre-computed trace features (avoids duplicate O(n)
+            pass when called from the orchestrator).
 
     Returns:
         A :class:`GenericDispatcherMatch` with ``protector="themida"``
@@ -1572,36 +1690,13 @@ def find_themida_dispatcher(
     if not trace_records:
         return None
 
-    addr_freq: Counter = Counter()
-    for rec in trace_records:
-        addr = rec.get("address", 0)
-        if addr:
-            addr_freq[addr] += 1
+    f = _features or _compute_trace_features(trace_records)
 
-    # Look for indirect CALL sites (Themida Dolphin uses call [vtable])
-    indirect_calls: List[Dict[str, Any]] = []
-    indirect_jumps: List[Dict[str, Any]] = []
-    pushad_addrs: Set[int] = set()
-
-    for rec in trace_records:
-        disasm = rec.get("disassembly", "").lower().strip()
-        mnem = disasm.split(None, 1)[0] if disasm else ""
-        if _THEMIDA_PUSHAD_PROLOGUE.match(mnem):
-            pushad_addrs.add(rec.get("address", 0))
-        if mnem == "call":
-            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
-            if ops and "[" in ops:
-                indirect_calls.append(rec)
-        elif mnem == "jmp":
-            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
-            if ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
-                indirect_jumps.append(rec)
-
-    if not pushad_addrs:
+    if not f.pushad_addrs:
         return None  # Themida requires pushad prologue
 
     # Themida's dispatch is the hottest indirect call/jump near a pushad
-    all_dispatch = indirect_calls + indirect_jumps
+    all_dispatch = f.indirect_calls + f.indirect_jumps
     if not all_dispatch:
         return None
 
@@ -1609,7 +1704,7 @@ def find_themida_dispatcher(
     best_freq = 0
     for rec in all_dispatch:
         addr = rec.get("address", 0)
-        freq = addr_freq.get(addr, 0)
+        freq = f.addr_freq.get(addr, 0)
         if freq > best_freq:
             best_freq = freq
             best = rec
@@ -1629,7 +1724,7 @@ def find_themida_dispatcher(
 
     return GenericDispatcherMatch(
         protector="themida",
-        entry_address=min(pushad_addrs) if pushad_addrs else 0,
+        entry_address=min(f.pushad_addrs) if f.pushad_addrs else 0,
         dispatch_address=dispatch_addr,
         vip_register=vip_reg or "",
         handler_addresses=sorted(handler_addrs) if handler_addrs else [],
@@ -1642,6 +1737,7 @@ def find_cv_dispatcher(
     trace_records: List[Dict[str, Any]],
     *,
     bit_width: int = 64,
+    _features: Optional[_TraceFeatures] = None,
 ) -> Optional[GenericDispatcherMatch]:
     """Identify a Code Virtualizer dispatcher in a trace.
 
@@ -1652,6 +1748,8 @@ def find_cv_dispatcher(
     Args:
         trace_records: Execution trace.
         bit_width: 32 or 64.
+        _features: Pre-computed trace features (avoids duplicate O(n)
+            pass when called from the orchestrator).
 
     Returns:
         A :class:`GenericDispatcherMatch` with
@@ -1660,39 +1758,19 @@ def find_cv_dispatcher(
     if not trace_records:
         return None
 
-    addr_freq: Counter = Counter()
-    lodsb_addrs: Set[int] = set()
-    xlat_addrs: Set[int] = set()
+    f = _features or _compute_trace_features(trace_records)
 
-    for rec in trace_records:
-        addr = rec.get("address", 0)
-        if addr:
-            addr_freq[addr] += 1
-        disasm = rec.get("disassembly", "").lower().strip()
-        mnem = disasm.split(None, 1)[0] if disasm else ""
-        if mnem in ("lodsb", "lodsw", "lodsd"):
-            lodsb_addrs.add(addr)
-        elif mnem == "xlat":
-            xlat_addrs.add(addr)
-
-    if not lodsb_addrs:
+    if not f.lodsb_addrs:
         return None  # CV requires LODSB-style fetch
 
-    # Find the hottest indirect jump
-    indirect_jumps: List[Dict[str, Any]] = []
-    for rec in trace_records:
-        disasm = rec.get("disassembly", "").lower().strip()
-        mnem = disasm.split(None, 1)[0] if disasm else ""
-        if mnem == "jmp":
-            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
-            if ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
-                indirect_jumps.append(rec)
-
-    if not indirect_jumps:
+    if not f.indirect_jumps:
         return None
 
-    best = max(indirect_jumps, key=lambda r: addr_freq.get(r.get("address", 0), 0))
-    best_freq = addr_freq.get(best.get("address", 0), 0)
+    best = max(
+        f.indirect_jumps,
+        key=lambda r: f.addr_freq.get(r.get("address", 0), 0),
+    )
+    best_freq = f.addr_freq.get(best.get("address", 0), 0)
     if best_freq < 3:
         return None
 
@@ -1705,12 +1783,12 @@ def find_cv_dispatcher(
 
     return GenericDispatcherMatch(
         protector="code_virtualizer",
-        entry_address=min(lodsb_addrs),
+        entry_address=min(f.lodsb_addrs),
         dispatch_address=dispatch_addr,
         vip_register=vip_reg,
         handler_addresses=sorted(handler_addrs) if handler_addrs else [],
         confidence=min(0.55 + best_freq * 0.02, 0.9),
-        dispatch_style="lodsb_xlat" if xlat_addrs else "jmp",
+        dispatch_style="lodsb_xlat" if f.xlat_addrs else "jmp",
     )
 
 
@@ -1724,6 +1802,7 @@ def find_generic_dispatcher(
     *,
     bit_width: int = 64,
     min_visit_frequency: int = 5,
+    _features: Optional[_TraceFeatures] = None,
 ) -> Optional[GenericDispatcherMatch]:
     """Identify a VM dispatcher using protector-agnostic trace heuristics.
 
@@ -1745,6 +1824,8 @@ def find_generic_dispatcher(
         bit_width: 32 or 64.
         min_visit_frequency: Minimum number of visits to the dispatch
             address for a valid detection (default 5).
+        _features: Pre-computed trace features (avoids duplicate O(n)
+            pass when called from the orchestrator).
 
     Returns:
         A :class:`GenericDispatcherMatch` with ``protector="unknown"``
@@ -1753,31 +1834,19 @@ def find_generic_dispatcher(
     if not trace_records:
         return None
 
-    addr_freq: Counter = Counter()
-    for rec in trace_records:
-        addr = rec.get("address", 0)
-        if addr:
-            addr_freq[addr] += 1
+    f = _features or _compute_trace_features(trace_records)
 
-    # Find all indirect branches (jmp/call with non-immediate targets)
-    indirect_branches: List[Dict[str, Any]] = []
-    for rec in trace_records:
-        disasm = rec.get("disassembly", "").lower().strip()
-        mnem = disasm.split(None, 1)[0] if disasm else ""
-        if mnem in ("jmp", "call"):
-            ops = disasm.split(None, 1)[1] if len(disasm.split(None, 1)) > 1 else ""
-            if ops and not ops.startswith("0x") and not ops.lstrip("-").isdigit():
-                indirect_branches.append(rec)
-
+    # Merge indirect calls + jumps for generic search
+    indirect_branches = f.indirect_calls + f.indirect_jumps
     if not indirect_branches:
         return None
 
     # Pick the hottest indirect branch
     best = max(
         indirect_branches,
-        key=lambda r: addr_freq.get(r.get("address", 0), 0),
+        key=lambda r: f.addr_freq.get(r.get("address", 0), 0),
     )
-    best_freq = addr_freq.get(best.get("address", 0), 0)
+    best_freq = f.addr_freq.get(best.get("address", 0), 0)
     if best_freq < min_visit_frequency:
         return None
 
@@ -1810,8 +1879,58 @@ def find_generic_dispatcher(
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator: try all finders in priority order (B100)
+# Dispatcher Finder Registry (B101 — extensible plugin pattern)
 # ---------------------------------------------------------------------------
+
+
+class DispatcherFinderProtocol(Protocol):
+    """Callable signature for pluggable dispatcher finders."""
+
+    def __call__(
+        self,
+        trace_records: List[Dict[str, Any]],
+        *,
+        bit_width: int = 64,
+        _features: Optional[_TraceFeatures] = None,
+    ) -> Optional[GenericDispatcherMatch]: ...  # pragma: no cover
+
+
+# Internal list: (name, callable, priority).  Lower priority runs first.
+_DISPATCHER_FINDERS: List[Tuple[str, DispatcherFinderProtocol, int]] = []
+
+
+def register_dispatcher_finder(
+    name: str,
+    finder: DispatcherFinderProtocol,
+    *,
+    priority: int = 100,
+) -> None:
+    """Register a custom dispatcher finder.
+
+    Third-party plugins can add protector-specific heuristics at
+    runtime.  Lower *priority* values run earlier.
+
+    Args:
+        name: Human-readable identifier (e.g. ``"my_protector"``).
+        finder: Callable matching :class:`DispatcherFinderProtocol`.
+        priority: Execution order (default 100).
+    """
+    _DISPATCHER_FINDERS.append((name, finder, priority))
+    _DISPATCHER_FINDERS.sort(key=lambda t: t[2])
+
+
+def _reset_finder_registry() -> None:
+    """Clear all registered finders (for tests)."""
+    _DISPATCHER_FINDERS.clear()
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator: try all finders in priority order (B100, refactored B101)
+# ---------------------------------------------------------------------------
+
+# Early-exit threshold — skip remaining finders if we already have a
+# high-confidence match.
+_EARLY_EXIT_CONFIDENCE = 0.9
 
 
 def find_dispatcher(
@@ -1823,9 +1942,15 @@ def find_dispatcher(
     """Identify the VM dispatcher using all available strategies.
 
     Tries protector-specific finders first (VMProtect, Themida, Code
-    Virtualizer), then falls back to the generic heuristic.  Returns
-    the match with the highest confidence, or ``None`` if no dispatcher
-    is found.
+    Virtualizer), then falls back to the generic heuristic, and
+    finally any finders added via :func:`register_dispatcher_finder`.
+
+    **B101 improvements**:
+
+    * Trace subsampling for adversarial-input resilience (> 500 K
+      records are uniformly sampled).
+    * Single ``_compute_trace_features`` pass shared across finders.
+    * Early-exit when a finder produces confidence >= 0.9.
 
     Args:
         trace_records: Execution trace (list of dicts).
@@ -1840,7 +1965,21 @@ def find_dispatcher(
     if not trace_records:
         return None
 
+    # Subsample very long traces to avoid DoS (B101)
+    trace_records = _subsample_trace(trace_records)
+
+    # Single-pass feature extraction shared by all finders (B101)
+    features = _compute_trace_features(trace_records)
+
     candidates: List[GenericDispatcherMatch] = []
+
+    def _accept(match: Optional[GenericDispatcherMatch]) -> bool:
+        """Append *match* and return True if early-exit threshold met."""
+        if match is not None:
+            candidates.append(match)
+            if match.confidence >= _EARLY_EXIT_CONFIDENCE:
+                return True
+        return False
 
     # --- Protector-specific finders ----------------------------------------
 
@@ -1848,23 +1987,29 @@ def find_dispatcher(
     try:
         vmp = find_dispatcher_in_trace(trace_records, bit_width=bit_width)
         if vmp is not None:
-            candidates.append(GenericDispatcherMatch.from_vmprotect_match(vmp))
+            m = GenericDispatcherMatch.from_vmprotect_match(vmp)
+            if _accept(m):
+                return _pick_best(candidates, protector_hint)
     except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
         logger.debug("VMProtect dispatcher finder raised", exc_info=True)
 
     # 2. Themida / WinLicense
     try:
-        thm = find_themida_dispatcher(trace_records, bit_width=bit_width)
-        if thm is not None:
-            candidates.append(thm)
+        thm = find_themida_dispatcher(
+            trace_records, bit_width=bit_width, _features=features,
+        )
+        if _accept(thm):
+            return _pick_best(candidates, protector_hint)
     except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
         logger.debug("Themida dispatcher finder raised", exc_info=True)
 
     # 3. Code Virtualizer
     try:
-        cv = find_cv_dispatcher(trace_records, bit_width=bit_width)
-        if cv is not None:
-            candidates.append(cv)
+        cv = find_cv_dispatcher(
+            trace_records, bit_width=bit_width, _features=features,
+        )
+        if _accept(cv):
+            return _pick_best(candidates, protector_hint)
     except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
         logger.debug("CV dispatcher finder raised", exc_info=True)
 
@@ -1872,22 +2017,39 @@ def find_dispatcher(
     try:
         gen = find_generic_dispatcher(
             trace_records, bit_width=bit_width, min_visit_frequency=5,
+            _features=features,
         )
-        if gen is not None:
-            candidates.append(gen)
+        if _accept(gen):
+            return _pick_best(candidates, protector_hint)
     except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
         logger.debug("Generic dispatcher finder raised", exc_info=True)
 
+    # --- Registered plugins (B101) -----------------------------------------
+    for name, finder, _prio in _DISPATCHER_FINDERS:
+        try:
+            result = finder(
+                trace_records, bit_width=bit_width, _features=features,
+            )
+            if _accept(result):
+                return _pick_best(candidates, protector_hint)
+        except (ValueError, TypeError, KeyError, IndexError, RuntimeError,
+                AttributeError, ArithmeticError):
+            logger.debug("Plugin '%s' dispatcher finder raised", name, exc_info=True)
+
+    return _pick_best(candidates, protector_hint)
+
+
+def _pick_best(
+    candidates: List[GenericDispatcherMatch],
+    protector_hint: Optional[str],
+) -> Optional[GenericDispatcherMatch]:
+    """Return highest-confidence match, optionally favouring *hint*."""
     if not candidates:
         return None
-
-    # If caller specified a hint, prefer that protector
     if protector_hint:
         hint_lower = protector_hint.lower()
         hinted = [c for c in candidates if c.protector == hint_lower]
         if hinted:
             return max(hinted, key=lambda c: c.confidence)
-
-    # Otherwise return the highest-confidence match
     return max(candidates, key=lambda c: c.confidence)
 

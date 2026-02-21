@@ -17,6 +17,13 @@ try:
         VMProtectDispatcherMatch,
         find_vmprotect_dispatcher,
         find_dispatcher_in_trace,
+        GenericDispatcherMatch,
+        find_dispatcher,
+        find_themida_dispatcher,
+        find_cv_dispatcher,
+        find_generic_dispatcher,
+        register_dispatcher_finder,
+        TraceRecord,
     )
     from .handler_boundaries import (
         identify_vip_register,
