@@ -321,6 +321,20 @@ class SymbolicState:
             for shift in (4, 2, 1):
                 pf_xor = pf_xor ^ z3.LShR(pf_xor, shift)
             self.flags["PF"] = z3.Extract(0, 0, pf_xor) == z3.BitVecVal(0, 1)
+            # AF: auxiliary carry (half-carry from bit 3 to bit 4)
+            left_nib = z3.Extract(3, 0, left_bv) if left_bv.sort().size() >= 4 else left_bv
+            right_nib = z3.Extract(3, 0, right_bv) if right_bv.sort().size() >= 4 else right_bv
+            res_nib = z3.Extract(3, 0, result) if bw >= 4 else result
+            if is_sub:
+                self.flags["AF"] = z3.UGT(
+                    z3.ZeroExt(1, left_nib) - z3.ZeroExt(1, right_nib),
+                    z3.BitVecVal(0xF, 5),
+                )
+            else:
+                self.flags["AF"] = z3.UGT(
+                    z3.ZeroExt(1, left_nib) + z3.ZeroExt(1, right_nib),
+                    z3.BitVecVal(0xF, 5),
+                )
         else:
             # Concrete path
             mask = (1 << bw) - 1
@@ -343,6 +357,13 @@ class SymbolicState:
                 self.flags["OF"] = (sl == sr) and (sres != sl)
             # PF: parity of low byte (set when even number of 1-bits)
             self.flags["PF"] = (bin(r & 0xFF).count("1") % 2) == 0
+            # AF: auxiliary carry (carry out of / borrow into bit 3)
+            ln = li & 0xF
+            rn = ri & 0xF
+            if is_sub:
+                self.flags["AF"] = ln < rn
+            else:
+                self.flags["AF"] = (ln + rn) > 0xF
 
     def update_flags_logic(self, result: Any, *, operand_size: int = 0) -> None:
         """Update ZF/SF after a logical operation (AND/OR/XOR/TEST).
@@ -380,6 +401,8 @@ class SymbolicState:
             self.flags["PF"] = (bin(r & 0xFF).count("1") % 2) == 0
         self.flags["CF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
         self.flags["OF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
+        # AF is undefined for logical ops; we clear it.
+        self.flags["AF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
 
     def update_flags_inc_dec(
         self, result: Any, original: Any, *, is_dec: bool,

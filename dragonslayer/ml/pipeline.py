@@ -63,7 +63,7 @@ class FeatureExtractor:
         is supplied.
         """
         if not self._spec:
-            raise NotImplementedError(
+            raise ValueError(
                 "FeatureExtractor requires a feature_spec mapping to "
                 "convert analysis data into numeric features"
             )

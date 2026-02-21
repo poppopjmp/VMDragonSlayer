@@ -44,11 +44,45 @@ class BaseModel:
     name: str = "base"
 
     def load(self, path: str) -> None:
-        """Load model weights / parameters from *path*."""
-        raise NotImplementedError(
-            f"{type(self).__name__}.load() is not implemented — "
-            "install a training backend and provide a trained model artifact"
-        )
+        """Load model weights / parameters from *path*.
+
+        Default implementation loads a joblib/pickle artifact.
+        Subclasses may override for custom deserialization.
+        """
+        from pathlib import Path as _P
+        if not _P(path).exists():
+            raise FileNotFoundError(f"Model file not found: {path}")
+        try:
+            import joblib  # type: ignore[import-untyped]
+            obj = joblib.load(path)
+        except ImportError:
+            import pickle
+            with open(path, "rb") as f:
+                obj = pickle.load(f)
+        # Store the loaded artifact on the instance so subclasses can use it.
+        self._artifact = obj
+
+    def save(self, path: str) -> None:
+        """Save model to *path* using joblib (preferred) or pickle.
+
+        Serialises ``self._artifact`` if set, otherwise raises
+        :exc:`RuntimeError`.
+        """
+        artifact = getattr(self, "_artifact", None)
+        if artifact is None:
+            raise RuntimeError(
+                f"{type(self).__name__} has no artifact to save — "
+                "train or load a model first"
+            )
+        from pathlib import Path as _P
+        _P(path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            import joblib  # type: ignore[import-untyped]
+            joblib.dump(artifact, path)
+        except ImportError:
+            import pickle
+            with open(path, "wb") as f:
+                pickle.dump(artifact, f)
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
         """Run inference on a single feature dict."""

@@ -34,6 +34,7 @@ from .exceptions import (
     ConfigurationError,
     InvalidDataError,
 )
+from ..utils.metrics import AnalysisMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ class AnalysisResult:
     execution_time: float = 0.0
     errors: List[str] = field(default_factory=list)
     confidence_scores: Dict[str, float] = field(default_factory=dict)
+    metrics: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -280,6 +282,7 @@ class Orchestrator:
         self._executor = ThreadPoolExecutor(
             max_workers=self.config.get("analysis.max_threads", 4),
         )
+        self.metrics = AnalysisMetrics()
         logger.info("Orchestrator initialised")
 
     # B64: Context-manager protocol ------------------------------------------
@@ -360,6 +363,7 @@ class Orchestrator:
         # All other analysis types use flat parallel dispatch (fast path for
         # single-engine calls or gateway delegation).
         # ------------------------------------------------------------------
+        self.metrics = AnalysisMetrics()  # fresh metrics per analysis
         t0 = time.monotonic()
         engine_names = self._resolve_engines(request.analysis_type)
 
@@ -368,7 +372,12 @@ class Orchestrator:
             handler = self._get_engine_handler(engine_name)
             if handler is None:
                 continue
-            fut = self._executor.submit(handler, request)
+
+            def _run_engine(h=handler, r=request, en=engine_name):
+                with self.metrics.phase(en):
+                    return h(r)
+
+            fut = self._executor.submit(_run_engine)
             futures[fut] = engine_name
 
         engine_results: List[EngineResult] = []
@@ -414,6 +423,7 @@ class Orchestrator:
                 confidence_scores[er.engine] = er.confidence
 
         overall_success = any(er.success for er in engine_results) if engine_results else False
+        self.metrics.finalise()
 
         return AnalysisResult(
             success=overall_success,
@@ -424,6 +434,7 @@ class Orchestrator:
             execution_time=elapsed,
             errors=errors,
             confidence_scores=confidence_scores,
+            metrics=self.metrics.to_dict(),
         )
 
     # ------------------------------------------------------------------
@@ -446,6 +457,7 @@ class Orchestrator:
             create_quick_scan_pipeline,
         )
 
+        self.metrics = AnalysisMetrics()  # fresh metrics per pipeline run
         t0 = time.monotonic()
         pipeline_timeout = self.config.get("analysis.timeout", 1800)
 
@@ -468,14 +480,15 @@ class Orchestrator:
         # B53: Run the pipeline with timeout guard
         try:
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    pipe.run,
-                    binary_data=request.binary_data,
-                    pipeline_config=cfg,
-                    metadata=request.metadata,
-                )
-                pipe_result = future.result(timeout=pipeline_timeout)
+            with self.metrics.phase("pipeline"):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        pipe.run,
+                        binary_data=request.binary_data,
+                        pipeline_config=cfg,
+                        metadata=request.metadata,
+                    )
+                    pipe_result = future.result(timeout=pipeline_timeout)
         except (TimeoutError, concurrent.futures.TimeoutError):
             elapsed = time.monotonic() - t0
             logger.error(
@@ -530,6 +543,7 @@ class Orchestrator:
             combined_results["_llm_insights"] = pipe_result.llm_insights
 
         elapsed = time.monotonic() - t0
+        self.metrics.finalise()
 
         return AnalysisResult(
             success=pipe_result.success,
@@ -540,6 +554,7 @@ class Orchestrator:
             execution_time=elapsed,
             errors=errors,
             confidence_scores=confidence_scores,
+            metrics=self.metrics.to_dict(),
         )
 
     # ------------------------------------------------------------------

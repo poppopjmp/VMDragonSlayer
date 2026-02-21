@@ -89,7 +89,7 @@ class TestEnsembleClassifier:
 
     def test_no_models_raises(self):
         ens = EnsembleClassifier()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError):
             ens.predict({})
 
     def test_add_model(self):

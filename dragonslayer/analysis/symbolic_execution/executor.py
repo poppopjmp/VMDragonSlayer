@@ -190,6 +190,17 @@ class SymbolicExecutor:
         self._state_seq: int = 0
         # B70: Dispatcher result cache — keyed by (code_hash, entry_point).
         self._dispatcher_cache: Dict[tuple, tuple[Optional[int], float]] = {}
+        # B85: Per-analysis metrics (optional).
+        self._metrics: Any = None
+
+    @property
+    def metrics(self) -> Any:
+        """Return the attached :class:`AnalysisMetrics` instance (or *None*)."""
+        return self._metrics
+
+    @metrics.setter
+    def metrics(self, value: Any) -> None:
+        self._metrics = value
 
     @classmethod
     def from_config(cls, config: Any = None) -> "SymbolicExecutor":
@@ -225,21 +236,37 @@ class SymbolicExecutor:
         pattern, classifies handlers, and checks for opaque predicates.
         """
         try:
+            _m = self._metrics  # alias for brevity
+
             # Step 1: Lift instructions
+            if _m:
+                _m.start_phase("lift")
             instructions = self._lifter.lift(code, base_address=entry_point)
+            if _m:
+                _m.stop_phase("lift", item_count=len(instructions) if instructions else 0)
             if not instructions:
                 return ExecutionResult(success=False, error="No instructions lifted")
 
             insn_map: Dict[int, LiftedInstruction] = {i.address: i for i in instructions}
 
             # Step 2: Find basic blocks
+            if _m:
+                _m.start_phase("basic_blocks")
             blocks = self._find_basic_blocks(instructions)
+            if _m:
+                _m.stop_phase("basic_blocks", item_count=len(blocks))
 
             # Step 2b (B60): Build explicit CFG graph with edges & dominators
+            if _m:
+                _m.start_phase("cfg")
             cfg = self._build_cfg(blocks, entry_point)
+            if _m:
+                _m.stop_phase("cfg")
 
             # Step 3: Identify dispatcher using VMProtect pattern matching
             # B70: Check cache first to avoid recomputation.
+            if _m:
+                _m.start_phase("dispatcher")
             _cache_key = (hashlib.sha256(code).hexdigest(), entry_point)
             if _cache_key in self._dispatcher_cache:
                 dispatcher_addr, dispatcher_confidence = self._dispatcher_cache[_cache_key]
@@ -252,25 +279,39 @@ class SymbolicExecutor:
             )
             if self._vmprotect_dispatcher is not None and dispatcher_addr is None:
                 dispatcher_addr = self._vmprotect_dispatcher.entry_address
+            if _m:
+                _m.stop_phase("dispatcher")
 
             # Step 4: Classify handlers (uses VMProtect dispatcher context)
+            if _m:
+                _m.start_phase("classify")
             handlers = self._classify_handlers(blocks, insn_map)
+            if _m:
+                _m.stop_phase("classify", item_count=len(handlers))
 
             # Step 5: Build handler table
             handler_table = {h.address: h.category for h in handlers}
 
             # Step 6: Symbolic exploration (must run before opaque detection
             # so path constraints are available).
+            if _m:
+                _m.start_phase("exploration")
             paths_explored, total_insns, snapshots = self._explore_paths(
                 insn_map, entry_point,
             )
+            if _m:
+                _m.stop_phase("exploration", item_count=paths_explored)
 
             # Step 7: Detect opaque predicates — now with path constraints
             # collected during exploration.
+            if _m:
+                _m.start_phase("opaque")
             opaque = self._detect_opaque_predicates(
                 instructions,
                 path_constraints=self._collected_path_constraints,
             )
+            if _m:
+                _m.stop_phase("opaque", item_count=len(opaque))
 
             return ExecutionResult(
                 success=True,
@@ -2077,7 +2118,7 @@ class SymbolicExecutor:
         if Z3Solver.available():
             bw = state.bit_width
             eflags = _z3.BitVecVal(0x202, bw)
-            for bit_pos, flag in ((0, "CF"), (2, "PF"), (6, "ZF"), (7, "SF"), (11, "OF")):
+            for bit_pos, flag in ((0, "CF"), (2, "PF"), (4, "AF"), (6, "ZF"), (7, "SF"), (11, "OF")):
                 fv = state.flags.get(flag, False)
                 if hasattr(fv, "sort"):
                     eflags = eflags | _z3.If(fv, _z3.BitVecVal(1 << bit_pos, bw),
@@ -2086,7 +2127,7 @@ class SymbolicExecutor:
                     eflags = eflags | _z3.BitVecVal(1 << bit_pos, bw)
         else:
             eflags = 0x202
-            for bit_pos, flag in ((0, "CF"), (2, "PF"), (6, "ZF"), (7, "SF"), (11, "OF")):
+            for bit_pos, flag in ((0, "CF"), (2, "PF"), (4, "AF"), (6, "ZF"), (7, "SF"), (11, "OF")):
                 if state.flags.get(flag, False):
                     eflags |= (1 << bit_pos)
         sp_reg = "rsp" if state.bit_width == 64 else "esp"
@@ -2116,12 +2157,14 @@ class SymbolicExecutor:
                 one = _z3.BitVecVal(1, 1)
                 state.flags["CF"] = _z3.Extract(0, 0, eflags) == one
                 state.flags["PF"] = _z3.Extract(2, 2, eflags) == one
+                state.flags["AF"] = _z3.Extract(4, 4, eflags) == one
                 state.flags["ZF"] = _z3.Extract(6, 6, eflags) == one
                 state.flags["SF"] = _z3.Extract(7, 7, eflags) == one
                 state.flags["OF"] = _z3.Extract(11, 11, eflags) == one
             elif isinstance(eflags, int):
                 state.flags["CF"] = bool(eflags & 1)
                 state.flags["PF"] = bool(eflags & (1 << 2))
+                state.flags["AF"] = bool(eflags & (1 << 4))
                 state.flags["ZF"] = bool(eflags & (1 << 6))
                 state.flags["SF"] = bool(eflags & (1 << 7))
                 state.flags["OF"] = bool(eflags & (1 << 11))

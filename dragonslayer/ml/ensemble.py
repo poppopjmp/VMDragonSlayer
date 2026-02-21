@@ -81,7 +81,7 @@ class EnsembleClassifier:
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
         """Majority-vote prediction from all component models."""
         if not self._models:
-            raise NotImplementedError(
+            raise ValueError(
                 "EnsembleClassifier has no component models — "
                 "add trained models via add_model()"
             )
