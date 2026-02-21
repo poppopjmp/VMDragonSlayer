@@ -2077,7 +2077,7 @@ class SymbolicExecutor:
         if Z3Solver.available():
             bw = state.bit_width
             eflags = _z3.BitVecVal(0x202, bw)
-            for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
+            for bit_pos, flag in ((0, "CF"), (2, "PF"), (6, "ZF"), (7, "SF"), (11, "OF")):
                 fv = state.flags.get(flag, False)
                 if hasattr(fv, "sort"):
                     eflags = eflags | _z3.If(fv, _z3.BitVecVal(1 << bit_pos, bw),
@@ -2086,7 +2086,7 @@ class SymbolicExecutor:
                     eflags = eflags | _z3.BitVecVal(1 << bit_pos, bw)
         else:
             eflags = 0x202
-            for bit_pos, flag in ((0, "CF"), (6, "ZF"), (7, "SF"), (11, "OF")):
+            for bit_pos, flag in ((0, "CF"), (2, "PF"), (6, "ZF"), (7, "SF"), (11, "OF")):
                 if state.flags.get(flag, False):
                     eflags |= (1 << bit_pos)
         sp_reg = "rsp" if state.bit_width == 64 else "esp"
@@ -2115,11 +2115,13 @@ class SymbolicExecutor:
             if Z3Solver.available() and hasattr(eflags, "sort"):
                 one = _z3.BitVecVal(1, 1)
                 state.flags["CF"] = _z3.Extract(0, 0, eflags) == one
+                state.flags["PF"] = _z3.Extract(2, 2, eflags) == one
                 state.flags["ZF"] = _z3.Extract(6, 6, eflags) == one
                 state.flags["SF"] = _z3.Extract(7, 7, eflags) == one
                 state.flags["OF"] = _z3.Extract(11, 11, eflags) == one
             elif isinstance(eflags, int):
                 state.flags["CF"] = bool(eflags & 1)
+                state.flags["PF"] = bool(eflags & (1 << 2))
                 state.flags["ZF"] = bool(eflags & (1 << 6))
                 state.flags["SF"] = bool(eflags & (1 << 7))
                 state.flags["OF"] = bool(eflags & (1 << 11))
@@ -2877,11 +2879,12 @@ class SymbolicExecutor:
         cf = state.flags.get("CF")
         sf = state.flags.get("SF")
         of = state.flags.get("OF")
+        pf = state.flags.get("PF", False)
 
         # Decide whether we need z3 mode: at least one flag is a z3 expression
         _symbolic = (
             Z3Solver.available()
-            and any(hasattr(v, "sort") or hasattr(v, "sexpr") for v in (zf, cf, sf, of) if v is not None)
+            and any(hasattr(v, "sort") or hasattr(v, "sexpr") for v in (zf, cf, sf, of, pf) if v is not None)
         )
 
         if _symbolic:
@@ -2894,6 +2897,7 @@ class SymbolicExecutor:
                 return v
 
             zf, cf, sf, of = _to_bv(zf), _to_bv(cf), _to_bv(sf), _to_bv(of)
+            pf = _to_bv(pf)
 
         cc = cc.lower()
         # Canonical condition-code mapping
@@ -2946,9 +2950,11 @@ class SymbolicExecutor:
                 return _z3.Not(of)
             return not of
         elif cc == "p" or cc == "pe":
-            return False
+            return pf
         elif cc == "np" or cc == "po":
-            return True
+            if _symbolic:
+                return _z3.Not(pf)
+            return not pf
         return False
 
     def _build_branch_constraint(self, state: SymbolicState, insn: LiftedInstruction) -> Any:

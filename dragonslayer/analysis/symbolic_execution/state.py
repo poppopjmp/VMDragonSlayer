@@ -315,6 +315,12 @@ class SymbolicState:
                 self.flags["OF"] = z3.And(sign_l != sign_r, sign_res != sign_l)
             else:
                 self.flags["OF"] = z3.And(sign_l == sign_r, sign_res != sign_l)
+            # PF: parity of the low byte (set when even number of bits)
+            low_byte = z3.Extract(7, 0, result) if bw >= 8 else result
+            pf_xor = low_byte
+            for shift in (4, 2, 1):
+                pf_xor = pf_xor ^ z3.LShR(pf_xor, shift)
+            self.flags["PF"] = z3.Extract(0, 0, pf_xor) == z3.BitVecVal(0, 1)
         else:
             # Concrete path
             mask = (1 << bw) - 1
@@ -335,6 +341,8 @@ class SymbolicState:
                 sr = (ri >> (bw - 1)) & 1
                 sres = (r >> (bw - 1)) & 1
                 self.flags["OF"] = (sl == sr) and (sres != sl)
+            # PF: parity of low byte (set when even number of 1-bits)
+            self.flags["PF"] = (bin(r & 0xFF).count("1") % 2) == 0
 
     def update_flags_logic(self, result: Any, *, operand_size: int = 0) -> None:
         """Update ZF/SF after a logical operation (AND/OR/XOR/TEST).
@@ -358,11 +366,18 @@ class SymbolicState:
             zero = z3.BitVecVal(0, bw)
             self.flags["ZF"] = result == zero
             self.flags["SF"] = z3.Extract(bw - 1, bw - 1, result) == z3.BitVecVal(1, 1)
+            # PF: parity of low byte
+            low_byte = z3.Extract(7, 0, result) if bw >= 8 else result
+            pf_xor = low_byte
+            for shift in (4, 2, 1):
+                pf_xor = pf_xor ^ z3.LShR(pf_xor, shift)
+            self.flags["PF"] = z3.Extract(0, 0, pf_xor) == z3.BitVecVal(0, 1)
         else:
             mask = (1 << bw) - 1
             r = result & mask
             self.flags["ZF"] = (r == 0)
             self.flags["SF"] = bool(r >> (bw - 1))
+            self.flags["PF"] = (bin(r & 0xFF).count("1") % 2) == 0
         self.flags["CF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
         self.flags["OF"] = False if not _Z3_AVAILABLE else z3.BoolVal(False)
 

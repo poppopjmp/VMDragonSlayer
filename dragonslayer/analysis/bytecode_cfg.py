@@ -1094,7 +1094,10 @@ def build_static_cfg(
 
     edges = _build_edges(blocks, vm_insns)
     graph = _build_nx_graph(blocks, edges)
-    detect_natural_loops(blocks, edges, graph)
+    loops = detect_natural_loops(blocks, edges, graph)
+    lt: Optional[LoopTree] = None
+    if loops:
+        lt = LoopTree(loops)
 
     return HandlerCFG(
         blocks=blocks,
@@ -1102,4 +1105,5 @@ def build_static_cfg(
         graph=graph,
         entry_block_id=blocks[0].block_id if blocks else 0,
         vm_instructions=vm_insns,
+        loop_tree=lt,
     )
