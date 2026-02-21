@@ -110,12 +110,19 @@ class AnalysisMetrics:
                 self._order.append(name)
         return pm
 
-    def stop_phase(self, name: str) -> None:
+    def stop_phase(self, name: str, *, item_count: int = 0, error_count: int = 0,
+                   **metadata: Any) -> None:
         with self._lock:
             pm = self._phases.get(name)
         if pm:
             pm.end_ts = time.perf_counter()
             pm.elapsed_s = pm.end_ts - pm.start_ts
+            if item_count:
+                pm.item_count += item_count
+            if error_count:
+                pm.error_count += error_count
+            if metadata:
+                pm.metadata.update(metadata)
 
     # -- finalise ------------------------------------------------------------
 

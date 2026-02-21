@@ -209,12 +209,14 @@ class SymbolicState:
         # B54: Symbolic call stack for call/return tracking
         self.call_stack: List[int] = []
 
-        # Explicit EFLAGS: ZF (zero), CF (carry/borrow), SF (sign), OF (overflow)
+        # Explicit EFLAGS: ZF, CF, SF, OF, PF (parity), AF (auxiliary carry)
         self.flags: Dict[str, Any] = {
             "ZF": False,
             "CF": False,
             "SF": False,
             "OF": False,
+            "PF": False,
+            "AF": False,
         }
 
         # Initialise registers

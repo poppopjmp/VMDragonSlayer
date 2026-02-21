@@ -28,6 +28,7 @@ from .state import SymbolicState
 from .lifter import InstructionLifter, LiftedInstruction, InstructionCategory
 from .solver import Z3Solver, SolverResult
 
+from dragonslayer.core.exceptions import AnalysisError, ResourceLimitError
 # B79: Hoist z3 import to module level to avoid repeated inline imports.
 # The module is optional; all z3-dependent code checks _HAS_Z3 first.
 try:
@@ -333,8 +334,10 @@ class SymbolicExecutor:
                 ],
             )
 
-        except Exception as exc:
-            logger.exception("Symbolic execution failed")
+        except (AnalysisError, ResourceLimitError,
+                ValueError, KeyError, IndexError, ArithmeticError,
+                OverflowError, MemoryError, RecursionError) as exc:
+            logger.exception("Symbolic execution failed: %s", type(exc).__name__)
             return ExecutionResult(success=False, error=str(exc))
 
     # -- Basic block discovery -----------------------------------------------
