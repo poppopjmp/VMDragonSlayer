@@ -50,6 +50,15 @@ __all__ = [
     "CVOpcodeTable", "CVDevirtResult",
     "identify_cv_version", "reconstruct_cv_handler_table",
     "devirtualize_cv",
+    # trace_collector (B106)
+    "TraceBackend", "TraceConfig", "CollectionResult",
+    "collect_trace", "collect_trace_from_plugin", "collect_trace_from_file",
+    "filter_trace", "merge_traces", "trace_statistics",
+    # trace_export (B106)
+    "OutputFormat", "export_trace", "render_trace",
+    "render_trace_json", "render_trace_text", "render_trace_csv",
+    "render_ida_annotations", "render_ghidra_script",
+    "list_formats", "validate_roundtrip",
 ]
 
 from .binary_format import (  # noqa: F401
@@ -241,3 +250,51 @@ except (ImportError, AttributeError):
     identify_cv_version = None  # type: ignore[assignment,misc]
     reconstruct_cv_handler_table = None  # type: ignore[assignment,misc]
     devirtualize_cv = None  # type: ignore[assignment,misc]
+
+try:
+    from .trace_collector import (  # noqa: F401
+        TraceBackend,
+        TraceConfig,
+        CollectionResult,
+        collect_trace,
+        collect_trace_from_plugin,
+        collect_trace_from_file,
+        filter_trace,
+        merge_traces,
+        trace_statistics,
+    )
+except (ImportError, AttributeError):
+    TraceBackend = None  # type: ignore[assignment,misc]
+    TraceConfig = None  # type: ignore[assignment,misc]
+    CollectionResult = None  # type: ignore[assignment,misc]
+    collect_trace = None  # type: ignore[assignment,misc]
+    collect_trace_from_plugin = None  # type: ignore[assignment,misc]
+    collect_trace_from_file = None  # type: ignore[assignment,misc]
+    filter_trace = None  # type: ignore[assignment,misc]
+    merge_traces = None  # type: ignore[assignment,misc]
+    trace_statistics = None  # type: ignore[assignment,misc]
+
+try:
+    from .trace_export import (  # noqa: F401
+        OutputFormat,
+        export_trace,
+        render_trace,
+        render_trace_json,
+        render_trace_text,
+        render_trace_csv,
+        render_ida_annotations,
+        render_ghidra_script,
+        list_formats,
+        validate_roundtrip,
+    )
+except (ImportError, AttributeError):
+    OutputFormat = None  # type: ignore[assignment,misc]
+    export_trace = None  # type: ignore[assignment,misc]
+    render_trace = None  # type: ignore[assignment,misc]
+    render_trace_json = None  # type: ignore[assignment,misc]
+    render_trace_text = None  # type: ignore[assignment,misc]
+    render_trace_csv = None  # type: ignore[assignment,misc]
+    render_ida_annotations = None  # type: ignore[assignment,misc]
+    render_ghidra_script = None  # type: ignore[assignment,misc]
+    list_formats = None  # type: ignore[assignment,misc]
+    validate_roundtrip = None  # type: ignore[assignment,misc]
