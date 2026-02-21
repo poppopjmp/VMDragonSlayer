@@ -532,14 +532,25 @@ class PatternRecognizer:
 
     # B82: Map from YARA rule names → (protector, version, base_confidence)
     _YARA_VERSION_MAP: Dict[str, Tuple[str, str, float]] = {
+        # --- VMProtect ---
         "VMP_30_Handler_Prologue": ("VMProtect", "3.0.x", 0.85),
         "VMP_31_Handler_Prologue": ("VMProtect", "3.1.x", 0.85),
         "VMP_35_Handler_Prologue": ("VMProtect", "3.5.x", 0.80),
         "VMP_38_Extended_Dispatch": ("VMProtect", "3.8.x", 0.75),
         "VMP_Dispatcher_Loop": ("VMProtect", "unknown", 0.60),
+        "VMP_30_Stack_Machine": ("VMProtect", "3.0.x", 0.70),
+        "VMP_31_Mutation_Engine": ("VMProtect", "3.1.x", 0.70),
+        "VMP_35_Handler_Table": ("VMProtect", "3.5.x", 0.75),
+        "VMP_38_Complex_Dispatch": ("VMProtect", "3.8.x", 0.70),
+        # --- Themida / Code Virtualizer ---
         "Themida_2x_Entry": ("Themida", "2.x", 0.80),
         "Themida_3x_Entry": ("Themida", "3.x", 0.80),
         "CodeVirtualizer_Handler": ("Themida", "unknown", 0.65),
+        "Themida_2x_VM_Init": ("Themida", "2.x", 0.75),
+        "Themida_3x_Dolphin": ("Themida", "3.x", 0.75),
+        "Themida_3x_Tiger": ("Themida", "3.x", 0.70),
+        "CodeVirtualizer_2x_Dispatch": ("Themida", "2.x", 0.70),
+        "CodeVirtualizer_3x_Dispatch": ("Themida", "3.x", 0.70),
     }
 
     # Confidence boost when both regex and YARA agree on the same version

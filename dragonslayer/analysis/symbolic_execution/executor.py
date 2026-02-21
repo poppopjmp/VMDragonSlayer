@@ -2285,6 +2285,48 @@ class SymbolicExecutor:
             result |= ((la - lb) & mask) << shift
         return result
 
+    @staticmethod
+    def _packed_mul(a: int, b: int, lane_bits: int) -> int:
+        """Packed multiplication — *lane_bits* wide lanes (low half)."""
+        mask = (1 << lane_bits) - 1
+        result = 0
+        for i in range(128 // lane_bits):
+            shift = i * lane_bits
+            la = (a >> shift) & mask
+            lb = (b >> shift) & mask
+            result |= ((la * lb) & mask) << shift
+        return result
+
+    @staticmethod
+    def _z3_lane_op(
+        a: Any, b: Any, lane_bits: int, op: str,
+    ) -> Any:
+        """Apply a lane-aware operation on 128-bit z3 BitVecs.
+
+        For each lane, Extract → operate → Concat back to 128 bits.
+        Supported *op*: ``"add"``, ``"sub"``, ``"mul"``.
+        """
+        num_lanes = 128 // lane_bits
+        lanes = []
+        for i in range(num_lanes):
+            hi = (i + 1) * lane_bits - 1
+            lo = i * lane_bits
+            la = _z3.Extract(hi, lo, a)
+            lb = _z3.Extract(hi, lo, b)
+            if op == "add":
+                lanes.append(la + lb)
+            elif op == "sub":
+                lanes.append(la - lb)
+            elif op == "mul":
+                lanes.append(la * lb)
+            else:
+                lanes.append(la + lb)
+        # Concat expects MSB-first: lanes[-1] is highest
+        result = lanes[-1]
+        for lane in reversed(lanes[:-1]):
+            result = _z3.Concat(result, lane)
+        return result
+
     _LANE_WIDTH = {"paddb": 8, "paddw": 16, "paddd": 32, "paddq": 64,
                    "psubb": 8, "psubw": 16, "psubd": 32, "psubq": 64,
                    "pmullw": 16}
@@ -2368,33 +2410,34 @@ class SymbolicExecutor:
                          insn: LiftedInstruction, mnemonic: str) -> None:
         """PADDB/PADDW/PADDD/PADDQ/PSUBB/PSUBW/PSUBD/PSUBQ/PMULLW.
 
-        Lane-aware packed arithmetic.  Under z3, operations are simplified
-        to full 128-bit add/sub (correct for taint/data-flow, approximate
-        for lane overflow).  For concrete ints, exact lane wrapping is
-        applied.
+        Lane-aware packed arithmetic.  Both z3 and concrete paths use
+        per-lane operations to avoid cross-lane carry/overflow leakage.
         """
         if len(ops) != 2:
             return
         left = self._ensure_xmm(self._resolve_operand(state, ops[0]))
         right = self._ensure_xmm(self._resolve_operand(state, ops[1]))
-        lane = self._LANE_WIDTH.get(mnemonic.lower(), 32)
+        mn = mnemonic.lower()
+        lane = self._LANE_WIDTH.get(mn, 32)
+
+        if mn.startswith("padd"):
+            op_kind = "add"
+        elif mn == "pmullw":
+            op_kind = "mul"
+        else:
+            op_kind = "sub"
 
         if _HAS_Z3 and (hasattr(left, "sort") or hasattr(right, "sort")):
             l_bv = self._ensure_xmm(left)
             r_bv = self._ensure_xmm(right)
-            if mnemonic.lower().startswith("padd"):
-                result = l_bv + r_bv
-            elif mnemonic.lower() == "pmullw":
-                result = l_bv * r_bv
-            else:
-                result = l_bv - r_bv
+            result = self._z3_lane_op(l_bv, r_bv, lane, op_kind)
         else:
             li = left if isinstance(left, int) else 0
             ri = right if isinstance(right, int) else 0
-            if mnemonic.lower().startswith("padd"):
+            if op_kind == "add":
                 result = self._packed_add(li, ri, lane)
-            elif mnemonic.lower() == "pmullw":
-                result = self._packed_add(li, ri, lane)  # approximate
+            elif op_kind == "mul":
+                result = self._packed_mul(li, ri, lane)
             else:
                 result = self._packed_sub(li, ri, lane)
 

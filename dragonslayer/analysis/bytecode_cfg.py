@@ -224,6 +224,7 @@ class HandlerCFG:
     graph: Any = None  # networkx.DiGraph when available
     entry_block_id: int = 0
     vm_instructions: List[VMInstruction] = field(default_factory=list)
+    loop_tree: Optional["LoopTree"] = None
 
     @property
     def block_count(self) -> int:
@@ -277,14 +278,17 @@ class HandlerCFG:
         n_loops = len(self.loop_headers())
         n_exits = len(self.exit_blocks())
         total_insns = sum(b.instruction_count for b in self.blocks)
+        depth_str = ""
+        if self.loop_tree:
+            depth_str = f", max loop depth {self.loop_tree.max_depth}"
         return (
             f"HandlerCFG: {self.block_count} blocks, "
             f"{self.edge_count} edges, {total_insns} instructions, "
-            f"{n_loops} loops, {n_exits} exits"
+            f"{n_loops} loops, {n_exits} exits{depth_str}"
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result: Dict[str, Any] = {
             "block_count": self.block_count,
             "edge_count": self.edge_count,
             "entry_block_id": self.entry_block_id,
@@ -293,6 +297,9 @@ class HandlerCFG:
             "blocks": [b.to_dict() for b in self.blocks],
             "edges": [e.to_dict() for e in self.edges],
         }
+        if self.loop_tree:
+            result["loop_tree"] = self.loop_tree.to_dict()
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +682,187 @@ def detect_natural_loops(
 
 
 # ---------------------------------------------------------------------------
+# Step 5b — Loop Tree (nesting hierarchy)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class NaturalLoop:
+    """A single natural loop in the CFG."""
+
+    header: int
+    """Block-id of the loop header (dominator / back-edge target)."""
+
+    back_edge_sources: List[int] = field(default_factory=list)
+    """Block-ids that branch back to ``header``."""
+
+    body: Set[int] = field(default_factory=set)
+    """All block-ids belonging to this loop (including ``header``)."""
+
+    parent: Optional["NaturalLoop"] = field(default=None, repr=False)
+    """Enclosing loop (``None`` for outermost / root loops)."""
+
+    children: List["NaturalLoop"] = field(default_factory=list)
+    """Immediately nested child loops."""
+
+    @property
+    def nesting_depth(self) -> int:
+        """0 for outermost loops, +1 for each level of nesting."""
+        depth = 0
+        cur = self.parent
+        while cur is not None:
+            depth += 1
+            cur = cur.parent
+        return depth
+
+    @property
+    def is_innermost(self) -> bool:
+        return len(self.children) == 0
+
+    def __contains__(self, block_id: int) -> bool:
+        return block_id in self.body
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "header": self.header,
+            "back_edge_sources": self.back_edge_sources,
+            "body": sorted(self.body),
+            "nesting_depth": self.nesting_depth,
+            "children": [c.header for c in self.children],
+        }
+
+
+class LoopTree:
+    """Hierarchical representation of all natural loops in the CFG.
+
+    Builds a nesting forest from the flat list returned by
+    :func:`detect_natural_loops`.  Two loops are in a parent/child
+    relationship when the child's body is a strict subset of the
+    parent's body.  Loops with identical headers are merged.
+    """
+
+    def __init__(self, loops: Optional[List[Dict[str, Any]]] = None) -> None:
+        self._loops_by_header: Dict[int, NaturalLoop] = {}
+        self.roots: List[NaturalLoop] = []
+        if loops:
+            self._build(loops)
+
+    # -- construction -------------------------------------------------------
+
+    def _build(self, raw_loops: List[Dict[str, Any]]) -> None:
+        """Merge duplicate headers & compute nesting."""
+        # 1. Merge raw dicts into NaturalLoop objects by header
+        for raw in raw_loops:
+            hdr = raw["header"]
+            if hdr in self._loops_by_header:
+                nl = self._loops_by_header[hdr]
+                nl.body |= raw.get("body", set())
+                src = raw.get("back_edge_source")
+                if src is not None and src not in nl.back_edge_sources:
+                    nl.back_edge_sources.append(src)
+            else:
+                nl = NaturalLoop(
+                    header=hdr,
+                    back_edge_sources=[raw["back_edge_source"]]
+                    if "back_edge_source" in raw
+                    else [],
+                    body=set(raw.get("body", set())),
+                )
+                self._loops_by_header[hdr] = nl
+
+        all_loops = list(self._loops_by_header.values())
+
+        # 2. Sort by body size descending so outer loops come first
+        all_loops.sort(key=lambda lp: len(lp.body), reverse=True)
+
+        # 3. Build nesting: child's body ⊂ parent's body
+        for i, inner in enumerate(all_loops):
+            best_parent: Optional[NaturalLoop] = None
+            best_size = float("inf")
+            for j, outer in enumerate(all_loops):
+                if i == j:
+                    continue
+                if inner.body < outer.body:  # strict subset
+                    if len(outer.body) < best_size:
+                        best_parent = outer
+                        best_size = len(outer.body)
+            if best_parent is not None:
+                inner.parent = best_parent
+                best_parent.children.append(inner)
+
+        self.roots = [lp for lp in all_loops if lp.parent is None]
+
+    # -- queries ------------------------------------------------------------
+
+    @property
+    def all_loops(self) -> List[NaturalLoop]:
+        return list(self._loops_by_header.values())
+
+    @property
+    def loop_count(self) -> int:
+        return len(self._loops_by_header)
+
+    @property
+    def max_depth(self) -> int:
+        """Maximum nesting depth across all loops (0 if no loops)."""
+        if not self._loops_by_header:
+            return 0
+        return max(lp.nesting_depth for lp in self._loops_by_header.values())
+
+    def get_loop(self, header: int) -> Optional[NaturalLoop]:
+        return self._loops_by_header.get(header)
+
+    def innermost_loops(self) -> List[NaturalLoop]:
+        return [lp for lp in self._loops_by_header.values() if lp.is_innermost]
+
+    def loop_for_block(self, block_id: int) -> Optional[NaturalLoop]:
+        """Return the *innermost* loop containing ``block_id``."""
+        best: Optional[NaturalLoop] = None
+        best_size = float("inf")
+        for lp in self._loops_by_header.values():
+            if block_id in lp.body and len(lp.body) < best_size:
+                best = lp
+                best_size = len(lp.body)
+        return best
+
+    def is_reducible(self) -> bool:
+        """Check if all loops have a single header (natural loops).
+
+        Always ``True`` after construction from
+        :func:`detect_natural_loops` which produces natural loops by
+        definition, but useful as a guard after manual edits.
+        """
+        for lp in self._loops_by_header.values():
+            if lp.header not in lp.body:
+                return False
+        return True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "loop_count": self.loop_count,
+            "max_depth": self.max_depth,
+            "reducible": self.is_reducible(),
+            "loops": [lp.to_dict() for lp in self._loops_by_header.values()],
+        }
+
+    def __len__(self) -> int:
+        return self.loop_count
+
+    def __bool__(self) -> bool:
+        return self.loop_count > 0
+
+
+def build_loop_tree(
+    blocks: List[HandlerBasicBlock],
+    edges: List[CFGEdge],
+    graph: Any = None,
+) -> LoopTree:
+    """Build a :class:`LoopTree` from the CFG. Convenience wrapper."""
+    flat = detect_natural_loops(blocks, edges, graph)
+    return LoopTree(flat)
+
+
+# ---------------------------------------------------------------------------
 # Public API — build_handler_cfg
 # ---------------------------------------------------------------------------
 
@@ -726,10 +914,12 @@ def build_handler_cfg(
 
     # Step 6: Annotate back-edges for loop detection
     loops = detect_natural_loops(blocks, edges, graph)
+    lt: Optional[LoopTree] = None
     if loops:
         logger.debug(
             "Detected %d natural loops in handler CFG", len(loops),
         )
+        lt = LoopTree(loops)
 
     cfg = HandlerCFG(
         blocks=blocks,
@@ -737,6 +927,7 @@ def build_handler_cfg(
         graph=graph,
         entry_block_id=blocks[0].block_id,
         vm_instructions=vm_insns,
+        loop_tree=lt,
     )
 
     return cfg

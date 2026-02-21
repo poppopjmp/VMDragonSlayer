@@ -42,3 +42,63 @@ rule CodeVirtualizer_Handler {
     condition:
         $cv_fetch
 }
+
+rule Themida_2x_VM_Init {
+    meta:
+        description = "Themida 2.x VM context initialisation (pushad + mov ebp,esp)"
+        protector = "Themida"
+        version = "2.x"
+        confidence = 75
+    strings:
+        $init = { 60 8B EC [0-8] 83 EC }
+    condition:
+        $init
+}
+
+rule Themida_3x_Dolphin {
+    meta:
+        description = "Themida 3.x Dolphin VM variant (LEA + XOR init)"
+        protector = "Themida"
+        version = "3.x"
+        confidence = 75
+    strings:
+        $dolphin = { 48 8D ?? ?? ?? ?? ?? 48 33 ?? E8 }
+    condition:
+        $dolphin
+}
+
+rule Themida_3x_Tiger {
+    meta:
+        description = "Themida 3.x Tiger VM variant (SUB RSP + MOV chain)"
+        protector = "Themida"
+        version = "3.x"
+        confidence = 70
+    strings:
+        $tiger = { 48 83 EC ?? 48 89 ?? ?? 48 89 ?? ?? 48 89 }
+    condition:
+        $tiger
+}
+
+rule CodeVirtualizer_2x_Dispatch {
+    meta:
+        description = "Code Virtualizer 2.x dispatch loop (LODSB + XLAT pattern)"
+        protector = "CodeVirtualizer"
+        version = "2.x"
+        confidence = 70
+    strings:
+        $lodsb_xlat = { AC D7 [0-8] FF }
+    condition:
+        $lodsb_xlat
+}
+
+rule CodeVirtualizer_3x_Dispatch {
+    meta:
+        description = "Code Virtualizer 3.x dispatch with handler table"
+        protector = "CodeVirtualizer"
+        version = "3.x"
+        confidence = 70
+    strings:
+        $cv3_dispatch = { 0F B6 ?? 48 8B ?? ?? ?? ?? ?? FF }
+    condition:
+        $cv3_dispatch
+}

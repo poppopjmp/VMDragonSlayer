@@ -70,10 +70,13 @@ from .bytecode_cfg import (  # noqa: F401
     walk_trace_bytecode,
     walk_static_bytecode,
     detect_natural_loops,
+    build_loop_tree,
     VMInstruction,
     HandlerBasicBlock,
     CFGEdge,
     HandlerCFG,
+    NaturalLoop,
+    LoopTree,
 )
 
 from .symbolic_depth import (  # noqa: F401

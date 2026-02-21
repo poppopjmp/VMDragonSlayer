@@ -66,3 +66,51 @@ rule VMP_Dispatcher_Loop {
     condition:
         $movzx_jmp
 }
+
+rule VMP_30_Stack_Machine {
+    meta:
+        description = "VMProtect 3.0.x stack-machine pop sequence"
+        protector = "VMProtect"
+        version = "3.0.x"
+        confidence = 70
+    strings:
+        $stack_pop = { 58 5? 5? 89 ?? [0-4] E9 }
+    condition:
+        $stack_pop
+}
+
+rule VMP_31_Mutation_Engine {
+    meta:
+        description = "VMProtect 3.1.x mutation engine marker (xor + rol chain)"
+        protector = "VMProtect"
+        version = "3.1.x"
+        confidence = 70
+    strings:
+        $xor_rol = { 33 ?? C1 C0 ?? 33 ?? }
+    condition:
+        $xor_rol
+}
+
+rule VMP_35_Handler_Table {
+    meta:
+        description = "VMProtect 3.5.x handler table lookup (lea + movsxd)"
+        protector = "VMProtect"
+        version = "3.5.x"
+        confidence = 75
+    strings:
+        $lea_movsxd = { 48 8D ?? ?? ?? ?? ?? 48 63 }
+    condition:
+        $lea_movsxd
+}
+
+rule VMP_38_Complex_Dispatch {
+    meta:
+        description = "VMProtect 3.8.x complex dispatch (multi-level indirect)"
+        protector = "VMProtect"
+        version = "3.8.x"
+        confidence = 70
+    strings:
+        $multi_indirect = { 4? 8B ?? ?? 4? 8B ?? ?? FF }
+    condition:
+        $multi_indirect
+}
