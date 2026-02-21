@@ -156,7 +156,7 @@ def analyze(
             binary_data,
             analysis_type=analysis_type,
         )
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, ImportError) as exc:
         click.secho(f"Analysis failed: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
     elapsed = time.perf_counter() - t0

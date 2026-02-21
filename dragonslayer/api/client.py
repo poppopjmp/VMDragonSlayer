@@ -132,7 +132,7 @@ class MetroplexGatewayClient:
 
         try:
             return resp.json()
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             raise APIError(f"Gateway returned non-JSON response: {exc}")
 
     def scan_plugin(
@@ -171,7 +171,7 @@ class MetroplexGatewayClient:
 
         try:
             return resp.json()
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             raise APIError(f"Plugin {plugin_name} returned non-JSON response: {exc}")
 
     def list_plugins(self) -> List[Dict[str, Any]]:
@@ -182,7 +182,7 @@ class MetroplexGatewayClient:
                 resp = client.get(url)
             resp.raise_for_status()
             return resp.json()
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
             raise GatewayError(f"Failed to list plugins: {exc}")
 
     def health(self) -> Dict[str, Any]:
@@ -193,7 +193,7 @@ class MetroplexGatewayClient:
                 resp = client.get(url)
             resp.raise_for_status()
             return resp.json()
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
             raise GatewayError(f"Gateway health check failed: {exc}")
 
 

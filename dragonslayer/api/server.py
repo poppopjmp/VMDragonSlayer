@@ -104,7 +104,7 @@ class AnalysisRequest(BaseModel):
         """Validate base64 encoding."""
         try:
             base64.b64decode(v)
-        except Exception:
+        except (ValueError, TypeError):
             raise ValueError("Invalid base64 encoding")
         return v
 
@@ -150,7 +150,7 @@ async def lifespan(application: FastAPI):
     try:
         server_state['api'] = VMDragonSlayerAPI()
         logger.info("API server started successfully")
-    except Exception as exc:
+    except (ValueError, TypeError, RuntimeError, OSError, ImportError) as exc:
         logger.error("Failed to start API server: %s", exc)
         raise
     yield
@@ -408,7 +408,7 @@ async def circuit_breaker_middleware(request: Request, call_next):
         else:
             await circuit_breaker.record_failure()
         return response
-    except Exception:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, ConnectionError):
         await circuit_breaker.record_failure()
         raise
 
@@ -737,7 +737,7 @@ async def analyze_binary(
     except VMDragonSlayerError:
         # B57: Let registered exception handlers process framework errors.
         raise
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
         logger.error("Analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -808,7 +808,7 @@ async def upload_and_analyze(
     except VMDragonSlayerError:
         # B57: Let registered exception handlers process framework errors.
         raise
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
         logger.error("Upload analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

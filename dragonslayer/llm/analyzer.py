@@ -364,7 +364,7 @@ class LLMAnalyzer:
                     return {"raw": content}
             return {"raw": content}
 
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError, KeyError) as exc:
             logger.warning("LLM completion failed: %s", exc)
             return {"error": str(exc), "raw": ""}
 
@@ -518,7 +518,7 @@ def get_llm_analyzer(**kwargs: Any) -> LLMAnalyzer:
         defaults = {k: v for k, v in defaults.items() if v is not None}
         defaults.update(kwargs)
         _analyzer = LLMAnalyzer(**defaults)
-    except Exception:
+    except (ValueError, TypeError, KeyError, RuntimeError, OSError):
         _analyzer = LLMAnalyzer(**kwargs)
 
     return _analyzer

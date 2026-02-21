@@ -5,7 +5,7 @@ VMDragonSlayer API Module
 
 try:
     from .server import app, CircuitBreaker, circuit_breaker, CircuitState
-except Exception:  # server has heavy deps (fastapi)
+except (ImportError, OSError):  # server has heavy deps (fastapi)
     app = None  # type: ignore[assignment]
     CircuitBreaker = None  # type: ignore[assignment,misc]
     circuit_breaker = None  # type: ignore[assignment]

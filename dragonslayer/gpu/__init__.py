@@ -20,7 +20,7 @@ _HAS_CUDA = False
 try:
     import cupy  # type: ignore[import-untyped]
     _HAS_CUDA = True
-except Exception:
+except (ImportError, OSError):
     pass
 
 
