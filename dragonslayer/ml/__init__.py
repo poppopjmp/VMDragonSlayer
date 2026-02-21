@@ -33,8 +33,13 @@ try:
         prepare_training_data,
         prepare_extended_training_data,
         generate_synthetic_handlers,
+        generate_multi_protector_data,
         feature_importance,
         train_full_pipeline,
+        train_and_save_model,
+        PROTECTOR_VMPROTECT,
+        PROTECTOR_THEMIDA,
+        PROTECTOR_CV,
     )
 except (ImportError, AttributeError):
     ModelTrainer = None  # type: ignore[assignment,misc]
@@ -42,8 +47,13 @@ except (ImportError, AttributeError):
     prepare_training_data = None  # type: ignore[assignment,misc]
     prepare_extended_training_data = None  # type: ignore[assignment,misc]
     generate_synthetic_handlers = None  # type: ignore[assignment,misc]
+    generate_multi_protector_data = None  # type: ignore[assignment,misc]
     feature_importance = None  # type: ignore[assignment,misc]
     train_full_pipeline = None  # type: ignore[assignment,misc]
+    train_and_save_model = None  # type: ignore[assignment,misc]
+    PROTECTOR_VMPROTECT = None  # type: ignore[assignment,misc]
+    PROTECTOR_THEMIDA = None  # type: ignore[assignment,misc]
+    PROTECTOR_CV = None  # type: ignore[assignment,misc]
 
 try:
     from .model import BaseModel, VMHandlerModel, PredictionResult, SymbolicClassifierModel
@@ -121,8 +131,13 @@ __all__ = [
     'prepare_training_data',
     'prepare_extended_training_data',
     'generate_synthetic_handlers',
+    'generate_multi_protector_data',
     'feature_importance',
     'train_full_pipeline',
+    'train_and_save_model',
+    'PROTECTOR_VMPROTECT',
+    'PROTECTOR_THEMIDA',
+    'PROTECTOR_CV',
     'BaseModel',
     'VMHandlerModel',
     'PredictionResult',

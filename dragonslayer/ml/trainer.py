@@ -908,3 +908,640 @@ def train_full_pipeline(
         model.save(save_path)
 
     return model, result, imp
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Themida / WinLicense handler templates
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Themida VMs use EDI as the virtual context pointer with all virtual
+# registers stored at [edi+offset].  ESI is the virtual IP.
+# Handlers are shorter than VMProtect and use pushad/popad context save.
+
+_THEMIDA_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
+    "arithmetic": [
+        # ADD two virtual registers via EDI context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("add", "eax, ecx"),
+            ("mov", "[edi+0x00], eax"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [edi+0x20]"),
+        ],
+        # SUB via EDI context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x08]"),
+            ("sub", "eax, ecx"),
+            ("mov", "[edi+0x00], eax"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [edi+0x20]"),
+        ],
+        # NEG single register
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("neg", "eax"),
+            ("mov", "[edi+0x00], eax"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [edi+0x20]"),
+        ],
+        # IMUL via context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("imul", "eax, ecx"),
+            ("mov", "[edi+0x00], eax"),
+        ],
+    ],
+    "bitwise": [
+        # XOR via EDI context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("xor", "eax, ecx"),
+            ("mov", "[edi+0x00], eax"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [edi+0x20]"),
+        ],
+        # AND via EDI context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("and", "eax, ecx"),
+            ("mov", "[edi+0x00], eax"),
+        ],
+        # NOT
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("not", "eax"),
+            ("mov", "[edi+0x00], eax"),
+        ],
+        # SHL via context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "cl, [edi+0x04]"),
+            ("shl", "eax, cl"),
+            ("mov", "[edi+0x00], eax"),
+        ],
+    ],
+    "stack": [
+        # PUSH to Themida virtual stack (ESP-like in EDI context)
+        [
+            ("mov", "eax, [edi+0x10]"),
+            ("sub", "eax, 4"),
+            ("mov", "ecx, [edi+0x00]"),
+            ("mov", "[eax], ecx"),
+            ("mov", "[edi+0x10], eax"),
+        ],
+        # POP from Themida virtual stack
+        [
+            ("mov", "eax, [edi+0x10]"),
+            ("mov", "ecx, [eax]"),
+            ("add", "eax, 4"),
+            ("mov", "[edi+0x00], ecx"),
+            ("mov", "[edi+0x10], eax"),
+        ],
+    ],
+    "memory": [
+        # Load dword via virtual address in context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [eax]"),
+            ("mov", "[edi+0x00], ecx"),
+        ],
+        # Store dword
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("mov", "[eax], ecx"),
+        ],
+        # Load byte (movzx)
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("movzx", "ecx, byte ptr [eax]"),
+            ("mov", "[edi+0x00], ecx"),
+        ],
+    ],
+    "control_flow": [
+        # Unconditional jump: set ESI (vIP) from context
+        [
+            ("mov", "esi, [edi+0x00]"),
+        ],
+        # Conditional jump (Themida style: check flags + overwrite ESI)
+        [
+            ("push", "dword ptr [edi+0x20]"),
+            ("popfd", ""),
+            ("jz", "skip"),
+            ("mov", "esi, [edi+0x00]"),
+        ],
+        # VM call: push return address then jump
+        [
+            ("mov", "eax, esi"),
+            ("mov", "ecx, [edi+0x10]"),
+            ("sub", "ecx, 4"),
+            ("mov", "[ecx], eax"),
+            ("mov", "[edi+0x10], ecx"),
+            ("mov", "esi, [edi+0x00]"),
+        ],
+    ],
+    "nop": [
+        [("nop", "")],
+        [("nop", ""), ("nop", "")],
+    ],
+    "vm_control": [
+        # VM entry — Themida pushad-style context save
+        [
+            ("pushad", ""),
+            ("mov", "edi, esp"),
+            ("sub", "esp, 0x40"),
+            ("mov", "esi, [esp+0x24]"),
+        ],
+        # VM exit — popad-style context restore
+        [
+            ("mov", "esp, edi"),
+            ("popad", ""),
+            ("ret", ""),
+        ],
+        # Opcode fetch from ESI (Themida style)
+        [
+            ("movzx", "eax, byte ptr [esi]"),
+            ("inc", "esi"),
+        ],
+        # Dispatch via handler table
+        [
+            ("movzx", "eax, byte ptr [esi]"),
+            ("inc", "esi"),
+            ("mov", "edx, [ebx+eax*4]"),
+            ("jmp", "edx"),
+        ],
+        # Context save — store single register from virtual context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "[edi+ecx*4], eax"),
+        ],
+    ],
+    "comparison": [
+        # CMP two virtual registers, store flags in EDI context
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("cmp", "eax, ecx"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [edi+0x20]"),
+        ],
+        # TEST two virtual registers
+        [
+            ("mov", "eax, [edi+0x00]"),
+            ("mov", "ecx, [edi+0x04]"),
+            ("test", "eax, ecx"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [edi+0x20]"),
+        ],
+    ],
+    "crypto": [
+        # Themida rolling-key XOR decrypt
+        [
+            ("movzx", "eax, byte ptr [esi]"),
+            ("xor", "al, cl"),
+            ("ror", "cl, 3"),
+            ("xor", "cl, al"),
+            ("inc", "esi"),
+        ],
+        # ADD-based key update
+        [
+            ("movzx", "eax, byte ptr [esi]"),
+            ("add", "al, cl"),
+            ("rol", "cl, 5"),
+            ("sub", "cl, al"),
+            ("inc", "esi"),
+        ],
+    ],
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Code Virtualizer (Oreans) handler templates
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Code Virtualizer (CV) VMs use LODSB for bytecode fetch, XLAT for
+# bytecode decryption, and ESI as the virtual IP.  CV handlers are
+# typically CISC-style with longer instruction sequences.
+
+_CV_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
+    "arithmetic": [
+        # CV ADD: LODSB fetch + XLAT decrypt + context-based add
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("add", "[esp+eax*4], ecx"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [esp+0x20]"),
+        ],
+        # CV SUB
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("sub", "[esp+eax*4], ecx"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [esp+0x20]"),
+        ],
+        # CV NEG single register
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("neg", "dword ptr [esp+eax*4]"),
+        ],
+    ],
+    "bitwise": [
+        # CV XOR
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("xor", "[esp+eax*4], ecx"),
+        ],
+        # CV AND
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("and", "[esp+eax*4], ecx"),
+        ],
+        # CV SHL
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "cl, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("shl", "[esp+eax*4], cl"),
+        ],
+    ],
+    "stack": [
+        # CV PUSH via LODSB + XLAT
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("push", "dword ptr [esp+eax*4+4]"),
+        ],
+        # CV POP
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("pop", "dword ptr [esp+eax*4]"),
+        ],
+    ],
+    "memory": [
+        # CV LOAD dword
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("mov", "ecx, [ecx]"),
+            ("mov", "[esp+eax*4], ecx"),
+        ],
+        # CV STORE dword
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "edx, [esp+eax*4]"),
+            ("mov", "[ecx], edx"),
+        ],
+    ],
+    "control_flow": [
+        # CV unconditional jump (read dword offset from bytecode)
+        [
+            ("lodsd", ""),
+            ("bswap", "eax"),
+            ("add", "esi, eax"),
+        ],
+        # CV conditional jump (flags-based)
+        [
+            ("push", "dword ptr [esp+0x20]"),
+            ("popfd", ""),
+            ("lodsd", ""),
+            ("bswap", "eax"),
+            ("jnz", "do_jump"),
+        ],
+    ],
+    "nop": [
+        [("lodsb", ""), ("xlat", "")],
+        [("nop", "")],
+    ],
+    "vm_control": [
+        # CV VM entry — save all GPRs to stack + set up XLAT table
+        [
+            ("pushad", ""),
+            ("mov", "ebx, [esp+0x24]"),
+            ("mov", "esi, [esp+0x20]"),
+            ("sub", "esp, 0x24"),
+        ],
+        # CV VM exit
+        [
+            ("add", "esp, 0x24"),
+            ("popad", ""),
+            ("ret", ""),
+        ],
+        # CV opcode fetch (LODSB + XLAT = fetch + decrypt in one step)
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+        ],
+        # CV dispatch: XLAT decoded opcode → handler table
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("movzx", "eax, al"),
+            ("jmp", "dword ptr [edx+eax*4]"),
+        ],
+    ],
+    "comparison": [
+        # CV CMP
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("cmp", "ecx, [esp+eax*4]"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [esp+0x20]"),
+        ],
+        # CV TEST
+        [
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("mov", "ecx, [esp+eax*4]"),
+            ("lodsb", ""),
+            ("xlat", ""),
+            ("test", "ecx, [esp+eax*4]"),
+            ("pushfd", ""),
+            ("pop", "dword ptr [esp+0x20]"),
+        ],
+    ],
+    "crypto": [
+        # CV key update (ror+xor chain)
+        [
+            ("ror", "ebp, 7"),
+            ("xor", "ebp, eax"),
+            ("add", "ebp, ecx"),
+        ],
+        # CV bswap-based decrypt
+        [
+            ("lodsb", ""),
+            ("bswap", "eax"),
+            ("xor", "eax, ebp"),
+            ("ror", "ebp, 3"),
+        ],
+    ],
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Multi-protector synthetic data generation
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Protector names used as metadata labels in synthetic data.
+PROTECTOR_VMPROTECT = "vmprotect"
+PROTECTOR_THEMIDA = "themida"
+PROTECTOR_CV = "code_virtualizer"
+
+_PROTECTOR_TEMPLATE_MAP: Dict[str, Dict[str, List[List[tuple[str, str]]]]] = {
+    PROTECTOR_VMPROTECT: _HANDLER_TEMPLATES,
+    PROTECTOR_THEMIDA: _THEMIDA_HANDLER_TEMPLATES,
+    PROTECTOR_CV: _CV_HANDLER_TEMPLATES,
+}
+
+
+def _apply_jitter(
+    body: List[tuple[str, str]],
+    rng: _random.Random,
+    *,
+    nop_probability: float = 0.5,
+    max_nops: int = 2,
+    reg_rename: bool = True,
+) -> List[tuple[str, str]]:
+    """Apply realistic jitter transformations to a handler template.
+
+    Jitter includes:
+    - Random NOP insertion (0-*max_nops* instructions)
+    - Register renaming (swap equivalent register names for diversity)
+    - Dead-code insertion (push/pop pairs that cancel out)
+
+    Returns a new list; does not mutate the original.
+    """
+    result = list(body)
+
+    # NOP insertion
+    if rng.random() < nop_probability:
+        n_nops = rng.randint(0, max_nops)
+        for _ in range(n_nops):
+            pos = rng.randint(0, len(result))
+            result.insert(pos, ("nop", ""))
+
+    # Register renaming — swap register pairs that don't change semantics
+    if reg_rename and rng.random() < 0.3:
+        # Choose a rename pair for 64-bit or 32-bit contexts
+        rename_pairs_64 = [
+            ("rax", "rdx"), ("rcx", "r8"), ("r9", "r10"), ("r11", "r12"),
+        ]
+        rename_pairs_32 = [
+            ("eax", "edx"), ("ecx", "ebx"),
+        ]
+        # Detect register width from body
+        body_str = " ".join(ops for _, ops in result)
+        if "rax" in body_str or "r8" in body_str:
+            a, b = rng.choice(rename_pairs_64)
+        else:
+            a, b = rng.choice(rename_pairs_32)
+        # Only rename if both registers appear (to create meaningful variation)
+        if a in body_str and b not in body_str:
+            result = [(m, ops.replace(a, b)) for m, ops in result]
+
+    # Dead-code insertion (push/pop pair)
+    if rng.random() < 0.15:
+        dead_reg = rng.choice(["eax", "ecx", "edx", "ebx"])
+        pos = rng.randint(0, max(len(result) - 1, 0))
+        result.insert(pos, ("push", dead_reg))
+        result.insert(pos + 1, ("pop", dead_reg))
+
+    return result
+
+
+def generate_multi_protector_data(
+    n_per_category: int = 50,
+    *,
+    seed: int = 42,
+    protectors: Sequence[str] | None = None,
+    jitter: bool = True,
+) -> List[Dict[str, Any]]:
+    """Generate synthetic handler data for multiple protectors.
+
+    Each generated handler dict includes a ``protector`` key indicating
+    the source protector, in addition to the standard ``category``,
+    ``instructions``, ``mnemonics`` keys.
+
+    Parameters
+    ----------
+    n_per_category : int
+        Number of handlers per category per protector.
+    protectors : sequence of str or None
+        Which protectors to generate data for.  Defaults to all three
+        (VMProtect, Themida, Code Virtualizer).
+    jitter : bool
+        Apply realistic jitter (NOP insertion, register renaming,
+        dead-code insertion).
+
+    Returns
+    -------
+    list of dict
+        Shuffled list of handler dicts ready for feature extraction.
+    """
+    rng = _random.Random(seed)
+    if protectors is None:
+        protectors = list(_PROTECTOR_TEMPLATE_MAP.keys())
+
+    handlers: List[Dict[str, Any]] = []
+
+    for protector in protectors:
+        templates = _PROTECTOR_TEMPLATE_MAP.get(protector)
+        if templates is None:
+            logger.warning("Unknown protector %r, skipping", protector)
+            continue
+
+        for cat, cat_templates in templates.items():
+            for _ in range(n_per_category):
+                tmpl = rng.choice(cat_templates)
+                body = list(tmpl)
+
+                if jitter:
+                    body = _apply_jitter(body, rng)
+                else:
+                    body = list(body)
+
+                # Build instruction dicts
+                instructions: List[Dict[str, str]] = []
+                mnemonics: List[str] = []
+                for mnem, ops in body:
+                    instructions.append({"mnemonic": mnem, "operands": ops})
+                    mnemonics.append(mnem.lower())
+
+                _cat_to_op = {
+                    "arithmetic": "vm_add",
+                    "bitwise": "vm_xor",
+                    "stack": "vm_push",
+                    "memory": "vm_load",
+                    "control_flow": "vm_jmp",
+                    "vm_control": "vm_enter",
+                    "comparison": "vm_cmp",
+                    "crypto": "vm_decrypt",
+                    "nop": "vm_nop",
+                }
+
+                handlers.append({
+                    "instructions": instructions,
+                    "mnemonics": mnemonics,
+                    "category": cat,
+                    "operation": _cat_to_op.get(cat, "vm_unknown"),
+                    "operand_width": rng.choice([4, 8]),
+                    "block_count": rng.randint(1, 3),
+                    "reads": [],
+                    "writes": [],
+                    "protector": protector,
+                })
+
+    rng.shuffle(handlers)
+    return handlers
+
+
+def train_and_save_model(
+    output_path: str = "data/models/pretrained/handler_classifier.pkl",
+    *,
+    n_per_category: int = 80,
+    seed: int = 42,
+    algorithm: str = "auto",
+    n_estimators: int = 200,
+) -> tuple[VMHandlerModel, TrainingResult, List[tuple[str, float]]]:
+    """End-to-end: generate multi-protector data, train, and save.
+
+    Unlike :func:`train_full_pipeline`, this function generates data
+    from all three protector families (VMProtect, Themida, Code
+    Virtualizer) and saves both the model and a JSON training report.
+
+    Parameters
+    ----------
+    output_path : str
+        Where to save the trained model artifact.
+    n_per_category : int
+        Handlers per category per protector (total ≈ 3×9×n).
+    algorithm : str
+        ``"auto"``, ``"rf"``, or ``"gb"``.
+
+    Returns
+    -------
+    tuple of (VMHandlerModel, TrainingResult, feature_importances)
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    logger.info(
+        "Generating multi-protector synthetic data (n_per_cat=%d, seed=%d)",
+        n_per_category, seed,
+    )
+    handlers = generate_multi_protector_data(
+        n_per_category=n_per_category, seed=seed, jitter=True,
+    )
+    logger.info("Generated %d synthetic handlers across 3 protectors", len(handlers))
+
+    features, labels = prepare_extended_training_data(handlers, label_key="category")
+    names = EXTENDED_FEATURE_NAMES
+
+    model = VMHandlerModel()
+    trainer = ModelTrainer(model)
+    result = trainer.train(
+        features, labels,
+        n_estimators=n_estimators,
+        algorithm=algorithm,
+    )
+
+    imp = feature_importance(model, feature_names=names, top_n=20)
+
+    if model.is_trained:
+        model.save(output_path, feature_names=list(names))
+        logger.info("Saved trained model to %s", output_path)
+
+        # Save training report alongside model
+        report_path = str(_Path(output_path).with_suffix(".report.json"))
+        report = {
+            "model_path": output_path,
+            "accuracy": result.accuracy,
+            "n_samples": len(handlers),
+            "n_features": len(names),
+            "algorithm": result.metrics.get("algorithm", algorithm),
+            "n_estimators": n_estimators,
+            "protectors": list(_PROTECTOR_TEMPLATE_MAP.keys()),
+            "categories": sorted(set(labels)),
+            "top_features": [
+                {"name": n, "importance": round(v, 4)} for n, v in imp
+            ],
+        }
+        _Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(report_path, "w", encoding="utf-8") as fh:
+            _json.dump(report, fh, indent=2)
+        logger.info("Saved training report to %s", report_path)
+
+    return model, result, imp

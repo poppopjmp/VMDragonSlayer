@@ -1,0 +1,106 @@
+{
+  "model_path": "data/models/pretrained/handler_classifier.pkl",
+  "accuracy": 0.9852,
+  "n_samples": 2160,
+  "n_features": 132,
+  "algorithm": "GradientBoosting",
+  "n_estimators": 200,
+  "protectors": [
+    "vmprotect",
+    "themida",
+    "code_virtualizer"
+  ],
+  "categories": [
+    "arithmetic",
+    "bitwise",
+    "comparison",
+    "control_flow",
+    "crypto",
+    "memory",
+    "nop",
+    "stack",
+    "vm_control"
+  ],
+  "top_features": [
+    {
+      "name": "mem_deref_ratio",
+      "importance": 0.1406
+    },
+    {
+      "name": "logic_ratio",
+      "importance": 0.1185
+    },
+    {
+      "name": "avg_operand_count",
+      "importance": 0.0955
+    },
+    {
+      "name": "imm_ratio",
+      "importance": 0.0479
+    },
+    {
+      "name": "freq_test",
+      "importance": 0.0377
+    },
+    {
+      "name": "has_cmp_insn",
+      "importance": 0.0311
+    },
+    {
+      "name": "freq_neg",
+      "importance": 0.0307
+    },
+    {
+      "name": "arith_ratio",
+      "importance": 0.0296
+    },
+    {
+      "name": "tg_mov_mov_mov",
+      "importance": 0.0273
+    },
+    {
+      "name": "reg_read_rdi",
+      "importance": 0.0271
+    },
+    {
+      "name": "freq_rol",
+      "importance": 0.0254
+    },
+    {
+      "name": "freq_bswap",
+      "importance": 0.0219
+    },
+    {
+      "name": "bg_movzx_mov",
+      "importance": 0.0219
+    },
+    {
+      "name": "reg_only_ratio",
+      "importance": 0.0219
+    },
+    {
+      "name": "bg_add_mov",
+      "importance": 0.0217
+    },
+    {
+      "name": "freq_mov",
+      "importance": 0.0208
+    },
+    {
+      "name": "tg_mov_sub_mov",
+      "importance": 0.0181
+    },
+    {
+      "name": "bg_mov_mov",
+      "importance": 0.0163
+    },
+    {
+      "name": "freq_cmp",
+      "importance": 0.0162
+    },
+    {
+      "name": "instruction_count",
+      "importance": 0.0146
+    }
+  ]
+}
