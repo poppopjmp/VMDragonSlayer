@@ -134,7 +134,7 @@ class MachOAnalyzer(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Mach-O analysis failed")
             return self._make_result(success=False, error=str(exc),
                                      duration=time.monotonic() - t0)
@@ -232,13 +232,13 @@ class MachOAnalyzer(Plugin):
             if cmd_type in DYLIB_CMDS:
                 try:
                     libraries.append(cmd[2].decode("utf-8").rstrip("\x00"))
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type == LC_RPATH:
                 try:
                     rpaths.append(cmd[2].decode("utf-8").rstrip("\x00"))
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type in SEG_CMDS:
@@ -252,7 +252,7 @@ class MachOAnalyzer(Plugin):
                         "maxprot": hex(cmd[1].maxprot),
                         "initprot": hex(cmd[1].initprot),
                     })
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type == LC_UUID:
@@ -262,14 +262,14 @@ class MachOAnalyzer(Plugin):
                         ub[:4].hex(), ub[4:6].hex(), ub[6:8].hex(),
                         ub[8:10].hex(), ub[10:16].hex(),
                     ])
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type in VER_CMDS:
                 try:
                     v = cmd[1].version
                     min_os_version = f"{(v >> 16) & 0xFFFF}.{(v >> 8) & 0xFF}.{v & 0xFF}"
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type == LC_SOURCE_VERSION:
@@ -279,7 +279,7 @@ class MachOAnalyzer(Plugin):
                         f"{(v >> 40) & 0xFFFFFF}.{(v >> 30) & 0x3FF}."
                         f"{(v >> 20) & 0x3FF}.{(v >> 10) & 0x3FF}.{v & 0x3FF}"
                     )
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type == LC_CODE_SIGNATURE:
@@ -288,13 +288,13 @@ class MachOAnalyzer(Plugin):
             elif cmd_type in (LC_ENCRYPTION_INFO, LC_ENCRYPTION_INFO_64):
                 try:
                     has_encryption = cmd[1].cryptid != 0
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             elif cmd_type == LC_MAIN:
                 try:
                     entry_point = hex(cmd[1].entryoff)
-                except Exception:
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
         result["load_commands"] = load_cmds

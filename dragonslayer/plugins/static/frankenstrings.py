@@ -175,7 +175,7 @@ class _FrankenStringsEngine:
                     if MIN_STRING_LENGTH < len(val) <= MAX_STRING_LENGTH:
                         self.strings["unicode"].append(val.decode("utf-16le", errors="ignore"))
                         self._check_iocs(val)
-            except Exception:  # noqa: BLE001
+            except (ValueError, TypeError, UnicodeDecodeError, AttributeError):  # noqa: BLE001
                 pass
 
     def _extract_base64(self, data: bytes) -> None:
@@ -186,7 +186,7 @@ class _FrankenStringsEngine:
                 continue
             try:
                 decoded = binascii.a2b_base64(b64)
-            except Exception:
+            except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                 continue
             h = hashlib.sha256(decoded).hexdigest()
 
@@ -222,7 +222,7 @@ class _FrankenStringsEngine:
                     "size": len(hit.value),
                     "hash": hashlib.sha256(hit.value).hexdigest(), "type": "reversed",
                 })
-        except Exception:  # noqa: BLE001
+        except (ValueError, TypeError, UnicodeDecodeError, AttributeError):  # noqa: BLE001
             pass
 
     def _extract_unicode_encoded(self, data: bytes) -> None:
@@ -243,7 +243,7 @@ class _FrankenStringsEngine:
                             "size": len(decoded),
                         })
                         self._check_iocs(decoded.encode("utf-8", errors="ignore"))
-                except Exception:  # noqa: BLE001
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):  # noqa: BLE001
                     continue
         if results:
             self.strings["unicode_encoded"] = results  # type: ignore[assignment]
@@ -258,7 +258,7 @@ class _FrankenStringsEngine:
             parts = data.split(enc)[1:]
             raw = b"".join(bytes([int(p[:2], 16)]) for p in parts if len(p) >= 2)
             return raw.decode("utf-8", errors="ignore")
-        except Exception:
+        except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
             return None
 
     def _extract_ascii_hex(self, data: bytes) -> None:
@@ -269,7 +269,7 @@ class _FrankenStringsEngine:
                 chunk = chunk[:-1]
             try:
                 decoded = binascii.unhexlify(chunk)
-            except Exception:
+            except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                 continue
             if len(set(decoded)) < 7:
                 continue
@@ -297,7 +297,7 @@ class _FrankenStringsEngine:
                     "decoded": match[:200].decode("ascii", errors="ignore"),
                 })
                 self._check_iocs(match)
-        except Exception:  # noqa: BLE001
+        except (ValueError, TypeError, UnicodeDecodeError, AttributeError):  # noqa: BLE001
             pass
 
 
@@ -339,7 +339,7 @@ class FrankenStrings(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("FrankenStrings analysis failed")
             return self._make_result(
                 success=False,

@@ -49,6 +49,13 @@ try:
 except ImportError:  # pragma: no cover
     UNICORN_AVAILABLE = False
 
+_UC_ERRORS: tuple[type[Exception], ...] = (
+    ValueError, TypeError, RuntimeError, OSError, OverflowError,
+)
+if UNICORN_AVAILABLE:
+    from unicorn import UcError
+    _UC_ERRORS = (*_UC_ERRORS, UcError)
+
 try:
     import capstone  # type: ignore[import-untyped]
     CAPSTONE_AVAILABLE = True
@@ -266,7 +273,7 @@ class TraceEngine:
                 end_addr,
                 count=max_insns,
             )
-        except Exception as exc:
+        except _UC_ERRORS as exc:
             logger.debug("Emulation stopped: %s", exc)
 
         return ExecutionTrace(
@@ -384,7 +391,7 @@ class TraceEngine:
         # Read raw bytes
         try:
             raw = bytes(uc.mem_read(address, size))
-        except Exception:
+        except _UC_ERRORS:
             raw = b""
 
         # Disassemble
@@ -437,5 +444,5 @@ class TraceEngine:
                 uc.mem_map(aligned, map_size)
                 self._mapped_regions.append((aligned, map_size))
             return True  # resume execution
-        except Exception:
+        except _UC_ERRORS:
             return False  # stop

@@ -85,7 +85,7 @@ class ELFAnalyzer(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("ELF analysis failed")
             return self._make_result(
                 success=False,
@@ -129,7 +129,7 @@ class ELFAnalyzer(Plugin):
                             "size": sec["sh_size"],
                             "entropy": round(_entropy(data), 2),
                         }
-                    except Exception:
+                    except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                         pass
             result["sections"] = sections
             result["section_count"] = len(sections)

@@ -251,7 +251,7 @@ class ElasticsearchBackend(StorageBackend):
         try:
             self._es.index(index=index, id=doc_id, body=document)
             return True
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
             logger.warning("ES store failed: %s", exc)
             return False
 
@@ -259,14 +259,14 @@ class ElasticsearchBackend(StorageBackend):
         try:
             res = self._es.get(index=index, id=doc_id)
             return res["_source"]
-        except Exception:
+        except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError):
             return None
 
     def delete(self, index: str, doc_id: str) -> bool:
         try:
             self._es.delete(index=index, id=doc_id)
             return True
-        except Exception:
+        except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError):
             return False
 
     def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
@@ -274,7 +274,7 @@ class ElasticsearchBackend(StorageBackend):
             body = {"size": size, "query": query}
             res = self._es.search(index=index, body=body)
             return [hit["_source"] for hit in res["hits"]["hits"]]
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
             logger.warning("ES query failed: %s", exc)
             return []
 
@@ -283,7 +283,7 @@ class ElasticsearchBackend(StorageBackend):
             if not self._es.indices.exists(index=index):
                 body = {"mappings": mapping} if mapping else {}
                 self._es.indices.create(index=index, body=body)
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
             logger.warning("ES ensure_index failed: %s", exc)
 
     def script_score_query(
@@ -312,7 +312,7 @@ class ElasticsearchBackend(StorageBackend):
                 {"_score": hit["_score"] - 1.0, **hit["_source"]}
                 for hit in res["hits"]["hits"]
             ]
-        except Exception as exc:
+        except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
             logger.warning("ES script_score query failed: %s", exc)
             return []
 

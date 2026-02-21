@@ -43,7 +43,7 @@ try:
     import capstone  # type: ignore[import-untyped]
 
     _HAS_TRITON = True
-except Exception:
+except (ImportError, OSError):
     pass
 
 
@@ -82,7 +82,7 @@ class TritonAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
                 confidence=result.get("confidence", 0.0),
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Triton analysis failed")
             return self._make_result(
                 success=False,
@@ -146,9 +146,9 @@ class TritonAnalyzer(Plugin):
                     try:
                         tc.taintRegister(reg)
                         taint_regs.append(reg.getName())
-                    except Exception:
+                    except (ValueError, TypeError, AttributeError, RuntimeError):
                         pass
-            except Exception:
+            except (ValueError, TypeError, AttributeError, RuntimeError):
                 pass
 
         # Guidance intervals from shared context
@@ -205,7 +205,7 @@ class TritonAnalyzer(Plugin):
             size = mem.getSize()
             try:
                 val = int(tc.getConcreteMemoryValue(mem))
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, OSError):
                 val = 0
             mem_accesses.append({
                 "type": "read",
@@ -219,7 +219,7 @@ class TritonAnalyzer(Plugin):
             size = mem.getSize()
             try:
                 val = int(value) if value is not None else 0
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, OverflowError):
                 val = 0
             mem_accesses.append({
                 "type": "write",
@@ -231,7 +231,7 @@ class TritonAnalyzer(Plugin):
         try:
             tc.addCallback(CALLBACK.GET_CONCRETE_MEMORY_VALUE, _on_mem_read)
             tc.addCallback(CALLBACK.SET_CONCRETE_MEMORY_VALUE, _on_mem_write)
-        except Exception:
+        except (ValueError, TypeError, AttributeError, RuntimeError):
             logger.debug("Triton memory callbacks not available")
 
         # ---- Symbolic execution (limited to prevent explosion) -------------
@@ -262,7 +262,7 @@ class TritonAnalyzer(Plugin):
                 try:
                     if not tc.processing(inst):
                         break
-                except Exception:
+                except (ValueError, TypeError, RuntimeError):
                     break
 
                 insn_count += 1
@@ -276,7 +276,7 @@ class TritonAnalyzer(Plugin):
                         reg_snapshot[reg.getName()] = int(
                             tc.getConcreteRegisterValue(reg)
                         )
-                    except Exception:
+                    except (ValueError, TypeError, RuntimeError):
                         pass
 
                 # --- Per-instruction memory accesses ------------------------
@@ -286,7 +286,7 @@ class TritonAnalyzer(Plugin):
                 insn_size = inst.getSize()
                 try:
                     raw = bytes(inst.getOpcode()[:insn_size])
-                except Exception:
+                except (ValueError, TypeError, AttributeError, RuntimeError):
                     raw = b""
 
                 trace_record: Dict[str, Any] = {
@@ -341,7 +341,7 @@ class TritonAnalyzer(Plugin):
                                         tainted_read.append(
                                             f"mem[0x{mem['address']:x}:{mem['size']}]"
                                         )
-                                except Exception:
+                                except (ValueError, TypeError, RuntimeError):
                                     pass
                             elif mem["type"] == "write":
                                 try:
@@ -349,11 +349,11 @@ class TritonAnalyzer(Plugin):
                                         tainted_write.append(
                                             f"mem[0x{mem['address']:x}:{mem['size']}]"
                                         )
-                                except Exception:
+                                except (ValueError, TypeError, RuntimeError):
                                     pass
                         taint_entry["tainted_reads"] = tainted_read
                         taint_entry["tainted_writes"] = tainted_write
-                    except Exception:
+                    except (ValueError, TypeError, AttributeError, RuntimeError):
                         pass
                     taint_flow.append(taint_entry)
 
@@ -363,7 +363,7 @@ class TritonAnalyzer(Plugin):
                         pc_ast = tc.getPathPredicate()
                         if pc_ast is not None:
                             path_constraints.append(str(pc_ast)[:500])
-                except Exception:
+                except (ValueError, TypeError, RuntimeError):
                     pass
 
                 instruction_trace.append(trace_record)

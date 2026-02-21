@@ -30,7 +30,7 @@ try:
     import angr  # type: ignore[import-untyped]
 
     _HAS_ANGR = True
-except Exception:
+except (ImportError, OSError):
     pass
 
 
@@ -72,7 +72,7 @@ class AngrAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
                 confidence=result.get("confidence", 0.0),
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("angr analysis failed")
             return self._make_result(
                 success=False,
@@ -134,7 +134,7 @@ class AngrAnalyzer(Plugin):
                     vex_block = proj.factory.block(block_node.addr).vex
                     for stmt in vex_block.statements:
                         mnemonic_counter[type(stmt).__name__] += 1
-                except Exception:
+                except (ValueError, TypeError, AttributeError, RuntimeError):
                     continue
 
             func_hash = hashlib.md5(
@@ -242,7 +242,7 @@ class AngrAnalyzer(Plugin):
                                     rv = getattr(s.regs, rname, None)
                                     if rv is not None and not rv.symbolic:
                                         reg_snapshot[rname] = s.solver.eval(rv)
-                                except Exception:
+                                except (ValueError, TypeError, AttributeError, RuntimeError):
                                     pass
 
                             instruction_records.append({
@@ -252,13 +252,13 @@ class AngrAnalyzer(Plugin):
                                 "disassembly": f"{ci.insn.mnemonic} {ci.insn.op_str}".strip(),
                                 "registers": reg_snapshot,
                             })
-                    except Exception:
+                    except (ValueError, TypeError, AttributeError, RuntimeError):
                         pass
 
                     # Step one block
                     try:
                         simgr.step()
-                    except Exception:
+                    except (ValueError, TypeError, RuntimeError):
                         break
 
                 traces.append({
@@ -266,7 +266,7 @@ class AngrAnalyzer(Plugin):
                     "instruction_count": len(instruction_records),
                     "instructions": instruction_records,
                 })
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.debug("Handler trace extraction for %#x failed: %s", d_addr, exc)
 
         return traces
@@ -350,7 +350,7 @@ class AngrAnalyzer(Plugin):
 
                 total_paths += len(simgr.deadended) + len(simgr.active)
 
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.debug("Handler exploration from %#x failed: %s", d_addr, exc)
                 continue
 

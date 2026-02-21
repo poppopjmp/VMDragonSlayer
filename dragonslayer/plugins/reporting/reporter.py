@@ -422,7 +422,7 @@ def enrich_with_ollama(
         resp = requests.post(f"{ollama_url}/api/generate", json=payload, timeout=600)
         resp.raise_for_status()
         return resp.json().get("response", "")
-    except Exception as exc:
+    except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
         logger.warning("Ollama enrichment failed: %s", exc)
         return None
 
@@ -491,7 +491,7 @@ class ReporterPlugin(Plugin):
                 },
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Reporter failed")
             return self._make_result(
                 success=False,

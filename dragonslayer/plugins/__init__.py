@@ -192,7 +192,8 @@ class Plugin(ABC):
             if result.duration == 0.0:
                 result.duration = time.monotonic() - t0
             return result
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+                OSError, IndexError, ArithmeticError, ImportError) as exc:
             logger.exception("Plugin %s failed", self.name)
             return self._make_result(
                 success=False,
@@ -217,7 +218,8 @@ class Plugin(ABC):
                 result_holder.append(
                     self.execute(file_path, file_data, context)
                 )
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+                    OSError, IndexError, ArithmeticError, ImportError) as exc:
                 error_holder.append(exc)
 
         thread = threading.Thread(target=_worker, daemon=True)
@@ -327,7 +329,7 @@ def _auto_discover() -> None:
         full_pkg = f"{__package__}.{subpkg}"
         try:
             importlib.import_module(full_pkg)
-        except Exception:  # noqa: BLE001
+        except (ImportError, SyntaxError, AttributeError, RuntimeError, OSError):  # noqa: BLE001
             logger.debug("Could not import plugins.%s", subpkg, exc_info=True)
             continue
         # Then import every .py module inside it
@@ -340,7 +342,8 @@ def _auto_discover() -> None:
                     "Could not import plugins.%s.%s (missing dep)",
                     subpkg, mod_info.name,
                 )
-            except Exception:  # noqa: BLE001
+            except (SyntaxError, AttributeError, RuntimeError, TypeError,
+                    ValueError, OSError):  # noqa: BLE001
                 # Real bug — surface at WARNING
                 logger.warning(
                     "Unexpected error importing plugins.%s.%s",

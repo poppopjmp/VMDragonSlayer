@@ -31,7 +31,7 @@ try:
     from blackfyre.datatypes.contexts.binarycontext import BinaryContext  # type: ignore[import-untyped]
 
     _HAS_BLACKFYRE = True
-except Exception:
+except (ImportError, OSError):
     pass
 
 
@@ -81,7 +81,7 @@ class BlackfyreAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
                 confidence=result.get("confidence", 0.0),
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Blackfyre analysis failed")
             return self._make_result(
                 success=False,

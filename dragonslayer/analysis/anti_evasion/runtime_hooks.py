@@ -487,7 +487,7 @@ def apply_hooks_to_qiling(
             else:
                 result.skipped.append(hook.name)
 
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             result.errors[hook.name] = str(exc)
             logger.debug("Failed to install Qiling hook %s: %s", hook.name, exc)
 
@@ -521,7 +521,7 @@ def _install_qiling_cpuid(ql: Any, hook: HookDescriptor) -> None:
                 ql_inner.arch.regs.write("ecx", ecx)
 
         ql.hook_insn(_cpuid_hook, 0x0FA2)
-    except Exception:
+    except (ValueError, TypeError, AttributeError, RuntimeError):
         logger.debug("Qiling CPUID hook installation failed")
         raise
 
@@ -535,7 +535,7 @@ def _install_qiling_api_hook(ql: Any, hook: HookDescriptor) -> None:
 
     try:
         ql.os.set_api(hook.api_name, _api_hook)
-    except Exception:
+    except (ValueError, TypeError, AttributeError, RuntimeError):
         logger.debug("Qiling API hook for %s failed", hook.api_name)
         raise
 
@@ -567,7 +567,7 @@ def apply_hooks_to_angr(
         try:
             _install_angr_api_hook(proj, hook)
             result.installed.append(hook.name)
-        except Exception as exc:
+        except (ImportError, ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             result.errors[hook.name] = str(exc)
             logger.debug("Failed to install angr hook %s: %s", hook.name, exc)
 
@@ -588,7 +588,7 @@ def _install_angr_api_hook(proj: Any, hook: HookDescriptor) -> None:
         proj.hook_symbol(hook.api_name, AntiEvasionProc())
     except ImportError:
         raise
-    except Exception as exc:
+    except (ValueError, TypeError, AttributeError, RuntimeError) as exc:
         # Symbol may not exist in the binary
         logger.debug("angr hook_symbol(%s) failed: %s", hook.api_name, exc)
         raise
@@ -633,7 +633,7 @@ def apply_hooks_to_triton(
                 result.skipped.append(hook.name)
             else:
                 result.skipped.append(hook.name)
-        except Exception as exc:
+        except (ImportError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
             result.errors[hook.name] = str(exc)
 
     return result
@@ -654,7 +654,7 @@ def _install_triton_rdtsc(tc: Any, timing: TimingState, is_64: bool) -> None:
         tc.addCallback(CALLBACK.BEFORE, _rdtsc_cb)
     except ImportError:
         raise
-    except Exception:
+    except (ValueError, TypeError, AttributeError, RuntimeError):
         logger.debug("Triton RDTSC callback installation failed")
         raise
 
@@ -685,7 +685,7 @@ def _install_triton_cpuid(tc: Any, hook: HookDescriptor, is_64: bool) -> None:
         tc.addCallback(CALLBACK.BEFORE, _cpuid_cb)
     except ImportError:
         raise
-    except Exception:
+    except (ValueError, TypeError, AttributeError, RuntimeError):
         logger.debug("Triton CPUID callback installation failed")
         raise
 
@@ -716,7 +716,7 @@ def hooks_for_binary(binary_data: bytes) -> HookSet:
         hook_set = build_hook_set_from_report(report)
         if hook_set.hooks:
             return hook_set
-    except Exception:
+    except (ImportError, ValueError, TypeError, AttributeError, RuntimeError):
         logger.debug("EnvironmentNormalizer failed, using full hook set")
 
     return build_hook_set()

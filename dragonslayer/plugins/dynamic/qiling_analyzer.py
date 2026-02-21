@@ -29,7 +29,7 @@ try:
     from qiling.const import QL_VERBOSE  # type: ignore[import-untyped]
 
     _HAS_QILING = True
-except Exception:
+except (ImportError, OSError):
     pass
 
 
@@ -111,7 +111,7 @@ class QilingAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
                 confidence=result.get("confidence", 0.0),
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Qiling analysis failed")
             return self._make_result(
                 success=False,
@@ -190,13 +190,13 @@ class QilingAnalyzer(Plugin):
             for rname in _REG_LIST:
                 try:
                     reg_snapshot[rname] = ql.arch.regs.read(rname)
-                except Exception:
+                except (ValueError, TypeError, AttributeError, RuntimeError):
                     pass
 
             # Read raw instruction bytes
             try:
                 raw = bytes(ql.mem.read(address, size))
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, OSError):
                 raw = b""
 
             # Disassemble via unified disassembler (one instance, reused)
@@ -204,7 +204,7 @@ class QilingAnalyzer(Plugin):
             try:
                 _text, _ = _ql_disasm.disassemble_to_text(raw, address)
                 disasm = _text
-            except Exception:
+            except (ValueError, TypeError, AttributeError, RuntimeError):
                 disasm = raw.hex()
 
             instruction_trace.append({
@@ -259,12 +259,12 @@ class QilingAnalyzer(Plugin):
 
             ql.hook_mem_read(_mem_read_hook)
             ql.hook_mem_write(_mem_write_hook)
-        except Exception:
+        except (ValueError, TypeError, AttributeError, RuntimeError):
             logger.debug("Qiling memory hooks not fully available")
 
         try:
             ql.run(timeout=timeout * 1_000_000)  # microseconds
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError, OSError) as exc:
             logger.warning("Qiling run ended with: %s", exc)
 
         confidence = min(1.0, len(executed_blocks) / 1000)

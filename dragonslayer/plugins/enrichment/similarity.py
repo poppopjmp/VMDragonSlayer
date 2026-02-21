@@ -117,7 +117,7 @@ def _extract_pe_features(file_path: str) -> Dict[str, Any]:
         # Imphash
         if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
             features["imphash"] = pe.get_imphash()
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
         logger.warning("PE feature extraction failed: %s", exc)
     finally:
         if pe is not None:
@@ -146,7 +146,7 @@ def _extract_elf_features(file_path: str) -> Dict[str, Any]:
             features["import_frequency"] = {}  # ELF doesn't have DLL grouping
             features["sections"] = sorted(sec.name for sec in elf.iter_sections() if sec.name)
             features["resources"] = []
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
         logger.warning("ELF feature extraction failed: %s", exc)
     return features
 
@@ -163,16 +163,16 @@ def _extract_macho_features(file_path: str) -> Dict[str, Any]:
                 if cmd[0].cmd in (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB):
                     try:
                         libraries.append(cmd[2].decode("utf-8").rstrip("\x00"))
-                    except Exception:
+                    except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                         pass
                 elif cmd[0].cmd in (LC_SEGMENT, LC_SEGMENT_64):
                     try:
                         segments.append(cmd[1].segname.decode("utf-8").rstrip("\x00"))
-                    except Exception:
+                    except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                         pass
         features["imports"] = sorted(set(libraries))
         features["sections"] = sorted(set(segments))
-    except Exception as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
         logger.warning("Mach-O feature extraction failed: %s", exc)
     return features
 
@@ -236,7 +236,7 @@ def compute_similarity(feat_a: Dict[str, Any], feat_b: Dict[str, Any], data_a: b
                 scores["ssdeep"] = ssdeep.compare(h_a, h_b) / 100.0
             else:
                 scores["ssdeep"] = 0.0
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             scores["ssdeep"] = 0.0
     else:
         scores["ssdeep"] = 0.0
@@ -282,7 +282,7 @@ class SimilarityPlugin(Plugin):
             if _HAS_SSDEEP:
                 try:
                     ssdeep_hash = ssdeep.hash(file_data)
-                except Exception:
+                except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                     pass
 
             result: Dict[str, Any] = {
@@ -317,7 +317,7 @@ class SimilarityPlugin(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Similarity analysis failed")
             return self._make_result(
                 success=False,
@@ -350,7 +350,7 @@ class SimilarityPlugin(Plugin):
         if _HAS_SSDEEP and file_data:
             try:
                 our_ssdeep = ssdeep.hash(file_data)
-            except Exception:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 pass
 
         comparisons = []

@@ -610,7 +610,7 @@ class PatternRecognizer:
                     if mapping and mapping[2] > best_yara_conf:
                         yara_hit = mapping
                         best_yara_conf = mapping[2]
-            except (ValueError, Exception):
+            except (ValueError, TypeError, AttributeError, RuntimeError, OSError):
                 pass  # hex decode / YARA scan failure
 
         # 3. Merge results — boost confidence when both agree

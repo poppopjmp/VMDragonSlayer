@@ -109,7 +109,7 @@ class StrelkaScanner(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Strelka scan failed")
             return self._make_result(
                 success=False,
@@ -134,7 +134,7 @@ class StrelkaScanner(Plugin):
             try:
                 result["mime"] = _magic.from_buffer(file_data, mime=True)
                 result["description"] = _magic.from_buffer(file_data)
-            except Exception:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 pass
 
         # Format-specific analysis
@@ -192,7 +192,7 @@ class StrelkaScanner(Plugin):
                 result["imphash"] = pe.get_imphash()
 
             return result
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             return {"valid": False, "error": str(exc)}
 
     # -- OLE / VBA ---------------------------------------------------------
@@ -212,7 +212,7 @@ class StrelkaScanner(Plugin):
                 })
             vba.close()
             return {"macros_found": len(macros), "macros": macros}
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             return None
 
     # -- YARA --------------------------------------------------------------
@@ -233,5 +233,5 @@ class StrelkaScanner(Plugin):
                 ],
                 "match_count": len(matches),
             }
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             return {"error": str(exc), "matches": []}

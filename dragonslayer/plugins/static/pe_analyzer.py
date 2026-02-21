@@ -73,7 +73,7 @@ class PEAnalyzer(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("PE analysis failed")
             return self._make_result(
                 success=False,

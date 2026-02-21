@@ -29,7 +29,7 @@ try:
     from binexport import ProgramBinExport  # type: ignore[import-untyped]
 
     _HAS_BINEXPORT = True
-except Exception:
+except (ImportError, OSError):
     pass
 
 
@@ -70,7 +70,7 @@ class BinExportPlugin(Plugin):
                 duration=time.monotonic() - t0,
                 confidence=result.get("confidence", 0.0),
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("BinExport analysis failed")
             return self._make_result(
                 success=False,

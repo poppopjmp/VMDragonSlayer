@@ -67,7 +67,7 @@ def extract_strings(data: bytes, min_length: int = 4) -> str:
             decoded = m.group().decode("utf-16le", errors="ignore")
             if len(decoded) >= min_length:
                 strings.append(decoded)
-        except Exception:
+        except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
             pass
 
     return "\n".join(strings)
@@ -126,7 +126,7 @@ class NetworkGraphPlugin(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("Network graph analysis failed")
             return self._make_result(
                 success=False,

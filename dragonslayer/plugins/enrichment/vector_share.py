@@ -110,7 +110,7 @@ def _query_ollama(
         if " " in name or "\n" in name:
             name = name.split("\n")[0].strip().replace(" ", "_").lower()
         return name if name else None
-    except Exception as exc:
+    except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
         logger.warning("Ollama query failed: %s", exc)
         return None
 
@@ -144,7 +144,7 @@ class VectorSharePlugin(Plugin):
                 data=result,
                 duration=time.monotonic() - t0,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, IndexError) as exc:
             logger.exception("VectorShare failed")
             return self._make_result(
                 success=False,
