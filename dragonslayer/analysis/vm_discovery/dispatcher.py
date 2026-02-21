@@ -92,27 +92,69 @@ class TraceRecord(TypedDict, total=False):
 # Configurable via ``dispatcher.max_trace_length`` in vmdragonslayer.yml.
 _MAX_TRACE_LEN = 500_000
 
+# Upper bound for max_trace_length to prevent accidental disabling.
+_MAX_TRACE_LEN_CEILING = 10_000_000
 
-def _get_max_trace_len() -> int:
-    """Return the dispatcher max-trace-length from config, or the default."""
+
+def _read_dispatcher_config(
+    key: str,
+    default: Any,
+    cast: type,
+) -> Any:
+    """Read a ``dispatcher.<key>`` value from config with safe fallback.
+
+    Args:
+        key: Dotted config key under the ``dispatcher`` section
+            (e.g. ``"dispatcher.max_trace_length"``).
+        default: Fallback value on missing/invalid config.
+        cast: Type constructor (``int``, ``float``, etc.).
+
+    Returns:
+        The config value cast to *cast*, or *default* on any error.
+    """
     try:
         from dragonslayer.core.config import get_config
         cfg = get_config()
-        val = cfg.get("dispatcher.max_trace_length", _MAX_TRACE_LEN)
-        return int(val) if val else _MAX_TRACE_LEN
+        val = cfg.get(key, default)
+        return cast(val) if val is not None else default
     except (ImportError, RuntimeError, ValueError, TypeError):
-        return _MAX_TRACE_LEN
+        return default
+
+
+def _get_max_trace_len() -> int:
+    """Return the dispatcher max-trace-length from config, clamped.
+
+    Enforces ``1 <= value <= 10_000_000`` (logs a warning if clamped).
+    """
+    raw = _read_dispatcher_config(
+        "dispatcher.max_trace_length", _MAX_TRACE_LEN, int,
+    )
+    clamped = max(1, min(raw, _MAX_TRACE_LEN_CEILING))
+    if clamped != raw:
+        logger.warning(
+            "dispatcher.max_trace_length=%r clamped to %d", raw, clamped,
+        )
+    return clamped
 
 
 def _get_early_exit_confidence() -> float:
-    """Return the dispatcher early-exit confidence from config, or default."""
-    try:
-        from dragonslayer.core.config import get_config
-        cfg = get_config()
-        val = cfg.get("dispatcher.early_exit_confidence", 0.9)
-        return float(val) if val else 0.9
-    except (ImportError, RuntimeError, ValueError, TypeError):
-        return 0.9
+    """Return the dispatcher early-exit confidence from config, clamped.
+
+    Enforces ``0.0 < value <= 1.0`` (logs a warning if clamped).
+    """
+    raw = _read_dispatcher_config(
+        "dispatcher.early_exit_confidence", 0.9, float,
+    )
+    clamped = max(0.01, min(raw, 1.0))
+    if abs(clamped - raw) > 1e-9:
+        logger.warning(
+            "dispatcher.early_exit_confidence=%r clamped to %.4f", raw, clamped,
+        )
+    return clamped
+
+
+# Module-level sentinel to avoid log-flooding on repeated subsamples.
+_subsample_warned: bool = False
 
 
 def _subsample_trace(
@@ -124,18 +166,30 @@ def _subsample_trace(
     When *max_len* is 0 (default), the limit is read from config
     (``dispatcher.max_trace_length``) or falls back to
     :data:`_MAX_TRACE_LEN`.
+
+    The subsampling event is logged at ``DEBUG`` level.  The first
+    occurrence per process also emits an ``INFO``-level notice.
     """
     if max_len <= 0:
         max_len = _get_max_trace_len()
     if len(trace) <= max_len:
         return trace
+    global _subsample_warned  # noqa: PLW0603
     orig_len = len(trace)
     step = orig_len / max_len
     result = [trace[int(i * step)] for i in range(max_len)]
-    logger.info(
-        "Subsampled trace from %d to %d records (ratio %.2f)",
-        orig_len, max_len, max_len / orig_len,
-    )
+    if not _subsample_warned:
+        logger.info(
+            "Subsampled trace from %d to %d records (ratio %.2f) — "
+            "subsequent subsamples logged at DEBUG level",
+            orig_len, max_len, max_len / orig_len,
+        )
+        _subsample_warned = True
+    else:
+        logger.debug(
+            "Subsampled trace from %d to %d records (ratio %.2f)",
+            orig_len, max_len, max_len / orig_len,
+        )
     return result
 
 

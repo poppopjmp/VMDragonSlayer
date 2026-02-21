@@ -718,3 +718,103 @@ class TestConfigDrivenThresholds:
         # With default config (500K), 100-record trace should pass through
         result = _subsample_trace(trace, max_len=0)
         assert result is trace
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Adversarial config tests (B103)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAdversarialConfig:
+    """Verify config clamping for out-of-range / malformed values."""
+
+    def test_max_trace_len_negative(self, monkeypatch):
+        """Negative max_trace_length should be clamped to 1."""
+        from dragonslayer.analysis.vm_discovery import dispatcher as mod
+        monkeypatch.setattr(
+            mod, "_read_dispatcher_config",
+            lambda key, default, cast: -1 if "max_trace" in key else default,
+        )
+        result = mod._get_max_trace_len()
+        assert result >= 1
+
+    def test_max_trace_len_zero(self, monkeypatch):
+        """Zero max_trace_length should be clamped to 1."""
+        from dragonslayer.analysis.vm_discovery import dispatcher as mod
+        monkeypatch.setattr(
+            mod, "_read_dispatcher_config",
+            lambda key, default, cast: 0 if "max_trace" in key else default,
+        )
+        result = mod._get_max_trace_len()
+        assert result >= 1
+
+    def test_max_trace_len_huge(self, monkeypatch):
+        """Huge max_trace_length should be clamped to ceiling."""
+        from dragonslayer.analysis.vm_discovery import dispatcher as mod
+        monkeypatch.setattr(
+            mod, "_read_dispatcher_config",
+            lambda key, default, cast: 999_999_999 if "max_trace" in key else default,
+        )
+        result = mod._get_max_trace_len()
+        assert result <= mod._MAX_TRACE_LEN_CEILING
+
+    def test_early_exit_confidence_too_high(self, monkeypatch):
+        """Confidence > 1.0 should be clamped to 1.0."""
+        from dragonslayer.analysis.vm_discovery import dispatcher as mod
+        monkeypatch.setattr(
+            mod, "_read_dispatcher_config",
+            lambda key, default, cast: 2.5 if "early_exit" in key else default,
+        )
+        result = mod._get_early_exit_confidence()
+        assert result <= 1.0
+
+    def test_early_exit_confidence_negative(self, monkeypatch):
+        """Negative confidence should be clamped to 0.01."""
+        from dragonslayer.analysis.vm_discovery import dispatcher as mod
+        monkeypatch.setattr(
+            mod, "_read_dispatcher_config",
+            lambda key, default, cast: -0.5 if "early_exit" in key else default,
+        )
+        result = mod._get_early_exit_confidence()
+        assert 0.0 < result <= 1.0
+
+    def test_read_dispatcher_config_fallback(self):
+        """_read_dispatcher_config returns default on import failure."""
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _read_dispatcher_config,
+        )
+        # Using a key that won't exist should still return default
+        result = _read_dispatcher_config(
+            "dispatcher.nonexistent_key", 42, int,
+        )
+        assert result == 42
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DRY config reader (B103)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestReadDispatcherConfig:
+    """Verify the generic _read_dispatcher_config helper."""
+
+    def test_returns_default_type(self):
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _read_dispatcher_config,
+        )
+        val = _read_dispatcher_config("dispatcher.max_trace_length", 500_000, int)
+        assert isinstance(val, int)
+
+    def test_float_cast(self):
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _read_dispatcher_config,
+        )
+        val = _read_dispatcher_config("dispatcher.early_exit_confidence", 0.9, float)
+        assert isinstance(val, float)
+
+    def test_missing_key_returns_default(self):
+        from dragonslayer.analysis.vm_discovery.dispatcher import (
+            _read_dispatcher_config,
+        )
+        val = _read_dispatcher_config("dispatcher.no_such_key", "fallback", str)
+        assert val == "fallback"

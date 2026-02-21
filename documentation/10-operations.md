@@ -43,6 +43,32 @@ Runtime checks should gracefully degrade to CPU when GPU libs are unavailable.
 - Keep `PYTHONHASHSEED` fixed in CI when comparing outputs.
 - Use `tools/determinism_runner.py` to verify identical outputs across repeated runs.
 
+## Dispatcher Configuration (B102)
+
+The dispatcher finder system reads tuning knobs from the `dispatcher:` section
+of `config/vmdragonslayer.yml`.  Both values have safe defaults and are clamped
+to valid ranges.
+
+```yaml
+dispatcher:
+  max_trace_length: 500000     # Max trace records before subsampling
+  early_exit_confidence: 0.9   # Skip remaining finders above this threshold
+```
+
+| Key | Type | Default | Range | Effect |
+|-----|------|---------|-------|--------|
+| `max_trace_length` | int | `500000` | `1 – 10,000,000` | Traces longer than this are uniformly sub-sampled to this size before analysis.  Lower values trade coverage for speed; higher values improve accuracy on very long traces but increase memory and CPU cost. |
+| `early_exit_confidence` | float | `0.9` | `0.01 – 1.0` | When any dispatcher finder reports confidence ≥ this threshold, remaining finders are skipped.  Set to `1.0` to always run all finders. |
+
+**Operational notes:**
+
+- Sub-sampling emits an `INFO` log on the first occurrence per process, then
+  `DEBUG` on subsequent triggers, to avoid log flooding in batch pipelines.
+- Early-exit successes are logged at `INFO` level with the protector name and
+  confidence score.
+- Out-of-range config values are clamped with a `WARNING` log explaining the
+  adjustment.
+
 ## Troubleshooting
 
 - Check `/health` and `/status` for quick diagnostics; inspect `/metrics` for counters and active connections.
