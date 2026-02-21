@@ -504,7 +504,9 @@ class TaintTracker:
 
         # B72: Interprocedural taint context — tracks register taint at
         # call boundaries so cross-function analysis is possible.
-        self._context_stack: List[tuple[Dict[str, TaintTag], Dict[str, List[TaintTag]]]] = []
+        self._context_stack: List[
+            tuple[Dict[str, TaintTag], Dict[str, List[TaintTag]], Dict[str, int]]
+        ] = []
         self._call_depth: int = 0
 
         # B76: Pointer-tracking alias detector — tracks concrete register

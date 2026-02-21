@@ -85,7 +85,7 @@ class Config:
                 logger.error("Configuration validation failed: %s", exc)
                 raise
         
-        logger.info(f"Configuration loaded for environment: {environment}")
+        logger.info("Configuration loaded for environment: %s", environment)
     
     def _find_config_dir(self) -> Path:
         """Find the configuration directory."""
@@ -104,11 +104,11 @@ class Config:
         # Default to config/ in current directory
         return Path('config')
     
-    def _load_defaults(self):
+    def _load_defaults(self) -> None:
         """Load default configuration values (deep copy so mutations are isolated)."""
         self._config = copy.deepcopy(self.DEFAULTS)
     
-    def _load_yaml_config(self):
+    def _load_yaml_config(self) -> None:
         """Load YAML configuration file based on environment.
 
         Checks for environment-specific file first (e.g. vmdragonslayer_development.yml),
@@ -126,17 +126,17 @@ class Config:
                         yaml_config = yaml.safe_load(f)
                         if yaml_config:
                             self._merge_config(yaml_config)
-                            logger.info(f"Loaded config from {config_file}")
+                            logger.info("Loaded config from %s", config_file)
                             return
                 except (OSError, yaml.YAMLError, ValueError, TypeError, KeyError) as e:
-                    logger.warning(f"Failed to load config from {config_file}: {e}")
+                    logger.warning("Failed to load config from %s: %s", config_file, e)
 
         logger.warning(
             "No config file found (tried %s), using defaults",
             ", ".join(str(c) for c in candidates),
         )
     
-    def _load_env_variables(self):
+    def _load_env_variables(self) -> None:
         """Load configuration from environment variables.
 
         Supports both legacy hardcoded keys and the B64 generic convention:
@@ -190,7 +190,7 @@ class Config:
                         pass
             self.set(path, parsed)
     
-    def _merge_config(self, new_config: Dict[str, Any]):
+    def _merge_config(self, new_config: Dict[str, Any]) -> None:
         """Recursively merge new configuration into existing config."""
         self._deep_merge(self._config, new_config)
 
@@ -208,7 +208,7 @@ class Config:
                 base[key] = value
     
     def get(self, key: str, default: Any = None) -> Any:
-
+        """Retrieve a configuration value by dotted key path."""
         keys = key.split('.')
         with self._lock:
             value = self._config
@@ -221,8 +221,8 @@ class Config:
 
             return value
     
-    def set(self, key: str, value: Any):
-
+    def set(self, key: str, value: Any) -> None:
+        """Set a configuration value by dotted key path."""
         keys = key.split('.')
         with self._lock:
             config = self._config
@@ -239,7 +239,7 @@ class Config:
         with self._lock:
             return copy.deepcopy(self._config.get(section, {}))
     
-    def validate(self):
+    def validate(self) -> None:
         """Validate configuration values (B53 — comprehensive).
 
         Checks types, ranges, and consistency for all known sections.
@@ -360,7 +360,8 @@ def get_config(environment: Optional[str] = None) -> Config:
     return _config_instance
 
 
-def reset_config():
+def reset_config() -> None:
+    """Reset the global configuration singleton to *None*."""
     global _config_instance
     with _config_lock:
         _config_instance = None

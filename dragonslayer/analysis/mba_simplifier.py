@@ -38,7 +38,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-import z3
+try:
+    import z3
+    _Z3_AVAILABLE = True
+except ImportError:
+    z3 = None  # type: ignore[assignment]
+    _Z3_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 

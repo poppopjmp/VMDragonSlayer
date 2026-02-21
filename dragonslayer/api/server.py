@@ -15,12 +15,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import AsyncIterator, Dict, Any, Optional, List
 from collections import defaultdict
 import tempfile
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
@@ -100,7 +100,7 @@ class AnalysisRequest(BaseModel):
     
     @field_validator('sample_data')
     @classmethod
-    def validate_base64(cls, v):
+    def validate_base64(cls, v) -> str:
         """Validate base64 encoding."""
         try:
             base64.b64decode(v)
@@ -144,7 +144,7 @@ class StatusResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
-async def lifespan(application: FastAPI):
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore[override]
     """Startup / shutdown lifecycle for the FastAPI app."""
     logger.info("Starting VMDragonSlayer API server...")
     try:
@@ -197,7 +197,7 @@ MAX_REQUEST_BODY_BYTES: int = 100 * 1024 * 1024  # 100 MB
 
 
 @app.middleware("http")
-async def body_size_limit_middleware(request: Request, call_next):
+async def body_size_limit_middleware(request: Request, call_next) -> Response:
     """Reject requests with Content-Length exceeding MAX_REQUEST_BODY_BYTES.
 
     This catches oversized uploads *before* the body is fully read, avoiding
@@ -222,7 +222,7 @@ async def body_size_limit_middleware(request: Request, call_next):
 # --- Request-ID middleware ---------------------------------------------------
 
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
+async def request_id_middleware(request: Request, call_next) -> Response:
     """Attach a unique X-Request-ID header to every request/response.
 
     B70: Also injects ``request_id`` into all log records emitted during
@@ -264,7 +264,7 @@ REQUEST_TIMEOUT_SECONDS: float = 300.0  # 5 minutes default
 
 
 @app.middleware("http")
-async def timeout_middleware(request: Request, call_next):
+async def timeout_middleware(request: Request, call_next) -> Response:
     """Cancel requests that exceed REQUEST_TIMEOUT_SECONDS."""
     try:
         response = await asyncio.wait_for(
@@ -299,7 +299,7 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
 
 
 @app.middleware("http")
-async def api_key_middleware(request: Request, call_next):
+async def api_key_middleware(request: Request, call_next) -> Response:
     """Reject requests without a valid API key (when API_KEY is set)."""
     if API_KEY and request.url.path not in _PUBLIC_PATHS:
         provided = (
@@ -386,7 +386,7 @@ circuit_breaker = CircuitBreaker()
 
 
 @app.middleware("http")
-async def circuit_breaker_middleware(request: Request, call_next):
+async def circuit_breaker_middleware(request: Request, call_next) -> Response:
     """Reject requests when the circuit breaker is open."""
     # Health/status endpoints bypass the circuit breaker
     if request.url.path in ("/health", "/status", "/metrics"):
@@ -475,7 +475,7 @@ async def check_rate_limit(request: Request) -> bool:
 
 # Middleware for request counting
 @app.middleware("http")
-async def count_requests(request: Request, call_next):
+async def count_requests(request: Request, call_next) -> Response:
     """Count active and total requests (async-safe)."""
     async with _counter_lock:
         server_state['total_requests'] += 1
@@ -492,7 +492,7 @@ async def count_requests(request: Request, call_next):
 # Exception Handlers
 
 @app.exception_handler(InvalidDataError)
-async def invalid_data_handler(request: Request, exc: InvalidDataError):
+async def invalid_data_handler(request: Request, exc: InvalidDataError) -> JSONResponse:
     """Handle invalid data errors."""
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -505,7 +505,7 @@ async def invalid_data_handler(request: Request, exc: InvalidDataError):
 
 
 @app.exception_handler(AnalysisError)
-async def analysis_error_handler(request: Request, exc: AnalysisError):
+async def analysis_error_handler(request: Request, exc: AnalysisError) -> JSONResponse:
     """Handle analysis errors."""
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -520,7 +520,7 @@ async def analysis_error_handler(request: Request, exc: AnalysisError):
 # B57: Additional exception handlers ----------------------------------------
 
 @app.exception_handler(ConfigurationError)
-async def configuration_error_handler(request: Request, exc: ConfigurationError):
+async def configuration_error_handler(request: Request, exc: ConfigurationError) -> JSONResponse:
     """Handle configuration errors (e.g. invalid config at startup)."""
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -533,7 +533,7 @@ async def configuration_error_handler(request: Request, exc: ConfigurationError)
 
 
 @app.exception_handler(ResourceLimitError)
-async def resource_limit_handler(request: Request, exc: ResourceLimitError):
+async def resource_limit_handler(request: Request, exc: ResourceLimitError) -> JSONResponse:
     """Handle resource-limit exceeded (memory, paths, loop iterations)."""
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -546,7 +546,7 @@ async def resource_limit_handler(request: Request, exc: ResourceLimitError):
 
 
 @app.exception_handler(AnalysisTimeoutError)
-async def analysis_timeout_handler(request: Request, exc: AnalysisTimeoutError):
+async def analysis_timeout_handler(request: Request, exc: AnalysisTimeoutError) -> JSONResponse:
     """Handle analysis-timeout exceeded."""
     return JSONResponse(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -559,7 +559,7 @@ async def analysis_timeout_handler(request: Request, exc: AnalysisTimeoutError):
 
 
 @app.exception_handler(VMDragonSlayerError)
-async def generic_vmds_error_handler(request: Request, exc: VMDragonSlayerError):
+async def generic_vmds_error_handler(request: Request, exc: VMDragonSlayerError) -> JSONResponse:
     """Catch-all for any VMDragonSlayerError subclass not handled above."""
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -574,7 +574,7 @@ async def generic_vmds_error_handler(request: Request, exc: VMDragonSlayerError)
 # Routes
 
 @app.get("/", tags=["Root"])
-async def root():
+async def root() -> Dict[str, Any]:
     """Root endpoint with API information."""
     return {
         'name': 'VMDragonSlayer API',
@@ -594,7 +594,7 @@ async def root():
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check():
+async def health_check() -> HealthResponse:
     """
     Health check endpoint.
     
@@ -608,7 +608,7 @@ async def health_check():
 
 
 @app.get("/status", response_model=StatusResponse, tags=["Health"])
-async def get_status():
+async def get_status() -> StatusResponse:
     """
     Get detailed server status.
     
@@ -629,7 +629,7 @@ async def get_status():
 
 
 @app.get("/metrics", tags=["Health"])
-async def get_metrics():
+async def get_metrics() -> Dict[str, Any]:
     """
     Get server metrics in Prometheus format.
     
@@ -647,7 +647,7 @@ async def get_metrics():
 
 
 @app.get("/analysis-types", tags=["Analysis"])
-async def get_analysis_types():
+async def get_analysis_types() -> Dict[str, Any]:
     """
     Get list of supported analysis types.
     
@@ -708,8 +708,8 @@ async def analyze_binary(
         # Decode binary data
         binary_data = base64.b64decode(analysis_request.sample_data)
 
-        # Check size limit (default 100MB)
-        max_size = 100 * 1024 * 1024  # 100MB
+        # Check size limit
+        max_size = MAX_REQUEST_BODY_BYTES
         if len(binary_data) > max_size:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -777,7 +777,7 @@ async def upload_and_analyze(
         binary_data = await file.read()
 
         # Check size limit
-        max_size = 100 * 1024 * 1024  # 100MB
+        max_size = MAX_REQUEST_BODY_BYTES
         if len(binary_data) > max_size:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -823,8 +823,8 @@ if __name__ == "__main__":
     import uvicorn
     
     config = get_config()
-    host = getattr(config, 'api_host', 'localhost')
-    port = getattr(config, 'api_port', 8000)
+    host = config.get('api.host', 'localhost')
+    port = config.get('api.port', 8000)
     
     logger.info("Starting server on %s:%s", host, port)
     

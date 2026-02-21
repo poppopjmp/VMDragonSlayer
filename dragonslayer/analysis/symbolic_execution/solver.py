@@ -19,7 +19,12 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-import z3
+try:
+    import z3
+    _Z3_AVAILABLE = True
+except ImportError:
+    z3 = None  # type: ignore[assignment]
+    _Z3_AVAILABLE = False
 
 # B57: Import resource-limit exceptions for raising on solver exhaustion.
 try:
@@ -55,6 +60,8 @@ class Z3Solver:
     """
 
     def __init__(self, timeout_ms: int = 10000, memory_limit_mb: int = 0) -> None:
+        if not _Z3_AVAILABLE:
+            raise ImportError("z3-solver is required for Z3Solver — install via pip install z3-solver")
         self.timeout_ms = timeout_ms
         self.memory_limit_mb = memory_limit_mb
         self._constraints: List[Any] = []
@@ -71,8 +78,8 @@ class Z3Solver:
 
     @staticmethod
     def available() -> bool:
-        """Always True — z3 is a required dependency."""
-        return True
+        """Return *True* if z3 is installed and usable."""
+        return _Z3_AVAILABLE
 
     # -- Variable creation --------------------------------------------------
 

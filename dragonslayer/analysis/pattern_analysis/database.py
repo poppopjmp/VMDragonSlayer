@@ -137,7 +137,7 @@ class PatternDatabase:
         self.patterns[pattern.pattern_id] = pattern
         self._update_indices(pattern)
         
-        logger.info(f"Added pattern: {pattern.pattern_id} ({pattern.name})")
+        logger.info("Added pattern: %s (%s)", pattern.pattern_id, pattern.name)
     
     def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
         """
@@ -162,7 +162,7 @@ class PatternDatabase:
         self.patterns[pattern.pattern_id] = pattern
         self._update_indices(pattern)
         
-        logger.info(f"Updated pattern: {pattern.pattern_id}")
+        logger.info("Updated pattern: %s", pattern.pattern_id)
     
     def delete_pattern(self, pattern_id: str) -> bool:
         """
@@ -176,7 +176,7 @@ class PatternDatabase:
         self._remove_from_indices(pattern)
         del self.patterns[pattern_id]
         
-        logger.info(f"Deleted pattern: {pattern_id}")
+        logger.info("Deleted pattern: %s", pattern_id)
         return True
     
     def search_by_type(self, handler_type: str) -> List[Pattern]:
@@ -276,10 +276,10 @@ class PatternDatabase:
                 pattern = Pattern.from_dict(pattern_dict)
                 self.add_pattern(pattern)
             except (ValueError, TypeError, KeyError) as e:
-                logger.warning(f"Failed to load pattern {pattern_dict.get('pattern_id', 'unknown')}: {e}")
+                logger.warning("Failed to load pattern %s: %s", pattern_dict.get('pattern_id', 'unknown'), e)
         
         self.database_path = path
-        logger.info(f"Loaded {len(self.patterns)} patterns from {path}")
+        logger.info("Loaded %d patterns from %s", len(self.patterns), path)
         return len(self.patterns)
     
     def save(self, path: Optional[Path] = None) -> None:
@@ -303,7 +303,7 @@ class PatternDatabase:
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
         
-        logger.info(f"Saved {len(self.patterns)} patterns to {save_path}")
+        logger.info("Saved %d patterns to %s", len(self.patterns), save_path)
     
     def _update_indices(self, pattern: Pattern) -> None:
         """Update search indices for a pattern."""
