@@ -25,7 +25,17 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    TypedDict,
+    runtime_checkable,
+)
 
 from .config import get_config
 from .exceptions import (
@@ -179,6 +189,18 @@ class EngineResult:
     error: Optional[str] = None
     duration: float = 0.0
     confidence: float = 0.0
+
+
+@runtime_checkable
+class EngineHandler(Protocol):
+    """Protocol for engine handlers in the orchestrator dispatch table.
+
+    Every handler callable must accept an :class:`AnalysisRequest` and
+    return an :class:`EngineResult`.  Handlers may be bound methods on
+    the :class:`Orchestrator` or standalone callables.
+    """
+
+    def __call__(self, request: AnalysisRequest) -> EngineResult: ...
 
 
 @dataclass
@@ -618,7 +640,7 @@ class Orchestrator:
         # Single-engine types map 1-to-1
         return [analysis_type.value]
 
-    def _get_engine_handler(self, engine_name: str) -> "Optional[Callable[[AnalysisRequest], EngineResult]]":
+    def _get_engine_handler(self, engine_name: str) -> Optional[EngineHandler]:
         """Return a callable ``(AnalysisRequest) → EngineResult`` or *None*."""
         handlers = {
             "pattern_analysis": self._run_pattern_analysis,

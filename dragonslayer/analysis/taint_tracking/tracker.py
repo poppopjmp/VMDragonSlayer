@@ -169,23 +169,45 @@ _EFLAGS_CONSUMERS: Set[str] = {
 
 
 def is_eflags_producer(mnemonic: str) -> bool:
-    """Return True if *mnemonic* writes (produces) flags."""
+    """Return True if *mnemonic* writes (produces) flags.
+
+    Args:
+        mnemonic: x86 instruction mnemonic (case-insensitive).
+    """
     return mnemonic.lower() in _EFLAGS_PRODUCERS
 
 
 def is_eflags_consumer(mnemonic: str) -> bool:
-    """Return True if *mnemonic* reads (consumes) flags."""
+    """Return True if *mnemonic* reads (consumes) flags.
+
+    Args:
+        mnemonic: x86 instruction mnemonic (case-insensitive).
+    """
     return mnemonic.lower() in _EFLAGS_CONSUMERS
 
 
 def subreg_canonical(reg: str) -> str:
-    """Return the canonical 64-bit parent for *reg*, or *reg* itself."""
+    """Return the canonical 64-bit parent for *reg*, or *reg* itself.
+
+    Args:
+        reg: Register name (e.g. ``"eax"``, ``"al"``, ``"r8d"``).
+
+    Returns:
+        Canonical 64-bit name (e.g. ``"rax"``, ``"r8"``).
+    """
     info = _SUBREG_FAMILIES.get(reg.lower())
     return info[0] if info else reg.lower()
 
 
 def subreg_aliases(reg: str) -> Set[str]:
-    """Return all names in the same register family as *reg*."""
+    """Return all names in the same register family as *reg*.
+
+    Args:
+        reg: Any register name in a family.
+
+    Returns:
+        Set of all names sharing the same physical storage.
+    """
     info = _SUBREG_FAMILIES.get(reg.lower())
     if info is None:
         return {reg.lower()}
@@ -193,7 +215,15 @@ def subreg_aliases(reg: str) -> Set[str]:
 
 
 def subreg_info(reg: str) -> Optional[tuple]:
-    """Return ``(canonical, bit_lo, width, zero_ext)`` or ``None``."""
+    """Return ``(canonical, bit_lo, width, zero_ext)`` or ``None``.
+
+    Args:
+        reg: Register name to look up.
+
+    Returns:
+        A 4-tuple describing the sub-register layout, or ``None``
+        if *reg* is not in the family map.
+    """
     return _SUBREG_FAMILIES.get(reg.lower())
 
 
@@ -236,7 +266,12 @@ class MemoryAliasTracker:
         self._addr_to_regs: Dict[int, set[str]] = {}
 
     def bind(self, reg: str, addr: int) -> None:
-        """Record that *reg* now points to concrete *addr*."""
+        """Record that *reg* now points to concrete *addr*.
+
+        Args:
+            reg: Register name (case-insensitive).
+            addr: Concrete memory address value.
+        """
         reg = reg.lower()
         # Unbind old
         old = self._bindings.get(reg)
@@ -248,7 +283,11 @@ class MemoryAliasTracker:
         self._addr_to_regs.setdefault(addr, set()).add(reg)
 
     def unbind(self, reg: str) -> None:
-        """Remove *reg* from alias tracking (e.g. on write to reg)."""
+        """Remove *reg* from alias tracking (e.g. on write to reg).
+
+        Args:
+            reg: Register name to remove from the binding map.
+        """
         reg = reg.lower()
         old = self._bindings.pop(reg, None)
         if old is not None and old in self._addr_to_regs:
@@ -257,17 +296,33 @@ class MemoryAliasTracker:
                 del self._addr_to_regs[old]
 
     def resolve(self, reg: str) -> Optional[int]:
-        """Return the concrete address *reg* is known to hold, or None."""
+        """Return the concrete address *reg* is known to hold, or ``None``.
+
+        Args:
+            reg: Register name to resolve.
+        """
         return self._bindings.get(reg.lower())
 
     def must_alias(self, reg_a: str, reg_b: str) -> bool:
-        """Return True if *reg_a* and *reg_b* are known to hold the same address."""
+        """Return ``True`` if *reg_a* and *reg_b* hold the same address.
+
+        Args:
+            reg_a: First register name.
+            reg_b: Second register name.
+        """
         a = self._bindings.get(reg_a.lower())
         b = self._bindings.get(reg_b.lower())
         return a is not None and a == b
 
     def aliases_of(self, reg: str) -> Set[str]:
-        """Return all registers that must-alias *reg* (excluding itself)."""
+        """Return all registers that must-alias *reg* (excluding itself).
+
+        Args:
+            reg: Register to query.
+
+        Returns:
+            Set of register names that share the same concrete address.
+        """
         addr = self._bindings.get(reg.lower())
         if addr is None:
             return set()

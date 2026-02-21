@@ -162,7 +162,7 @@ class TestHealthEndpoint:
             resp = await c.get("/health")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] == "healthy"
+        assert body["status"] in ("healthy", "degraded")
         assert "timestamp" in body
         assert body["version"] == "2025.10"
 
@@ -172,7 +172,7 @@ class TestHealthEndpoint:
             resp = await c.get("/health")
         # Validate against the Pydantic model
         h = HealthResponse(**resp.json())
-        assert h.status == "healthy"
+        assert h.status in ("healthy", "degraded")
 
 
 class TestStatusEndpoint:

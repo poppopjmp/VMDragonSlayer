@@ -85,34 +85,67 @@ class Z3Solver:
 
     @staticmethod
     def bitvec(name: str, bits: int = 64) -> Any:
-        """Create a symbolic bit-vector variable."""
+        """Create a symbolic bit-vector variable.
+
+        Args:
+            name: Symbolic variable name (must be unique per solver scope).
+            bits: Bit-width of the vector (default 64).
+
+        Returns:
+            A z3 ``BitVec`` expression.
+        """
         return z3.BitVec(name, bits)
 
     @staticmethod
     def bitvec_val(value: int, bits: int = 64) -> Any:
-        """Create a concrete bit-vector value."""
+        """Create a concrete bit-vector value.
+
+        Args:
+            value: Integer value to encode.
+            bits: Bit-width of the vector (default 64).
+
+        Returns:
+            A z3 ``BitVecVal`` expression.
+        """
         return z3.BitVecVal(value, bits)
 
     # -- Constraint management -----------------------------------------------
 
     def add(self, *constraints: Any) -> None:
-        """Add constraints."""
+        """Add constraints to the solver.
+
+        Args:
+            *constraints: One or more z3 Boolean expressions.
+        """
         self._constraints.extend(constraints)
         self._solver.add(*constraints)
 
     def reset(self) -> None:
-        """Clear all constraints."""
+        """Clear all constraints and the push/pop stack."""
         self._constraints.clear()
         self._constraint_stack.clear()
         self._solver.reset()
 
     def push(self) -> None:
-        """Save the current constraint count for later pop()."""
+        """Save the current constraint count for later :meth:`pop`.
+
+        Creates a checkpoint so that constraints added after this call
+        can be discarded by a subsequent :meth:`pop`.
+
+        Raises:
+            Nothing — always succeeds.  A corresponding :meth:`pop` is
+            required to restore the checkpoint.
+        """
         self._constraint_stack.append(len(self._constraints))
         self._solver.push()
 
     def pop(self) -> None:
-        """Restore constraints to the last push() point."""
+        """Restore constraints to the last :meth:`push` checkpoint.
+
+        Raises:
+            IndexError: Implicitly, if called without a matching :meth:`push`
+                (z3 solver will raise).
+        """
         if self._constraint_stack:
             idx = self._constraint_stack.pop()
             self._constraints = self._constraints[:idx]
@@ -297,7 +330,14 @@ class Z3Solver:
 
     @staticmethod
     def simplify(expr: Any) -> Any:
-        """Simplify a z3 expression."""
+        """Simplify a z3 expression.
+
+        Args:
+            expr: A z3 expression (``BitVec``, ``BoolRef``, etc.).
+
+        Returns:
+            The simplified z3 expression.
+        """
         return z3.simplify(expr)
 
     def enumerate_values(

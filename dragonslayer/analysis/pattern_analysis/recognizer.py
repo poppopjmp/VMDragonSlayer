@@ -123,6 +123,18 @@ class PatternRecognizer:
         """
         Recognize the best matching pattern.
 
+        Convenience wrapper around :meth:`recognize` that returns only the
+        highest-confidence match (or ``None`` if nothing exceeds the
+        threshold).
+
+        Args:
+            instruction_bytes: Hex-encoded byte string to match against.
+            min_confidence: Minimum confidence threshold (0.0–1.0).
+            architecture: Optional architecture filter (e.g. ``"x86_64"``).
+            handler_type: Optional handler-type filter (e.g. ``"vadd"``).
+
+        Returns:
+            The best :class:`Match`, or ``None`` if no pattern matched.
         """
         matches = self.recognize(
             instruction_bytes,
@@ -226,6 +238,15 @@ class PatternRecognizer:
         """
         Match a single pattern against byte sequence.
 
+        Tries the main signature first, then each variant.  Returns all
+        successful matches (callers filter by confidence later).
+
+        Args:
+            pattern: The :class:`Pattern` to attempt.
+            normalized_bytes: Uppercase hex string with separators stripped.
+
+        Returns:
+            List of :class:`Match` instances (may be empty).
         """
         matches = []
         
@@ -250,6 +271,17 @@ class PatternRecognizer:
         """
         Try matching a specific signature.
 
+        Normalises the signature, then delegates to :meth:`_exact_match`
+        or :meth:`_regex_match` depending on wildcard presence.
+
+        Args:
+            pattern: Source :class:`Pattern`.
+            signature: Raw hex signature string (may contain ``??`` wildcards).
+            normalized_bytes: Target byte string, already normalised.
+            variant_index: 0 for the main signature, 1+ for variants.
+
+        Returns:
+            A :class:`Match` on success, ``None`` otherwise.
         """
         # Normalize signature
         sig_normalized = self._normalize_bytes(signature)
@@ -270,6 +302,18 @@ class PatternRecognizer:
         """
         Perform exact byte matching.
 
+        Searches for *signature* as a literal sub-string of
+        *normalized_bytes* (no wildcard expansion).  Variant matches
+        receive a 5 % confidence penalty.
+
+        Args:
+            pattern: Source :class:`Pattern` (supplies base confidence).
+            signature: Normalised signature (uppercase hex, no separators).
+            normalized_bytes: Target byte string.
+            variant_index: 0 for primary signature, 1+ for variants.
+
+        Returns:
+            A :class:`Match` on hit, ``None`` if the signature is absent.
         """
         # Find all occurrences
         index = normalized_bytes.find(signature)
@@ -300,6 +344,18 @@ class PatternRecognizer:
         """
         Perform regex-based matching with wildcards.
 
+        Compiles and caches the *regex_pattern*, then searches
+        *normalized_bytes*.  Confidence is adjusted for the wildcard-to-exact
+        byte ratio (higher exactness → higher confidence) and variant index.
+
+        Args:
+            pattern: Source :class:`Pattern`.
+            regex_pattern: Compiled-ready regex string (``??`` → ``'.{2}'``).
+            normalized_bytes: Target byte string.
+            variant_index: 0 for primary signature, 1+ for variants.
+
+        Returns:
+            A :class:`Match` on hit, ``None`` on miss.
         """
         # Compile and cache regex
         if regex_pattern not in self._compiled_patterns:
@@ -347,6 +403,14 @@ class PatternRecognizer:
         """
         Convert signature with wildcards to regex pattern.
 
+        Splits *signature* on ``??`` tokens, ``re.escape``-s each literal
+        segment, and rejoins with ``'.{2}'`` (match any two hex chars).
+
+        Args:
+            signature: Normalised hex signature containing ``??`` wildcards.
+
+        Returns:
+            A regex pattern string suitable for :func:`re.search`.
         """
         # Split on wildcard tokens, escape literal parts, rejoin
         parts = signature.split('??')
@@ -358,6 +422,14 @@ class PatternRecognizer:
         """
         Normalize byte string by removing spaces, pipes, and converting to uppercase.
 
+        Strips common separators (space, pipe, comma, newline, tab) and
+        returns the result in uppercase so comparisons are case-insensitive.
+
+        Args:
+            byte_string: Raw hex string with arbitrary separators.
+
+        Returns:
+            Uppercase hex string with all separators removed.
         """
         # Remove common separators
         normalized = byte_string.replace(' ', '').replace('|', '').replace(',', '')
@@ -368,6 +440,13 @@ class PatternRecognizer:
         """
         Format byte string with spaces for readability.
 
+        Inserts a space every two hex characters (i.e. every byte).
+
+        Args:
+            byte_string: Continuous hex string (e.g. ``"4D5A90"``).
+
+        Returns:
+            Space-separated hex string (e.g. ``"4D 5A 90"``).
         """
         return ' '.join(byte_string[i:i+2] for i in range(0, len(byte_string), 2))
     
@@ -375,6 +454,9 @@ class PatternRecognizer:
         """
         Get recognizer statistics.
 
+        Returns:
+            Dict with ``total_patterns``, ``compiled_patterns``,
+            ``database_stats``, ``yara_available``, and ``yara_active``.
         """
         return {
             'total_patterns': len(self.database),
@@ -663,6 +745,19 @@ class SequenceRecognizer:
         """
         Recognize patterns across a sequence of instructions.
 
+        Slides a window of *window_size* over the instruction hex strings,
+        concatenates each window, and runs single-pattern recognition.
+        De-duplicates overlapping results.
+
+        Args:
+            instructions: List of hex-encoded instruction byte strings.
+            window_size: Number of consecutive instructions per window.
+            min_confidence: Minimum match confidence threshold.
+            architecture: Optional architecture filter.
+
+        Returns:
+            De-duplicated list of :class:`Match` objects, sorted by
+            descending confidence.
         """
         all_matches = []
         
@@ -696,6 +791,14 @@ class SequenceRecognizer:
         """
         Remove duplicate/overlapping matches, keeping highest confidence.
 
+        Sorts by descending confidence, then greedily keeps non-overlapping
+        matches using byte-offset ranges.
+
+        Args:
+            matches: Unsorted list of candidate matches.
+
+        Returns:
+            Filtered list with overlapping lower-confidence matches removed.
         """
         if not matches:
             return []
@@ -725,6 +828,15 @@ class SequenceRecognizer:
     def _ranges_overlap(self, range1: Tuple[int, int], range2: Tuple[int, int]) -> bool:
         """
         Check if two ranges overlap.
-        
+
+        Uses the standard non-overlapping test: two half-open intervals
+        ``[a, b)`` and ``[c, d)`` overlap unless ``b <= c`` or ``d <= a``.
+
+        Args:
+            range1: ``(start, end)`` byte-offset pair.
+            range2: ``(start, end)`` byte-offset pair.
+
+        Returns:
+            ``True`` if the ranges share at least one byte.
         """
         return not (range1[1] <= range2[0] or range2[1] <= range1[0])

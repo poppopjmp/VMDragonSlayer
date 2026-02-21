@@ -122,10 +122,14 @@ class AnalysisResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
+    """Health check response with optional dependency probes."""
     status: str
     timestamp: str
     version: str
+    components: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-component health status (e.g. api, pattern_db).",
+    )
 
 
 class StatusResponse(BaseModel):
@@ -143,9 +147,19 @@ class StatusResponse(BaseModel):
 # Lifespan (replaces deprecated @app.on_event)
 # ---------------------------------------------------------------------------
 
+_SHUTDOWN_DRAIN_SECONDS: float = float(
+    _os.environ.get("VMDS_SHUTDOWN_DRAIN_SECONDS", "5")
+)
+"""Seconds to wait for in-flight requests before forced shutdown."""
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore[override]
-    """Startup / shutdown lifecycle for the FastAPI app."""
+    """Startup / shutdown lifecycle for the FastAPI app.
+
+    On shutdown the server waits up to ``_SHUTDOWN_DRAIN_SECONDS`` for
+    in-flight requests to complete before calling ``api.shutdown()``.
+    """
     logger.info("Starting VMDragonSlayer API server...")
     try:
         server_state['api'] = VMDragonSlayerAPI()
@@ -154,8 +168,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore
         logger.error("Failed to start API server: %s", exc)
         raise
     yield
-    # --- shutdown ---
-    logger.info("Shutting down VMDragonSlayer API server...")
+    # --- graceful drain ---
+    logger.info("Shutting down VMDragonSlayer API server (drain=%.1fs)...",
+                _SHUTDOWN_DRAIN_SECONDS)
+    deadline = time.monotonic() + _SHUTDOWN_DRAIN_SECONDS
+    while server_state.get('active_requests', 0) > 0 and time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+    remaining = server_state.get('active_requests', 0)
+    if remaining:
+        logger.warning("Shutdown forced with %d active request(s)", remaining)
     api = server_state.get('api')
     if api is not None:
         api.shutdown()
@@ -596,15 +617,38 @@ async def root() -> Dict[str, Any]:
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check() -> HealthResponse:
+    """Health check endpoint with dependency probing.
+
+    Returns per-component status so orchestration layers can distinguish
+    between *liveness* (process is running) and *readiness* (dependencies
+    are functional).  The top-level ``status`` is ``"healthy"`` only when
+    every probed component is ``"ok"``.
     """
-    Health check endpoint.
-    
-    Returns basic server health status.
-    """
+    components: Dict[str, str] = {}
+
+    # Probe 1 — VMDragonSlayerAPI instance
+    api = server_state.get('api')
+    if api is not None:
+        components['api'] = 'ok'
+    else:
+        components['api'] = 'unavailable'
+
+    # Probe 2 — Pattern database
+    try:
+        if api is not None and hasattr(api, 'pattern_db') and api.pattern_db is not None:
+            components['pattern_db'] = 'ok'
+        else:
+            components['pattern_db'] = 'unavailable'
+    except (AttributeError, RuntimeError):
+        components['pattern_db'] = 'error'
+
+    overall = 'healthy' if all(v == 'ok' for v in components.values()) else 'degraded'
+
     return HealthResponse(
-        status='healthy',
+        status=overall,
         timestamp=datetime.now().isoformat(),
-        version='2025.10'
+        version='2025.10',
+        components=components,
     )
 
 

@@ -22,7 +22,7 @@ import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TypedDict
 
 from .state import SymbolicState
 from .lifter import InstructionLifter, LiftedInstruction, InstructionCategory
@@ -53,9 +53,75 @@ else:
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# TypedDicts for to_dict() return shapes
+# ---------------------------------------------------------------------------
+
+class HandlerInfoDict(TypedDict):
+    """Shape returned by :meth:`HandlerInfo.to_dict`."""
+    address: int
+    category: str
+    instruction_count: int
+    instructions: List[Dict[str, Any]]
+    reads: List[str]
+    writes: List[str]
+    confidence: float
+
+
+class ExecutionResultDict(TypedDict, total=False):
+    """Shape returned by :meth:`ExecutionResult.to_dict`."""
+    success: bool
+    handlers: List[HandlerInfoDict]
+    paths_explored: int
+    instructions_executed: int
+    dispatcher_address: Optional[int]
+    dispatcher_confidence: float
+    handler_table: Dict[str, str]
+    opaque_predicates: List[Dict[str, Any]]
+    state_snapshot_count: int
+    vmprotect_dispatcher: Optional[Dict[str, Any]]
+    loops_detected: List[Dict[str, Any]]
+    cfg: Optional[Dict[str, Any]]
+    error: Optional[str]
+
+
+class HandlerSymbolicSummaryDict(TypedDict, total=False):
+    """Shape returned by :meth:`HandlerSymbolicSummary.to_dict`."""
+    address: int
+    instruction_count: int
+    final_registers: Dict[str, str]
+    simplified_registers: Dict[str, str]
+    memory_write_count: int
+    memory_writes: List[Dict[str, Any]]
+    constraint_count: int
+    constraints: List[str]
+    memory_effects: Dict[str, Any]
+    error: Optional[str]
+
+
+class LoopInfoDict(TypedDict):
+    """Shape returned by :meth:`LoopInfo.to_dict`."""
+    header_address: str
+    back_edge_sources: List[str]
+    iteration_count: int
+    body_size: int
+    widened: bool
+    widened_registers: List[str]
+
+
 @dataclass
 class HandlerInfo:
-    """Information about a discovered VM handler."""
+    """Information about a discovered VM handler.
+
+    Attributes:
+        address: Virtual address of the handler entry point.
+        category: Semantic category (e.g. ``"vadd"``, ``"vmov"``).
+        instruction_count: Number of lifted instructions in the handler body.
+        instructions: Raw instruction dicts from the lifter.
+        reads: Register names read by the handler.
+        writes: Register names written by the handler.
+        confidence: Classification confidence in ``[0.0, 1.0]``.
+    """
     address: int
     category: str
     instruction_count: int
@@ -64,7 +130,7 @@ class HandlerInfo:
     writes: List[str] = field(default_factory=list)
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> HandlerInfoDict:
         return {
             "address": self.address,
             "category": self.category,
@@ -78,7 +144,23 @@ class HandlerInfo:
 
 @dataclass
 class ExecutionResult:
-    """Result of symbolic execution analysis."""
+    """Result of symbolic execution analysis.
+
+    Attributes:
+        success: Whether execution completed without fatal error.
+        handlers: Discovered VM handlers.
+        paths_explored: Number of execution paths forked/explored.
+        instructions_executed: Total lifted instructions stepped through.
+        dispatcher_address: Detected dispatcher entry address.
+        dispatcher_confidence: Confidence in the dispatcher detection.
+        handler_table: Opcode → handler-address mapping.
+        opaque_predicates: Detected opaque-predicate constructs.
+        state_snapshots: Intermediate state dumps (internal).
+        vmprotect_dispatcher: VMProtect-specific dispatcher info.
+        loops_detected: Loops identified by back-edge analysis.
+        cfg: Control-flow graph structure.
+        error: Error message if *success* is ``False``.
+    """
     success: bool
     handlers: List[HandlerInfo] = field(default_factory=list)
     paths_explored: int = 0
@@ -93,7 +175,7 @@ class ExecutionResult:
     cfg: Optional[Dict[str, Any]] = None  # B60: CFG graph structure
     error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> ExecutionResultDict:
         return {
             "success": self.success,
             "handlers": [h.to_dict() for h in self.handlers],
@@ -113,7 +195,19 @@ class ExecutionResult:
 
 @dataclass
 class HandlerSymbolicSummary:
-    """Symbolic summary of a single handler after local execution."""
+    """Symbolic summary of a single handler after local execution.
+
+    Attributes:
+        address: Handler entry-point address.
+        instruction_count: Lifted instructions executed.
+        final_registers: Register state at handler exit (z3 expression strings).
+        simplified_registers: z3-simplified register expressions.
+        memory_writes: Memory write events captured during execution.
+        constraints: Path constraints as string expressions.
+        input_symbols: Mapping of symbolic input names to descriptions.
+        memory_effects: Aggregated memory-effect summary.
+        error: Error message if symbolic execution failed for this handler.
+    """
     address: int = 0
     instruction_count: int = 0
     final_registers: Dict[str, str] = field(default_factory=dict)
@@ -124,7 +218,7 @@ class HandlerSymbolicSummary:
     memory_effects: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> HandlerSymbolicSummaryDict:
         return {
             "address": self.address,
             "instruction_count": self.instruction_count,
@@ -145,7 +239,16 @@ class HandlerSymbolicSummary:
 
 @dataclass
 class LoopInfo:
-    """Information about a detected loop during symbolic execution."""
+    """Information about a detected loop during symbolic execution.
+
+    Attributes:
+        header_address: Address of the loop header (first instruction).
+        back_edge_sources: Addresses of instructions that branch back.
+        iteration_count: Number of iterations observed before widening.
+        body_addresses: Set of addresses within the loop body.
+        widened: Whether abstract widening was applied.
+        widened_registers: Registers that were widened to ``⊤``.
+    """
     header_address: int
     back_edge_sources: List[int] = field(default_factory=list)
     iteration_count: int = 0
@@ -153,7 +256,7 @@ class LoopInfo:
     widened: bool = False
     widened_registers: List[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> LoopInfoDict:
         return {
             "header_address": hex(self.header_address),
             "back_edge_sources": [hex(a) for a in self.back_edge_sources],
