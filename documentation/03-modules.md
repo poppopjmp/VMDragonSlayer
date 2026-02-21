@@ -3,7 +3,7 @@
 Index of primary packages and key modules.
 
 > **Note**: This listing reflects modules that actually exist in the
-> codebase as of Phase 11 (dev-0.9.1, 831 tests).
+> codebase as of dev-0.9.1 (3 148+ tests).
 
 ## Core System (`dragonslayer/core/`)
 

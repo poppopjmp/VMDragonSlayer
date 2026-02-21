@@ -37,6 +37,17 @@ from typing import Any, Dict, List, Optional, Type
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "Stage",
+    "PluginResult",
+    "PluginContext",
+    "Plugin",
+    "register_plugin",
+    "get_plugin",
+    "list_plugins",
+    "get_all_plugins",
+]
+
 
 # ---------------------------------------------------------------------------
 # Data classes

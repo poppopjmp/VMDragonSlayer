@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .config import get_config
 from .exceptions import (
@@ -177,7 +177,8 @@ class _EngineRegistry:
     # -- Pattern Analysis (local, always available) -------------------------
 
     @property
-    def pattern_db(self):
+    def pattern_db(self) -> "PatternDatabase":
+        """Return the lazily-loaded :class:`PatternDatabase` instance."""
         if self._pattern_db is None:
             from ..analysis.pattern_analysis.database import PatternDatabase
             cfg = get_config()
@@ -198,7 +199,8 @@ class _EngineRegistry:
         return self._pattern_db
 
     @property
-    def pattern_recognizer(self):
+    def pattern_recognizer(self) -> "PatternRecognizer":
+        """Return the lazily-loaded :class:`PatternRecognizer` instance."""
         if self._pattern_recognizer is None:
             from ..analysis.pattern_analysis.recognizer import PatternRecognizer
             self._pattern_recognizer = PatternRecognizer(self.pattern_db)
@@ -207,8 +209,8 @@ class _EngineRegistry:
     # -- Metroplex Gateway client -------------------------------------------
 
     @property
-    def gateway_client(self):
-        """Return the (lazily-created) gateway HTTP client."""
+    def gateway_client(self) -> "MetroplexGatewayClient":
+        """Return the lazily-created :class:`MetroplexGatewayClient`."""
         if self._gateway_client is None:
             from ..api.client import MetroplexGatewayClient
             cfg = get_config()
@@ -575,7 +577,7 @@ class Orchestrator:
         # Single-engine types map 1-to-1
         return [analysis_type.value]
 
-    def _get_engine_handler(self, engine_name: str):
+    def _get_engine_handler(self, engine_name: str) -> "Optional[Callable[[AnalysisRequest], EngineResult]]":
         """Return a callable ``(AnalysisRequest) → EngineResult`` or *None*."""
         handlers = {
             "pattern_analysis": self._run_pattern_analysis,
