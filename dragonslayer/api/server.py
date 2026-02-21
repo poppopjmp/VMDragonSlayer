@@ -22,6 +22,7 @@ import tempfile
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from ..core.orchestrator import Orchestrator
@@ -207,6 +208,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# B97: Response compression for large JSON payloads (min 1 KB).
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # B62: Production middleware

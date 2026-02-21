@@ -85,13 +85,31 @@ class BaseModel:
                 pickle.dump(artifact, f)
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
-        """Run inference on a single feature dict."""
+        """Run inference on a single feature dict.
+
+        Args:
+            features: Dict with ``values`` (float list) and ``names``
+                (feature name list).
+
+        Returns:
+            A :class:`PredictionResult` with label, confidence, and probabilities.
+
+        Raises:
+            NotImplementedError: Subclasses must override this method.
+        """
         raise NotImplementedError(
             f"{type(self).__name__}.predict() is not implemented"
         )
 
     def predict_batch(self, batch: List[Dict[str, Any]]) -> List[PredictionResult]:
-        """Run inference on a batch (default: sequential predict)."""
+        """Run inference on a batch (default: sequential predict).
+
+        Args:
+            batch: List of feature dicts, each matching :meth:`predict` input.
+
+        Returns:
+            Corresponding list of :class:`PredictionResult` objects.
+        """
         return [self.predict(f) for f in batch]
 
 
@@ -173,7 +191,18 @@ def _score_rules(
     values: List[float],
     names: List[str],
 ) -> Dict[str, float]:
-    """Score each handler category using the heuristic rules."""
+    """Score each handler category using the heuristic rules.
+
+    Applies the weight/threshold/direction rules in ``_HEURISTIC_RULES``
+    to produce a score for every category.
+
+    Args:
+        values: Feature values (floats) in the same order as *names*.
+        names: Feature names corresponding to *values*.
+
+    Returns:
+        Dict mapping category name to cumulative rule score.
+    """
     lookup: Dict[str, float] = dict(zip(names, values))
     scores: Dict[str, float] = {}
 
@@ -430,7 +459,12 @@ class VMHandlerModel(BaseModel):
 
     @property
     def is_trained(self) -> bool:
-        """Return True if a trained sklearn model is loaded."""
+        """Return True if a trained sklearn model is loaded.
+
+        Returns:
+            ``True`` when a scikit-learn pipeline has been loaded or
+            trained, ``False`` otherwise.
+        """
         return self._sklearn_model is not None
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:

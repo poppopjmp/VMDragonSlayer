@@ -34,7 +34,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
@@ -160,9 +160,52 @@ _JCC_PREFIXES = {"je", "jne", "jz", "jnz", "ja", "jb", "jg", "jl",
 # ---------------------------------------------------------------------------
 
 
+class HandlerSemanticDict(TypedDict):
+    """Shape returned by :meth:`HandlerSemantic.to_dict`."""
+    handler_address: str
+    operation: str
+    confidence: float
+    operand_count: int
+    operand_width: int
+    reads_memory: bool
+    writes_memory: bool
+    modifies_flags: bool
+    detail: str
+
+
+class OpcodeTableEntryDict(TypedDict):
+    """Shape returned by :meth:`OpcodeTableEntry.to_dict`."""
+    opcode: str
+    handler_address: str
+    operation: str
+    confidence: float
+    vip_delta: int
+
+
+class SemanticOpcodeTableDict(TypedDict):
+    """Shape returned by :meth:`SemanticOpcodeTable.to_dict`."""
+    handler_count: int
+    unique_operations: int
+    operations_summary: Dict[str, int]
+    entries: List[OpcodeTableEntryDict]
+
+
 @dataclass
 class HandlerSemantic:
-    """Semantic analysis result for one handler."""
+    """Semantic analysis result for one handler.
+
+    Attributes:
+        handler_address: Virtual address of the handler entry point.
+        operation: Detected :class:`VMOperation` string constant.
+        confidence: Classification confidence in ``[0.0, 1.0]``.
+        operand_count: Number of operands the handler consumes.
+        operand_width: Operand width in bytes (4 = dword, 8 = qword).
+        reads_memory: Whether the handler reads from memory.
+        writes_memory: Whether the handler writes to memory.
+        modifies_flags: Whether the handler modifies CPU flags.
+        mnemonic_histogram: Frequency of native mnemonics in the handler.
+        detail: Human-readable classification rationale.
+    """
 
     handler_address: int
     operation: str = VMOperation.UNKNOWN
@@ -175,7 +218,7 @@ class HandlerSemantic:
     mnemonic_histogram: Dict[str, int] = field(default_factory=dict)
     detail: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> HandlerSemanticDict:
         return {
             "handler_address": hex(self.handler_address),
             "operation": self.operation,
@@ -191,14 +234,21 @@ class HandlerSemantic:
 
 @dataclass
 class OpcodeTableEntry:
-    """Combines VM opcode value, handler address, and semantics."""
+    """Combines VM opcode value, handler address, and semantics.
+
+    Attributes:
+        opcode: Raw VM opcode (integer).
+        handler_address: Native address of the handler.
+        semantic: Full :class:`HandlerSemantic` for this opcode.
+        vip_delta: Virtual-instruction-pointer advance in bytes.
+    """
 
     opcode: int
     handler_address: int
     semantic: HandlerSemantic
     vip_delta: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> OpcodeTableEntryDict:
         return {
             "opcode": hex(self.opcode),
             "handler_address": hex(self.handler_address),
@@ -210,7 +260,13 @@ class OpcodeTableEntry:
 
 @dataclass
 class SemanticOpcodeTable:
-    """The fully-analysed VM opcode table with semantic annotations."""
+    """The fully-analysed VM opcode table with semantic annotations.
+
+    Attributes:
+        entries: Ordered list of :class:`OpcodeTableEntry` items.
+        handler_count: Number of distinct handler addresses.
+        unique_operations: Number of distinct semantic operations.
+    """
 
     entries: List[OpcodeTableEntry] = field(default_factory=list)
     handler_count: int = 0
@@ -235,7 +291,7 @@ class SemanticOpcodeTable:
             counter[e.semantic.operation] += 1
         return dict(counter.most_common())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> SemanticOpcodeTableDict:
         return {
             "handler_count": self.handler_count,
             "unique_operations": self.unique_operations,

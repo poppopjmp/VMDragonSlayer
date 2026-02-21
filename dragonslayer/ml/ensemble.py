@@ -79,7 +79,17 @@ class EnsembleClassifier:
     # ── Standard prediction ────────────────────────────────────────────────
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
-        """Majority-vote prediction from all component models."""
+        """Majority-vote prediction from all component models.
+
+        Args:
+            features: Feature dict passed to every component model.
+
+        Returns:
+            Aggregated :class:`PredictionResult` (majority vote).
+
+        Raises:
+            ValueError: If no component models have been added.
+        """
         if not self._models:
             raise ValueError(
                 "EnsembleClassifier has no component models — "
@@ -96,7 +106,15 @@ class EnsembleClassifier:
         *,
         failures: List[str] | None = None,
     ) -> PredictionResult:
-        """Aggregate results via majority vote (B59 refactor)."""
+        """Aggregate results via majority vote (B59 refactor).
+
+        Args:
+            results: Predictions from component models.
+            failures: Optional list of model names that failed.
+
+        Returns:
+            A single :class:`PredictionResult` with agreement metadata.
+        """
         votes = Counter(r.label for r in results)
         winner, count = votes.most_common(1)[0]
         agreement = count / len(results) if results else 0.0
@@ -196,7 +214,17 @@ class StackedEnsemble(EnsembleClassifier):
     def _build_meta_features(
         self, results: List[PredictionResult]
     ) -> Dict[str, Any]:
-        """Build a feature dict from base-model outputs for the meta-model."""
+        """Build a feature dict from base-model outputs for the meta-model.
+
+        Extracts labels, confidences, per-class probabilities, and
+        agreement ratio from the base-model results.
+
+        Args:
+            results: Predictions from the base component models.
+
+        Returns:
+            Dict of meta-features suitable for the stacking meta-model.
+        """
         meta: Dict[str, Any] = {}
         for i, r in enumerate(results):
             meta[f"base_{i}_label"] = r.label
