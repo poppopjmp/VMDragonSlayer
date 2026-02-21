@@ -4,6 +4,47 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### B104–B107 — Deep Implementation Cycle (4 commits)
+
+Addresses remaining gaps identified by a comprehensive audit to bring
+the codebase from ~80% to ~97% real implementation.
+Test count: **3756 → 3773** (new B107 tests; cumulative B104–B107: 200 new tests).
+
+#### B104 — GPU Removal + Devirt Pipelines (`94b20d5`)
+- **Removed** `dragonslayer/gpu/` module entirely (5 stub files); replaced by litellm LLM provider
+- **Themida devirt pipeline** (`themida_devirt.py` ~460 lines): `ThemidaVariant` enum, `ThemidaBytecodeDecoder`, 5-step `devirtualize_themida()` pipeline (detect → decode → extract → map → devirtualise)
+- **Code Virtualizer devirt pipeline** (`cv_devirt.py` ~430 lines): `CVVersion` enum, `CVBytecodeDecoder`, 5-step `devirtualize_cv()` pipeline with LODSB/XLAT fetch-decrypt cycle
+- Updated `analysis/__init__.py` with 16 new guarded exports
+- 37 new tests; full suite: 3573 passed
+
+#### B105 — Multi-Protector Synthetic Data + ML Training (`3ab18cc`)
+- **Themida handler templates** (9 categories): EDI-based context, pushad/popad, [edi+offset], ESI as vIP
+- **Code Virtualizer handler templates** (9 categories): LODSB/XLAT fetch-decrypt, ESP-based context, BSWAP, LODSD
+- `generate_multi_protector_data()`: 2160 samples across 3 protectors × 9 categories × jitter
+- `train_and_save_model()`: end-to-end training producing 98.52% accuracy (GradientBoosting)
+- `_apply_jitter()`: NOP insertion, register renaming (64/32-bit pairs), dead-code push/pop
+- Expanded `vmprotect_handlers.json` from 75 → 144 patterns
+- 45 new tests; full suite: 3655 passed
+
+#### B106 — Trace Collection Facade + Multi-Format Export (`c156ab5`)
+- **Trace collector** (`trace_collector.py` ~441 lines): `TraceBackend` enum (Unicorn/Triton/angr/Qiling/File/Auto), `TraceConfig`, `CollectionResult`, `collect_trace()` with auto backend selection, `filter_trace()`, `merge_traces()`, `trace_statistics()`
+- **Trace export** (`trace_export.py` ~340 lines): `OutputFormat` enum, plugin-style `@_register_format` decorator, 5 renderers (JSON, TEXT, CSV, IDA annotation JSON, Ghidra Jython script), `export_trace()`, `validate_roundtrip()`
+- 19 new guarded exports in `analysis/__init__.py`
+- 101 new tests; full suite: 3756 passed
+
+#### B107 — RE Tool Plugins + CLI Export (`b725260`)
+- **IDA Pro plugin** (`plugins/idapro/dragonslayer_ida.py` ~228 lines): `DragonSlayerPlugin` class, `PLUGIN_ENTRY()`, `apply_annotations()`, colour/comment/rename/bookmark helpers, live analysis + pre-exported JSON, `Ctrl+Shift+D` hotkey
+- **Ghidra plugin** (`plugins/ghidra/dragonslayer_ghidra.py` ~224 lines): Jython 2.7 compatible, transaction-safe `apply_annotations()`, auto-discovery of annotation files, EOL/plate comments, bookmarks, function renames
+- **Binary Ninja plugin** (`plugins/binaryninja/dragonslayer_binja.py` ~232 lines): `PluginCommand.register()` for Apply & Analyze, highlight colours, dragon emoji tags, file dialog + live analysis
+- **CLI `export` subcommand**: `vmdragonslayer export <file> -f <format> -o <output>` (json/text/csv/ida/ghidra)
+- 17 new tests; full suite: 3773 passed
+
+#### B108 — Documentation Updates
+- Updated `03-modules.md`: Removed stale GPU section, added devirt pipelines, trace collection/export, RE tool plugins, multi-protector ML training
+- Filled `99-glossary.md` with 30+ domain terms across 7 categories (VM protection, protectors, analysis techniques, data structures, ML, infrastructure)
+- Expanded `05-workflows.md` with multi-protector devirtualisation flow, trace collection & export examples, CLI export usage, RE tool plugin installation, ML training workflow
+- Updated CHANGELOG with B104–B108 entries
+
 ### Phase 11 — Devirtualisation Pipeline Completion (10 commits)
 
 Phase 11 implements the full VMProtect devirtualisation pipeline end-to-end,

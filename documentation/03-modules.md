@@ -66,12 +66,24 @@ Index of primary packages and key modules.
 - `model.py` — `VMHandlerModel` weighted-rule classifier (+ optional scikit-learn)
 - `handler_classifier.py` — Bridge connecting ML pipeline to devirtualisation
 - `classifier.py` — `VMClassifier` high-level entry point
-- `trainer.py` — Training infrastructure with metric collection
+- `trainer.py` — Training infrastructure: multi-protector synthetic data generation (VMProtect, Themida, Code Virtualizer), jitter transforms (NOP insertion, register renaming, dead-code injection), `train_and_save_model()` with GradientBoosting
 - `ensemble.py` — Multi-model combination (majority/weighted vote)
 
-## GPU (`dragonslayer/gpu/`) — stubs
+## Devirtualisation Pipelines (`dragonslayer/analysis/`)
 
-- `engine.py`, `memory.py`, `optimizer.py`, `profiler.py` — Interface stubs for future GPU acceleration
+- `themida_devirt.py` — Themida / WinLicense VMs: variant detection, bytecode decode, handler extraction, opcode map, devirtualise pipeline
+- `cv_devirt.py` — Oreans Code Virtualizer: version detection, LODSB/XLAT fetch-decrypt decode, handler extraction, opcode map, devirtualise pipeline
+
+## Trace Collection & Export (`dragonslayer/analysis/`)
+
+- `trace_collector.py` — High-level trace collection facade: `TraceBackend` enum (Unicorn/Triton/angr/Qiling/File/Auto), `TraceConfig`, `CollectionResult`, `collect_trace()`, `filter_trace()`, `merge_traces()`, `trace_statistics()`
+- `trace_export.py` — Multi-format trace export: `OutputFormat` enum, plugin-style format registry (JSON, TEXT, CSV, IDA, Ghidra), `export_trace()`, `render_trace()`, `validate_roundtrip()`
+
+## RE Tool Plugins (`plugins/`)
+
+- `idapro/dragonslayer_ida.py` — IDA Pro plugin: `DragonSlayerPlugin` class, `apply_annotations()`, colour/comment/rename/bookmark helpers, live analysis + pre-exported JSON
+- `ghidra/dragonslayer_ghidra.py` — Ghidra Jython plugin: transaction-safe `apply_annotations()`, auto-discovery of annotation files, EOL/plate comments, bookmarks
+- `binaryninja/dragonslayer_binja.py` — Binary Ninja plugin: `PluginCommand` registration, highlight colours, dragon emoji tags, file dialog + live analysis
 
 ## LLM (`dragonslayer/llm/`)
 
