@@ -71,6 +71,7 @@ class HandlerTaintSummary:
     transfer: Dict[str, Set[str]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the handler taint summary to a JSON-compatible dict."""
         return {
             "handler_id": self.handler_id,
             "defs": sorted(self.defs),
@@ -97,6 +98,7 @@ class InterHandlerFlowEdge:
     via_memory: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the flow edge to a JSON-compatible dict."""
         return {
             "source": self.source,
             "target": self.target,
@@ -114,6 +116,7 @@ class InterHandlerFlowResult:
     converged: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the inter-handler flow result to a JSON-compatible dict."""
         return {
             "summary_count": len(self.summaries),
             "summaries": [s.to_dict() for s in self.summaries],

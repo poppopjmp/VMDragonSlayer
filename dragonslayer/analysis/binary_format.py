@@ -118,6 +118,7 @@ class ParsedBinary:
 
     @property
     def writable_sections(self) -> List[Section]:
+        """Sections with the writable flag set."""
         return [s for s in self.sections if s.writable]
 
     def executable_ranges(self) -> List[Tuple[int, int]]:
@@ -187,6 +188,7 @@ class ParsedBinary:
         return data[off:off + size]
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the parsed binary metadata and sections to a JSON-compatible dict."""
         return {
             "format": self.format.value,
             "architecture": self.architecture.value,

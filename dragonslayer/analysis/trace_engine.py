@@ -153,7 +153,7 @@ class TraceEngine:
         Optional configuration.  Uses defaults when ``None``.
     """
 
-    def __init__(self, arch: str = "x86_64", config: Optional[TraceConfig] = None):
+    def __init__(self, arch: str = "x86_64", config: Optional[TraceConfig] = None) -> None:
         if not UNICORN_AVAILABLE:
             raise RuntimeError(
                 "Unicorn engine is required for TraceEngine. "

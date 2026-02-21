@@ -71,6 +71,7 @@ class HandlerSlice:
 
     @property
     def address_range(self) -> Tuple[int, int]:
+        """``(first_address, last_address)`` of instructions in this slice."""
         if not self.instructions:
             return (0, 0)
         return (self.instructions[0].address, self.instructions[-1].address)
@@ -104,6 +105,7 @@ class HandlerBoundary:
     handler_id: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the handler boundary to a JSON-compatible dict."""
         return {
             "vip_value": self.vip_value,
             "handler_address": hex(self.handler_address),
@@ -127,6 +129,7 @@ class SegmentationResult:
     bytecode_width_mode: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the segmentation result to a JSON-compatible dict."""
         return {
             "vip_register": self.vip_register,
             "boundary_count": len(self.boundaries),

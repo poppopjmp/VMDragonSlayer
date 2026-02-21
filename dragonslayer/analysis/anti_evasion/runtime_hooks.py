@@ -84,6 +84,7 @@ class HookDescriptor:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the hook descriptor to a JSON-compatible dict."""
         return {
             "name": self.name,
             "category": self.category.value,
@@ -100,6 +101,7 @@ class HookSet:
     categories: Set[HookCategory] = field(default_factory=set)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the hook set to a JSON-compatible dict."""
         return {
             "hook_count": len(self.hooks),
             "categories": sorted(c.value for c in self.categories),
@@ -107,6 +109,7 @@ class HookSet:
         }
 
     def by_category(self, cat: HookCategory) -> List[HookDescriptor]:
+        """Return hooks belonging to the given :class:`HookCategory`."""
         return [h for h in self.hooks if h.category == cat]
 
 
@@ -119,9 +122,11 @@ class HookInstallResult:
 
     @property
     def success_count(self) -> int:
+        """Number of hooks successfully installed."""
         return len(self.installed)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the installation result to a JSON-compatible dict."""
         return {
             "installed_count": len(self.installed),
             "installed": self.installed,

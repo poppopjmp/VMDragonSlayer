@@ -280,53 +280,55 @@ class AnalysisPipeline:
         llm_insights: Dict[str, Any] = {}
 
         try:
-          for stage_name in cfg.stages:
-            handler = stage_handlers.get(stage_name)
-            if handler is None:
-                logger.warning("Unknown pipeline stage '%s' — skipping", stage_name)
-                continue
+          # Shared pool for per-stage timeout enforcement — avoids creating
+          # (and potentially leaking) a new executor every iteration.
+          stage_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+          try:
+            for stage_name in cfg.stages:
+                handler = stage_handlers.get(stage_name)
+                if handler is None:
+                    logger.warning("Unknown pipeline stage '%s' — skipping", stage_name)
+                    continue
 
-            # Skip LLM stages if disabled
-            if stage_name.startswith("llm_") and not cfg.llm_enabled:
-                continue
+                # Skip LLM stages if disabled
+                if stage_name.startswith("llm_") and not cfg.llm_enabled:
+                    continue
 
-            try:
-                # Enforce per-stage timeout via a thread-pool future.
-                stage_timeout = cfg.timeout if cfg.timeout > 0 else None
-                pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                future = pool.submit(handler)
                 try:
-                    sr = future.result(timeout=stage_timeout)
-                except concurrent.futures.TimeoutError:
-                    logger.warning(
-                        "Stage %s exceeded timeout of %.1fs", stage_name, cfg.timeout,
-                    )
-                    sr = StageResult(
+                    # Enforce per-stage timeout via a thread-pool future.
+                    stage_timeout = cfg.timeout if cfg.timeout > 0 else None
+                    future = stage_pool.submit(handler)
+                    try:
+                        sr = future.result(timeout=stage_timeout)
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(
+                            "Stage %s exceeded timeout of %.1fs", stage_name, cfg.timeout,
+                        )
+                        sr = StageResult(
+                            stage=stage_name,
+                            success=False,
+                            error=f"timeout after {cfg.timeout}s",
+                        )
+                    stage_results.append(sr)
+                    ctx.shared_data["pipeline_stages_completed"].append(stage_name)
+
+                    if not sr.success and sr.error:
+                        errors.append(f"[{stage_name}] {sr.error}")
+
+                    # Collect LLM insights separately
+                    if stage_name.startswith("llm_") and sr.data:
+                        llm_insights[stage_name] = sr.data
+
+                except _STAGE_ERRORS as exc:
+                    logger.exception("Pipeline stage %s failed", stage_name)
+                    stage_results.append(StageResult(
                         stage=stage_name,
                         success=False,
-                        error=f"timeout after {cfg.timeout}s",
-                    )
-                finally:
-                    # Shut down without waiting for the hung thread.
-                    pool.shutdown(wait=False, cancel_futures=True)
-                stage_results.append(sr)
-                ctx.shared_data["pipeline_stages_completed"].append(stage_name)
-
-                if not sr.success and sr.error:
-                    errors.append(f"[{stage_name}] {sr.error}")
-
-                # Collect LLM insights separately
-                if stage_name.startswith("llm_") and sr.data:
-                    llm_insights[stage_name] = sr.data
-
-            except _STAGE_ERRORS as exc:
-                logger.exception("Pipeline stage %s failed", stage_name)
-                stage_results.append(StageResult(
-                    stage=stage_name,
-                    success=False,
-                    error=str(exc),
-                ))
-                errors.append(f"[{stage_name}] {exc}")
+                        error=str(exc),
+                    ))
+                    errors.append(f"[{stage_name}] {exc}")
+          finally:
+            stage_pool.shutdown(wait=False, cancel_futures=True)
 
         finally:
             # Always clean up the temp directory

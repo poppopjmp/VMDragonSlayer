@@ -75,6 +75,7 @@ class PseudocodeResult:
     """Mapping of SSA variable name → operand width in bytes."""
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise pseudocode metadata and text to a JSON-compatible dict."""
         return {
             "line_count": self.line_count,
             "style": self.style,

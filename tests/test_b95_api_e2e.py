@@ -71,21 +71,21 @@ def anyio_backend():
 @pytest.fixture(autouse=True)
 def _reset_server_state():
     """Reset mutable server state between tests so they are independent."""
-    original = {
-        "start_time": time.time(),
-        "total_requests": 0,
-        "active_requests": 0,
-        "analysis_count": 0,
-        "api": None,
-        "rate_limiter": {},
-    }
-    server_state.update(original)
+    def _reset() -> None:
+        server_state.start_time = time.time()
+        server_state.total_requests = 0
+        server_state.active_requests = 0
+        server_state.analysis_count = 0
+        server_state.api = None
+        server_state.rate_limiter.clear()
+
+    _reset()
     # Reset circuit breaker to CLOSED
     circuit_breaker._state = CircuitState.CLOSED
     circuit_breaker._failure_count = 0
     circuit_breaker._last_failure_time = 0.0
     yield
-    server_state.update(original)
+    _reset()
 
 
 def _make_mock_api() -> MagicMock:
@@ -112,9 +112,9 @@ def _make_mock_api() -> MagicMock:
 def mock_api():
     """Inject a mock API into server_state for route tests."""
     mock = _make_mock_api()
-    server_state["api"] = mock
+    server_state.api = mock
     yield mock
-    server_state["api"] = None
+    server_state.api = None
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ class TestStatusEndpoint:
     @pytest.mark.anyio
     async def test_status_without_api(self):
         """When API is None, supported_types should be an empty list."""
-        server_state["api"] = None
+        server_state.api = None
         async with _client() as c:
             resp = await c.get("/status")
         assert resp.status_code == 200
@@ -279,7 +279,7 @@ class TestAnalyzeEndpoint:
         }
         async with _client() as c:
             await c.post("/analyze", json=payload)
-        assert server_state["analysis_count"] >= 1
+        assert server_state.analysis_count >= 1
 
 
 class TestUploadAnalyzeEndpoint:
@@ -464,13 +464,13 @@ class TestRequestCounting:
         async with _client() as c:
             await c.get("/health")
             await c.get("/health")
-        assert server_state["total_requests"] >= 2
+        assert server_state.total_requests >= 2
 
     @pytest.mark.anyio
     async def test_active_requests_returns_to_zero(self):
         async with _client() as c:
             await c.get("/health")
-        assert server_state["active_requests"] == 0
+        assert server_state.active_requests == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

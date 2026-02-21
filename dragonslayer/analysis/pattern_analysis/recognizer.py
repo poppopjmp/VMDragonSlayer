@@ -48,7 +48,7 @@ class PatternRecognizer:
     seamless fallback.
     """
     
-    def __init__(self, database: PatternDatabase, *, use_yara: bool = True):
+    def __init__(self, database: PatternDatabase, *, use_yara: bool = True) -> None:
         """
         Initialize pattern recognizer.
 
@@ -732,7 +732,7 @@ class SequenceRecognizer:
     
     """
     
-    def __init__(self, database: PatternDatabase):
+    def __init__(self, database: PatternDatabase) -> None:
 
         self.database = database
         self.recognizer = PatternRecognizer(database)

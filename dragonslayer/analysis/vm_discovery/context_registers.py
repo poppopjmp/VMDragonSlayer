@@ -58,6 +58,7 @@ class VMContextRegister:
     evidence: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the context register to a JSON-compatible dict."""
         return {
             "register": self.register,
             "role": self.role,
@@ -75,22 +76,27 @@ class VMContextLayout:
 
     @property
     def vsp(self) -> Optional[str]:
+        """Name of the register assigned the virtual stack pointer role, or ``None``."""
         return self._get_role("vSP")
 
     @property
     def table_base(self) -> Optional[str]:
+        """Name of the register holding the handler table base address, or ``None``."""
         return self._get_role("vHandlerTbl")
 
     @property
     def key_register(self) -> Optional[str]:
+        """Name of the rolling key / decode-transform register, or ``None``."""
         return self._get_role("vKey")
 
     @property
     def context_base(self) -> Optional[str]:
+        """Name of the register pointing to the VM context structure, or ``None``."""
         return self._get_role("vContext")
 
     @property
     def scratch_registers(self) -> List[str]:
+        """List of register names assigned the scratch role."""
         return [r.register for r in self.registers if r.role == "scratch"]
 
     def _get_role(self, role: str) -> Optional[str]:
@@ -100,12 +106,14 @@ class VMContextLayout:
         return None
 
     def get_register_role(self, reg_name: str) -> Optional[str]:
+        """Return the VM role string for *reg_name*, or ``None`` if unassigned."""
         for r in self.registers:
             if r.register == reg_name:
                 return r.role
         return None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the full VM context layout to a JSON-compatible dict."""
         return {
             "vip_register": self.vip_register,
             "bit_width": self.bit_width,

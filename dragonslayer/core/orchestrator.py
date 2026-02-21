@@ -213,7 +213,21 @@ class EngineHandler(Protocol):
 
 @dataclass
 class AnalysisResult:
-    """Aggregated result returned to callers."""
+    """Aggregated result returned to callers.
+
+    Attributes:
+        success: ``True`` if the analysis completed without fatal errors.
+        analysis_id: Unique UUID identifying this analysis run.
+        timestamp: ISO-8601 UTC timestamp of when the result was created.
+        file_info: Metadata about the analysed binary.
+        analysis_type: The :class:`AnalysisType` mode that was used.
+        results: Merged engine output data.
+        engine_results: Per-engine :class:`EngineResult` objects.
+        execution_time: Total wall-clock seconds for the run.
+        errors: Collected error messages.
+        confidence_scores: Per-engine confidence values.
+        metrics: Timing / telemetry data.
+    """
     success: bool
     analysis_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -226,7 +240,7 @@ class AnalysisResult:
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     metrics: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> AnalysisResultDict:
         d = asdict(self)
         # asdict() already recursively converted engine_results;
         # no need to re-convert.

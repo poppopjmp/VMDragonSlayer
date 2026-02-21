@@ -246,9 +246,9 @@ class TestAPIExceptionHandlers:
             "execution_time": 0.1,
             "errors": [],
         }
-        server_state['api'] = mock_api
+        server_state.api = mock_api
         # Reset rate limiter
-        server_state['rate_limiter'].clear()
+        server_state.rate_limiter.clear()
 
         self.client = TestClient(app, raise_server_exceptions=False)
         self.mock_api = mock_api
@@ -389,8 +389,8 @@ class TestRateLimiterCleanup:
             "file_info": {}, "analysis_type": "hybrid",
             "results": {}, "execution_time": 0.0, "errors": [],
         }
-        server_state['api'] = mock_api
-        server_state['rate_limiter'].clear()
+        server_state.api = mock_api
+        server_state.rate_limiter.clear()
         self.server_state = server_state
         self.client = TestClient(app, raise_server_exceptions=False)
         yield
@@ -401,9 +401,9 @@ class TestRateLimiterCleanup:
 
         # Pre-populate a stale IP
         stale_time = time.time() - RATE_LIMIT_WINDOW * 3
-        self.server_state['rate_limiter']['1.2.3.4'] = [stale_time]
+        self.server_state.rate_limiter['1.2.3.4'] = [stale_time]
         # Set total_requests to a multiple of 100 to trigger cleanup
-        self.server_state['total_requests'] = 99  # next request = 100
+        self.server_state.total_requests = 99  # next request = 100
 
         import base64
         sample = base64.b64encode(b"\x00" * 16).decode()
@@ -413,7 +413,7 @@ class TestRateLimiterCleanup:
         })
 
         # The stale IP should have been evicted
-        assert '1.2.3.4' not in self.server_state['rate_limiter']
+        assert '1.2.3.4' not in self.server_state.rate_limiter
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -77,6 +77,7 @@ class VMOpcode:
     vip_value: int = 0         # the vIP value when this opcode was fetched
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the VM opcode to a JSON-compatible dict."""
         return {
             "offset": self.offset,
             "value": hex(self.value),
@@ -96,6 +97,7 @@ class OpcodeMap:
     # entries[opcode_value] = (handler_address, category)
 
     def add(self, opcode: int, handler_address: int, category: str = "") -> None:
+        """Register an opcode-to-handler mapping, keeping the first seen on conflict."""
         existing = self.entries.get(opcode)
         if existing is None:
             self.entries[opcode] = (handler_address, category)
@@ -108,9 +110,11 @@ class OpcodeMap:
             )
 
     def handler_for(self, opcode: int) -> Optional[Tuple[int, str]]:
+        """Return ``(handler_address, category)`` for *opcode*, or ``None``."""
         return self.entries.get(opcode)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the opcode map to a JSON-compatible dict keyed by hex opcode."""
         return {
             hex(k): {"handler": hex(v[0]), "category": v[1]}
             for k, v in sorted(self.entries.items())
@@ -130,19 +134,23 @@ class BytecodeStream:
 
     @property
     def length(self) -> int:
+        """Total byte length of the raw bytecode stream."""
         return len(self.raw_bytes)
 
     @property
     def opcode_count(self) -> int:
+        """Number of decoded opcodes in the stream."""
         return len(self.opcodes)
 
     def opcode_at(self, offset: int) -> Optional[VMOpcode]:
+        """Return the :class:`VMOpcode` at byte *offset*, or ``None``."""
         for op in self.opcodes:
             if op.offset == offset:
                 return op
         return None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the bytecode stream to a JSON-compatible dict."""
         return {
             "base_address": hex(self.base_address),
             "length": self.length,

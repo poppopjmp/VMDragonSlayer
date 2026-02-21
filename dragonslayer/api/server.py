@@ -13,6 +13,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import AsyncIterator, Dict, Any, Optional, List
@@ -179,7 +180,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore
     """
     logger.info("Starting VMDragonSlayer API server...")
     try:
-        server_state['api'] = VMDragonSlayerAPI()
+        server_state.api = VMDragonSlayerAPI()
         logger.info("API server started successfully")
     except (ValueError, TypeError, RuntimeError, OSError, ImportError) as exc:
         logger.error("Failed to start API server: %s", exc)
@@ -189,15 +190,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore
     logger.info("Shutting down VMDragonSlayer API server (drain=%.1fs)...",
                 _SHUTDOWN_DRAIN_SECONDS)
     deadline = time.monotonic() + _SHUTDOWN_DRAIN_SECONDS
-    while server_state.get('active_requests', 0) > 0 and time.monotonic() < deadline:
+    while server_state.active_requests > 0 and time.monotonic() < deadline:
         await asyncio.sleep(0.1)
-    remaining = server_state.get('active_requests', 0)
+    remaining = server_state.active_requests
     if remaining:
         logger.warning("Shutdown forced with %d active request(s)", remaining)
-    api = server_state.get('api')
+    api = server_state.api
     if api is not None:
         api.shutdown()
-    server_state['api'] = None
+    server_state.api = None
 
 
 # Initialize FastAPI app
@@ -466,14 +467,28 @@ async def circuit_breaker_middleware(request: Request, call_next) -> Response:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Global state
-server_state: Dict[str, Any] = {
-    'start_time': time.time(),
-    'total_requests': 0,
-    'active_requests': 0,
-    'analysis_count': 0,
-    'api': None,
-    'rate_limiter': defaultdict(list),  # IP -> [timestamps]
-}
+@dataclass
+class ServerState:
+    """Typed container for global API server runtime state.
+
+    Attributes:
+        start_time: Epoch timestamp when the server was initialised.
+        total_requests: Cumulative number of HTTP requests handled.
+        active_requests: Number of requests currently being processed.
+        analysis_count: Total binary analyses completed.
+        api: The :class:`VMDragonSlayerAPI` instance (set during lifespan).
+        rate_limiter: Per-IP sliding-window timestamp lists.
+    """
+
+    start_time: float = field(default_factory=time.time)
+    total_requests: int = 0
+    active_requests: int = 0
+    analysis_count: int = 0
+    api: Optional[Any] = None
+    rate_limiter: Dict[str, List[float]] = field(default_factory=lambda: defaultdict(list))
+
+
+server_state = ServerState()
 
 # Async lock protects rate_limiter dict against concurrent ASGI requests
 _rate_lock = asyncio.Lock()
@@ -498,34 +513,34 @@ async def check_rate_limit(request: Request) -> bool:
         exceeded and the request should be rejected.
 
     B57: Also evicts stale IPs that have no recent requests to prevent
-    unbounded memory growth in ``server_state['rate_limiter']``.
+    unbounded memory growth in ``server_state.rate_limiter``.
     """
     client_ip = request.client.host
     now = time.time()
 
     async with _rate_lock:
         # Ensure the IP has an entry before filtering
-        timestamps = server_state['rate_limiter'].get(client_ip, [])
-        server_state['rate_limiter'][client_ip] = [
+        timestamps = server_state.rate_limiter.get(client_ip, [])
+        server_state.rate_limiter[client_ip] = [
             t for t in timestamps
             if now - t < RATE_LIMIT_WINDOW
         ]
 
         # B57: Evict IPs with no recent requests (cheap periodic sweep).
-        if server_state['total_requests'] % 100 == 0:
+        if server_state.total_requests % 100 == 0:
             stale_ips = [
-                ip for ip, ts in server_state['rate_limiter'].items()
+                ip for ip, ts in server_state.rate_limiter.items()
                 if not ts or (now - max(ts)) > RATE_LIMIT_WINDOW * 2
             ]
             for ip in stale_ips:
-                del server_state['rate_limiter'][ip]
+                del server_state.rate_limiter[ip]
 
         # Check limit
-        if len(server_state['rate_limiter'][client_ip]) >= RATE_LIMIT_REQUESTS:
+        if len(server_state.rate_limiter[client_ip]) >= RATE_LIMIT_REQUESTS:
             return False
 
         # Add current request
-        server_state['rate_limiter'][client_ip].append(now)
+        server_state.rate_limiter[client_ip].append(now)
         return True
 
 
@@ -537,15 +552,15 @@ async def check_rate_limit(request: Request) -> bool:
 async def count_requests(request: Request, call_next) -> Response:
     """Count active and total requests (async-safe)."""
     async with _counter_lock:
-        server_state['total_requests'] += 1
-        server_state['active_requests'] += 1
+        server_state.total_requests += 1
+        server_state.active_requests += 1
 
     try:
         response = await call_next(request)
         return response
     finally:
         async with _counter_lock:
-            server_state['active_requests'] -= 1
+            server_state.active_requests -= 1
 
 
 # Exception Handlers
@@ -664,7 +679,7 @@ async def health_check() -> HealthResponse:
     components: Dict[str, str] = {}
 
     # Probe 1 — VMDragonSlayerAPI instance
-    api = server_state.get('api')
+    api = server_state.api
     if api is not None:
         components['api'] = 'ok'
     else:
@@ -696,16 +711,16 @@ async def get_status() -> StatusResponse:
     
     Returns server metrics and statistics.
     """
-    api = server_state['api']
-    uptime = time.time() - server_state['start_time']
+    api = server_state.api
+    uptime = time.time() - server_state.start_time
     
     return StatusResponse(
         status='operational',
         version='2025.10',
         uptime_seconds=uptime,
-        total_requests=server_state['total_requests'],
-        active_requests=server_state['active_requests'],
-        analysis_count=server_state['analysis_count'],
+        total_requests=server_state.total_requests,
+        active_requests=server_state.active_requests,
+        analysis_count=server_state.analysis_count,
         supported_types=api.get_supported_analysis_types() if api else []
     )
 
@@ -717,13 +732,13 @@ async def get_metrics() -> Dict[str, Any]:
     
     Returns performance and usage metrics.
     """
-    uptime = time.time() - server_state['start_time']
+    uptime = time.time() - server_state.start_time
     
     return {
         'vmds_uptime_seconds': uptime,
-        'vmds_total_requests': server_state['total_requests'],
-        'vmds_active_requests': server_state['active_requests'],
-        'vmds_analysis_count': server_state['analysis_count'],
+        'vmds_total_requests': server_state.total_requests,
+        'vmds_active_requests': server_state.active_requests,
+        'vmds_analysis_count': server_state.analysis_count,
         'vmds_timestamp': time.time()
     }
 
@@ -735,7 +750,7 @@ async def get_analysis_types() -> Dict[str, Any]:
     
     Returns all available analysis types and their descriptions.
     """
-    api = server_state['api']
+    api = server_state.api
     
     types_info = {
         'vm_discovery': 'VM dispatcher and handler detection',
@@ -765,7 +780,7 @@ async def get_analysis_types() -> Dict[str, Any]:
 async def analyze_binary(
     request: Request,
     analysis_request: AnalysisRequest
-):
+) -> AnalysisResponse:
     """
     Analyze binary data.
     
@@ -784,7 +799,7 @@ async def analyze_binary(
             detail="Rate limit exceeded. Please try again later."
         )
 
-    api = server_state['api']
+    api = server_state.api
 
     try:
         # Decode binary data
@@ -807,7 +822,7 @@ async def analyze_binary(
         )
 
         async with _counter_lock:
-            server_state['analysis_count'] += 1
+            server_state.analysis_count += 1
 
         return AnalysisResponse(**result)
 
@@ -832,7 +847,7 @@ async def upload_and_analyze(
     request: Request,
     file: UploadFile = File(...),
     analysis_type: str = 'hybrid'
-):
+) -> Dict[str, Any]:
     """
     Upload and analyze a binary file.
     
@@ -852,7 +867,7 @@ async def upload_and_analyze(
             detail="Rate limit exceeded. Please try again later."
         )
 
-    api = server_state['api']
+    api = server_state.api
 
     try:
         # Read file data
@@ -881,7 +896,7 @@ async def upload_and_analyze(
         )
 
         async with _counter_lock:
-            server_state['analysis_count'] += 1
+            server_state.analysis_count += 1
 
         return result
 

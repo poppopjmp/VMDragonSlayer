@@ -55,6 +55,7 @@ class TraceInstruction:
     registers: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the instruction to a JSON-compatible dict."""
         return {
             "address": self.address,
             "size": self.size,
@@ -73,6 +74,7 @@ class TraceMemoryAccess:
     value: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the memory access to a JSON-compatible dict."""
         return {
             "type": self.type,
             "address": self.address,
@@ -89,6 +91,7 @@ class TraceControlFlow:
     target: int
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the control-flow edge to a JSON-compatible dict."""
         return {"type": self.type, "source": self.source, "target": self.target}
 
 
@@ -100,6 +103,7 @@ class HandlerMarker:
     handler_type: str = "unknown"
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the handler marker to a JSON-compatible dict."""
         return {
             "handler_id": self.handler_id,
             "address": self.address,
@@ -257,6 +261,11 @@ class ExecutionTrace:
         return {i.address for i in self.instructions}
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise trace metadata to a JSON-compatible dict.
+
+        Does not include the full instruction/memory/CF data — only
+        counts and the metadata dict.
+        """
         return {
             "source": self.source,
             "instruction_count": len(self.instructions),

@@ -70,6 +70,7 @@ class EvasionIndicator:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the evasion indicator to a JSON-compatible dict."""
         return {
             "category": self.category.value,
             "name": self.name,
@@ -92,6 +93,7 @@ class Patch:
     indicator_name: str
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the patch to a JSON-compatible dict with hex-encoded bytes."""
         return {
             "offset": self.offset,
             "original": self.original.hex(),
@@ -110,6 +112,7 @@ class NormalizationReport:
     risk_score: float = 0.0  # 0.0–1.0
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the full normalisation report to a JSON-compatible dict."""
         return {
             "indicators": [i.to_dict() for i in self.indicators],
             "patches": [p.to_dict() for p in self.patches],

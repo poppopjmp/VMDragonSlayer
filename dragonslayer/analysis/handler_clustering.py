@@ -194,6 +194,7 @@ class SemanticCluster:
     operand_bindings: Dict[int, Dict[int, str]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the semantic cluster to a JSON-compatible dict."""
         return {
             "cluster_id": self.cluster_id,
             "operation": self.operation,
@@ -216,6 +217,7 @@ class ClusteringResult:
     operation_counts: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the clustering result to a JSON-compatible dict."""
         return {
             "cluster_count": len(self.clusters),
             "unclustered_count": len(self.unclustered),

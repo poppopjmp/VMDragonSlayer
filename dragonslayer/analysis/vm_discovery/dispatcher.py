@@ -950,7 +950,7 @@ def _trace_to_pseudo_instructions(trace_records: List[Dict[str, Any]]) -> list:
 
 class _PseudoInstruction:
     """Minimal instruction-like object for dispatcher analysis."""
-    def __init__(self, address: int = 0, disassembly: str = ""):
+    def __init__(self, address: int = 0, disassembly: str = "") -> None:
         self.address = address
         parts = disassembly.strip().split(None, 1) if disassembly else []
         self.mnemonic = parts[0].lower() if parts else ""

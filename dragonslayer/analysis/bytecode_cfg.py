@@ -115,21 +115,27 @@ class VMInstruction:
     """Classification confidence."""
 
     def is_branch(self) -> bool:
+        """Return ``True`` if this instruction is a branch (jump/conditional)."""
         return self.operation in {VMOperation.JMP, VMOperation.JCC}
 
     def is_unconditional_jump(self) -> bool:
+        """Return ``True`` for unconditional jumps."""
         return self.operation == VMOperation.JMP
 
     def is_conditional_jump(self) -> bool:
+        """Return ``True`` for conditional branches."""
         return self.operation == VMOperation.JCC
 
     def is_call(self) -> bool:
+        """Return ``True`` for VM CALL instructions."""
         return self.operation == VMOperation.CALL
 
     def is_return(self) -> bool:
+        """Return ``True`` for VM RET instructions."""
         return self.operation == VMOperation.RET
 
     def is_terminator(self) -> bool:
+        """Return ``True`` if this instruction is a block terminator."""
         return self.is_branch() or self.is_return()
 
     def fallthrough_vip(self) -> int:
@@ -137,6 +143,12 @@ class VMInstruction:
         return self.vip + self.vip_delta
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a JSON-safe dict.
+
+        Returns:
+            Dict with keys ``vip``, ``opcode``, ``handler_address``,
+            ``operation``, ``vip_delta``, ``is_branch``.
+        """
         return {
             "vip": self.vip,
             "opcode": self.opcode,
@@ -182,6 +194,7 @@ class HandlerBasicBlock:
 
     @property
     def instruction_count(self) -> int:
+        """Number of VM instructions in this block."""
         return len(self.instructions)
 
     def operations_list(self) -> List[str]:
@@ -189,6 +202,12 @@ class HandlerBasicBlock:
         return [i.operation for i in self.instructions]
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise this block to a JSON-safe dict.
+
+        Returns:
+            Dict with keys ``block_id``, ``start_vip``, ``end_vip``,
+            ``instruction_count``, ``is_entry``, ``is_exit``, ``operations``.
+        """
         return {
             "block_id": self.block_id,
             "start_vip": self.start_vip,
@@ -210,6 +229,11 @@ class CFGEdge:
     """One of: 'fallthrough', 'jump', 'branch_taken', 'branch_not_taken', 'back_edge'."""
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise this edge to a JSON-safe dict.
+
+        Returns:
+            Dict with keys ``source``, ``target``, ``type``.
+        """
         return {
             "source": self.source_block,
             "target": self.target_block,
@@ -234,25 +258,30 @@ class HandlerCFG:
 
     @property
     def block_count(self) -> int:
+        """Number of basic blocks in the CFG."""
         return len(self.blocks)
 
     @property
     def edge_count(self) -> int:
+        """Number of edges in the CFG."""
         return len(self.edges)
 
     def find_block(self, block_id: int) -> Optional[HandlerBasicBlock]:
+        """Return the block with *block_id*, or ``None``."""
         for b in self.blocks:
             if b.block_id == block_id:
                 return b
         return None
 
     def find_block_by_vip(self, vip: int) -> Optional[HandlerBasicBlock]:
+        """Return the block starting at *vip*, or ``None``."""
         for b in self.blocks:
             if b.start_vip == vip:
                 return b
         return None
 
     def back_edges(self) -> List[CFGEdge]:
+        """Return all back-edges (loop indicators)."""
         return [e for e in self.edges if e.edge_type == "back_edge"]
 
     def loop_headers(self) -> Set[int]:
@@ -260,6 +289,7 @@ class HandlerCFG:
         return {e.target_block for e in self.edges if e.edge_type == "back_edge"}
 
     def exit_blocks(self) -> List[HandlerBasicBlock]:
+        """Return blocks marked as exits."""
         return [b for b in self.blocks if b.is_exit]
 
     def topological_order(self) -> List[int]:
@@ -281,6 +311,7 @@ class HandlerCFG:
         return [b.block_id for b in self.blocks]
 
     def summary(self) -> str:
+        """Return a one-line human-readable summary of the CFG."""
         n_loops = len(self.loop_headers())
         n_exits = len(self.exit_blocks())
         total_insns = sum(b.instruction_count for b in self.blocks)
@@ -294,6 +325,13 @@ class HandlerCFG:
         )
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the complete CFG to a JSON-safe dict.
+
+        Returns:
+            Dict with ``block_count``, ``edge_count``, ``entry_block_id``,
+            ``loop_count``, ``exit_count``, ``blocks``, ``edges``, and
+            optionally ``loop_tree``.
+        """
         result: Dict[str, Any] = {
             "block_count": self.block_count,
             "edge_count": self.edge_count,
@@ -723,12 +761,19 @@ class NaturalLoop:
 
     @property
     def is_innermost(self) -> bool:
+        """Return ``True`` if this loop has no nested children."""
         return len(self.children) == 0
 
     def __contains__(self, block_id: int) -> bool:
         return block_id in self.body
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise this natural loop to a JSON-safe dict.
+
+        Returns:
+            Dict with ``header``, ``back_edge_sources``, ``body``,
+            ``nesting_depth``, and ``children`` (header ids).
+        """
         return {
             "header": self.header,
             "back_edge_sources": self.back_edge_sources,
@@ -802,10 +847,12 @@ class LoopTree:
 
     @property
     def all_loops(self) -> List[NaturalLoop]:
+        """Return a flat list of every :class:`NaturalLoop`."""
         return list(self._loops_by_header.values())
 
     @property
     def loop_count(self) -> int:
+        """Total number of distinct natural loops."""
         return len(self._loops_by_header)
 
     @property
@@ -816,9 +863,11 @@ class LoopTree:
         return max(lp.nesting_depth for lp in self._loops_by_header.values())
 
     def get_loop(self, header: int) -> Optional[NaturalLoop]:
+        """Return the loop with *header*, or ``None``."""
         return self._loops_by_header.get(header)
 
     def innermost_loops(self) -> List[NaturalLoop]:
+        """Return all leaf (innermost) loops."""
         return [lp for lp in self._loops_by_header.values() if lp.is_innermost]
 
     def loop_for_block(self, block_id: int) -> Optional[NaturalLoop]:
@@ -844,6 +893,11 @@ class LoopTree:
         return True
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the full loop tree to a JSON-safe dict.
+
+        Returns:
+            Dict with ``loop_count``, ``max_depth``, ``reducible``, ``loops``.
+        """
         return {
             "loop_count": self.loop_count,
             "max_depth": self.max_depth,

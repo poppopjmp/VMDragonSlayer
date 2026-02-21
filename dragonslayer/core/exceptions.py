@@ -14,7 +14,7 @@ class VMDragonSlayerError(Exception):
 
     error_code: str = "VMDS_ERROR"
 
-    def __init__(self, message: str = "", *, error_code: str | None = None, details: dict | None = None):
+    def __init__(self, message: str = "", *, error_code: str | None = None, details: dict | None = None) -> None:
         super().__init__(message)
         if error_code is not None:
             self.error_code = error_code

@@ -98,6 +98,7 @@ class VmEntryCandidate:
     """Human-readable reason for flagging this address."""
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the VM entry candidate to a JSON-compatible dict."""
         return {
             "rva": self.rva,
             "va": self.va,
@@ -122,12 +123,15 @@ class VmEntryReport:
 
     @property
     def count(self) -> int:
+        """Total number of VM entry candidates found."""
         return len(self.entries)
 
     def top(self, n: int = 10) -> List[VmEntryCandidate]:
+        """Return the top *n* candidates sorted by descending confidence."""
         return sorted(self.entries, key=lambda e: -e.confidence)[:n]
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the VM entry report to a JSON-compatible dict."""
         return {
             "count": self.count,
             "sections_scanned": self.sections_scanned,
