@@ -190,6 +190,123 @@ def auto_detect_cipher_chain(
 
 
 # ---------------------------------------------------------------------------
+# B82: Cipher chain verification & inverse computation
+# ---------------------------------------------------------------------------
+
+# Inverse operations — used to derive a re-encryption (inverse) chain.
+_CIPHER_INVERSE: Dict[CipherOp, CipherOp] = {
+    CipherOp.XOR: CipherOp.XOR,     # XOR is self-inverse
+    CipherOp.ADD: CipherOp.SUB,
+    CipherOp.SUB: CipherOp.ADD,
+    CipherOp.ROL: CipherOp.ROR,
+    CipherOp.ROR: CipherOp.ROL,
+    CipherOp.NOT: CipherOp.NOT,     # NOT is self-inverse
+    CipherOp.BSWAP: CipherOp.BSWAP, # BSWAP is self-inverse
+}
+
+
+def inverse_cipher_chain(chain: List[CipherStep]) -> List[CipherStep]:
+    """Derive the inverse cipher chain (for re-encryption / patching).
+
+    The inverse chain applies the inverse operation of each step in
+    **reverse order**, so ``encrypt(decrypt(x)) == x``.
+
+    Returns
+    -------
+    list[CipherStep]
+        The inverted chain.  Raises ``ValueError`` if any step has no
+        known inverse.
+    """
+    inv: List[CipherStep] = []
+    for step in reversed(chain):
+        inv_op = _CIPHER_INVERSE.get(step.op)
+        if inv_op is None:
+            raise ValueError(f"No known inverse for cipher op: {step.op}")
+        inv.append(CipherStep(op=inv_op, operand_source=step.operand_source))
+    return inv
+
+
+def verify_cipher_chain(
+    chain: List[CipherStep],
+    *,
+    width: int = 8,
+    num_samples: int = 16,
+    seed: int = 42,
+) -> bool:
+    """Verify that a cipher chain round-trips correctly.
+
+    Applies ``encrypt(decrypt(value, key), key) == value`` for
+    *num_samples* random (value, key) pairs.  Returns ``True`` iff
+    all samples round-trip without error.
+
+    Parameters
+    ----------
+    chain : list[CipherStep]
+        The decryption (forward) chain.
+    width : int
+        Bit-width of the value being encrypted (8 or 16).
+    num_samples : int
+        Number of random test pairs.
+    seed : int
+        RNG seed for reproducibility.
+    """
+    import random as _rng
+    inv = inverse_cipher_chain(chain)
+    mask = (1 << width) - 1
+    gen = _rng.Random(seed)
+
+    for _ in range(num_samples):
+        value = gen.randint(0, mask)
+        key = gen.randint(0, mask)
+        # Decrypt
+        tmp = value
+        for step in chain:
+            tmp = _apply_cipher_step(tmp, step, key, width)
+        plaintext = tmp
+        # Re-encrypt with inverse chain
+        tmp = plaintext
+        for step in inv:
+            tmp = _apply_cipher_step(tmp, step, key, width)
+        if tmp != value:
+            return False
+    return True
+
+
+def cipher_chain_entropy_drop(
+    chain: List[CipherStep],
+    encrypted: bytes,
+    key: int,
+    width: int = 8,
+) -> float:
+    """Measure the entropy drop after applying a cipher chain.
+
+    A correct cipher chain should reduce the Shannon entropy of the
+    plaintext versus the ciphertext.  Returns ``H(ciphertext) - H(plaintext)``
+    (positive means entropy decreased = likely correct decryption).
+    """
+    import math
+
+    def _shannon(data: bytes) -> float:
+        if not data:
+            return 0.0
+        freq: Dict[int, int] = {}
+        for b in data:
+            freq[b] = freq.get(b, 0) + 1
+        total = len(data)
+        return -sum((c / total) * math.log2(c / total) for c in freq.values())
+
+    mask = (1 << width) - 1
+    plain = bytearray(len(encrypted))
+    for i, enc_byte in enumerate(encrypted):
+        tmp = enc_byte & mask
+        for step in chain:
+            tmp = _apply_cipher_step(tmp, step, key, width)
+        plain[i] = tmp & 0xFF
+
+    return _shannon(encrypted) - _shannon(bytes(plain))
+
+
+# ---------------------------------------------------------------------------
 # Parse dispatcher decode_transforms strings
 # ---------------------------------------------------------------------------
 

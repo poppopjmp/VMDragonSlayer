@@ -163,6 +163,10 @@ class SymbolicState:
         "rip", "rflags",
     ]
 
+    # B82: XMM registers — 128-bit SIMD (VMP 3.5+ injects SIMD junk)
+    XMM_REGISTERS = [f"xmm{n}" for n in range(16)]
+    XMM_WIDTH = 128
+
     X86_32_REGISTERS = [
         "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip", "eflags",
     ]
@@ -221,6 +225,15 @@ class SymbolicState:
         else:
             for name in reg_names:
                 self.registers[name] = 0
+
+        # B82: Initialise XMM registers (128-bit) for x86-64
+        if "64" in arch:
+            if _Z3_AVAILABLE:
+                for xmm in self.XMM_REGISTERS:
+                    self.registers[xmm] = z3.BitVec(f"init_{xmm}", self.XMM_WIDTH)
+            else:
+                for xmm in self.XMM_REGISTERS:
+                    self.registers[xmm] = 0
 
     # -- Priority / ordering (B54) -------------------------------------------
 

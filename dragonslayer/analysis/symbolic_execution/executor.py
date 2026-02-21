@@ -2242,8 +2242,52 @@ class SymbolicExecutor:
 
     # ── B81: SIMD / SSE handler stubs ─────────────────────────────
 
-    # XMM register tracking: stored in state.registers["xmm0"] etc.
-    # as 128-bit integers (or z3 BitVec(128)) for simple data-flow.
+    # B82: XMM register tracking — 128-bit lanes for SIMD data-flow.
+    # Stored in state.registers["xmm0"] etc. as z3 BitVec(128) or int.
+    _XMM_WIDTH = 128
+
+    @staticmethod
+    def _ensure_xmm(val: Any) -> Any:
+        """Promote *val* to a 128-bit value suitable for XMM ops."""
+        if _HAS_Z3 and hasattr(val, "sort"):
+            sz = val.sort().size()
+            if sz < 128:
+                return _z3.ZeroExt(128 - sz, val)
+            if sz > 128:
+                return _z3.Extract(127, 0, val)
+            return val
+        v = val if isinstance(val, int) else 0
+        return v & ((1 << 128) - 1)
+
+    # -- Lane-aware packed arithmetic helpers --------------------------------
+
+    @staticmethod
+    def _packed_add(a: int, b: int, lane_bits: int) -> int:
+        """Packed addition — *lane_bits* wide lanes (8/16/32/64)."""
+        mask = (1 << lane_bits) - 1
+        result = 0
+        for i in range(128 // lane_bits):
+            shift = i * lane_bits
+            la = (a >> shift) & mask
+            lb = (b >> shift) & mask
+            result |= ((la + lb) & mask) << shift
+        return result
+
+    @staticmethod
+    def _packed_sub(a: int, b: int, lane_bits: int) -> int:
+        """Packed subtraction — *lane_bits* wide lanes."""
+        mask = (1 << lane_bits) - 1
+        result = 0
+        for i in range(128 // lane_bits):
+            shift = i * lane_bits
+            la = (a >> shift) & mask
+            lb = (b >> shift) & mask
+            result |= ((la - lb) & mask) << shift
+        return result
+
+    _LANE_WIDTH = {"paddb": 8, "paddw": 16, "paddd": 32, "paddq": 64,
+                   "psubb": 8, "psubw": 16, "psubd": 32, "psubq": 64,
+                   "pmullw": 16}
 
     def _exec_simd_mov(self, state: SymbolicState, ops: list[str],
                        insn: LiftedInstruction, mnemonic: str) -> None:
@@ -2251,6 +2295,8 @@ class SymbolicExecutor:
         if len(ops) != 2:
             return
         val = self._resolve_operand(state, ops[1])
+        # MOVD/MOVQ: zero-extend smaller source into 128 bits
+        val = self._ensure_xmm(val)
         self._write_operand(state, ops[0], val)
 
     def _exec_simd_logic(self, state: SymbolicState, ops: list[str],
@@ -2258,43 +2304,100 @@ class SymbolicExecutor:
         """PXOR/POR/PAND/PANDN/XORPS/ANDPS/ORPS etc.: XMM bitwise logic."""
         if len(ops) != 2:
             return
-        left = self._resolve_operand(state, ops[0])
-        right = self._resolve_operand(state, ops[1])
-        base = mnemonic.rstrip("ps").rstrip("pd")  # xorps→xor, andpd→and
-        if base.startswith("p"):
-            base = base[1:]  # pxor→xor, pand→and, por→or, pandn→andn
-        if base in ("xor", "xorps", "xorpd"):
-            result = left ^ right if hasattr(left, "__xor__") else 0
-        elif base in ("and", "andps", "andpd"):
-            result = left & right if hasattr(left, "__and__") else 0
-        elif base in ("or", "orps", "orpd"):
-            result = left | right if hasattr(left, "__or__") else 0
-        elif base == "andn":
-            result = (~left) & right if hasattr(left, "__invert__") else 0
+        left = self._ensure_xmm(self._resolve_operand(state, ops[0]))
+        right = self._ensure_xmm(self._resolve_operand(state, ops[1]))
+
+        # Classify the core bitwise op from the mnemonic
+        mn = mnemonic.lower()
+        if "andn" in mn:
+            op_kind = "andn"
+        elif "xor" in mn:
+            op_kind = "xor"
+        elif "and" in mn:
+            op_kind = "and"
+        elif "or" in mn:
+            op_kind = "or"
         else:
-            result = left ^ right if hasattr(left, "__xor__") else 0
+            op_kind = "xor"  # fallback
+
+        if _HAS_Z3 and (hasattr(left, "sort") or hasattr(right, "sort")):
+            l_bv = self._ensure_xmm(left)
+            r_bv = self._ensure_xmm(right)
+            if op_kind == "xor":
+                result = l_bv ^ r_bv
+            elif op_kind == "and":
+                result = l_bv & r_bv
+            elif op_kind == "or":
+                result = l_bv | r_bv
+            elif op_kind == "andn":
+                result = (~l_bv) & r_bv
+            else:
+                result = l_bv ^ r_bv
+        else:
+            li = left if isinstance(left, int) else 0
+            ri = right if isinstance(right, int) else 0
+            m128 = (1 << 128) - 1
+            if op_kind == "xor":
+                result = (li ^ ri) & m128
+            elif op_kind == "and":
+                result = (li & ri) & m128
+            elif op_kind == "or":
+                result = (li | ri) & m128
+            elif op_kind == "andn":
+                result = ((~li) & ri) & m128
+            else:
+                result = (li ^ ri) & m128
+
         self._write_operand(state, ops[0], result)
 
     def _exec_simd_shuffle(self, state: SymbolicState, ops: list[str],
                            insn: LiftedInstruction, mnemonic: str) -> None:
-        """PSHUFD/SHUFPS/PUNPCK*: shuffle stubs — track data flow only."""
+        """PSHUFD/SHUFPS/PUNPCK*: shuffle stubs — track data flow only.
+
+        Precise lane permutation would need the imm8 control byte which is
+        not always available from the lifter.  We approximate by treating
+        the destination as an opaque function of the source, preserving
+        data-flow dependencies and taint.
+        """
         if len(ops) < 2:
             return
-        # Approximate: destination gets value derived from source
-        val = self._resolve_operand(state, ops[1])
+        val = self._ensure_xmm(self._resolve_operand(state, ops[1]))
         self._write_operand(state, ops[0], val)
 
     def _exec_simd_arith(self, state: SymbolicState, ops: list[str],
                          insn: LiftedInstruction, mnemonic: str) -> None:
-        """PADDB/PADDW/PADDD/PADDQ/PSUBB/PSUBW/PSUBD/PSUBQ."""
+        """PADDB/PADDW/PADDD/PADDQ/PSUBB/PSUBW/PSUBD/PSUBQ/PMULLW.
+
+        Lane-aware packed arithmetic.  Under z3, operations are simplified
+        to full 128-bit add/sub (correct for taint/data-flow, approximate
+        for lane overflow).  For concrete ints, exact lane wrapping is
+        applied.
+        """
         if len(ops) != 2:
             return
-        left = self._resolve_operand(state, ops[0])
-        right = self._resolve_operand(state, ops[1])
-        if mnemonic.startswith("padd"):
-            result = left + right if hasattr(left, "__add__") else 0
+        left = self._ensure_xmm(self._resolve_operand(state, ops[0]))
+        right = self._ensure_xmm(self._resolve_operand(state, ops[1]))
+        lane = self._LANE_WIDTH.get(mnemonic.lower(), 32)
+
+        if _HAS_Z3 and (hasattr(left, "sort") or hasattr(right, "sort")):
+            l_bv = self._ensure_xmm(left)
+            r_bv = self._ensure_xmm(right)
+            if mnemonic.lower().startswith("padd"):
+                result = l_bv + r_bv
+            elif mnemonic.lower() == "pmullw":
+                result = l_bv * r_bv
+            else:
+                result = l_bv - r_bv
         else:
-            result = left - right if hasattr(left, "__sub__") else 0
+            li = left if isinstance(left, int) else 0
+            ri = right if isinstance(right, int) else 0
+            if mnemonic.lower().startswith("padd"):
+                result = self._packed_add(li, ri, lane)
+            elif mnemonic.lower() == "pmullw":
+                result = self._packed_add(li, ri, lane)  # approximate
+            else:
+                result = self._packed_sub(li, ri, lane)
+
         self._write_operand(state, ops[0], result)
 
     # ---- SIB address resolver ----

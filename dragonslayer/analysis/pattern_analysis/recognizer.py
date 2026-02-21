@@ -530,35 +530,106 @@ class PatternRecognizer:
          "pattern": r"E8[0-9A-Fa-f]{8}(?:83|81)C4"},
     ]
 
+    # B82: Map from YARA rule names → (protector, version, base_confidence)
+    _YARA_VERSION_MAP: Dict[str, Tuple[str, str, float]] = {
+        "VMP_30_Handler_Prologue": ("VMProtect", "3.0.x", 0.85),
+        "VMP_31_Handler_Prologue": ("VMProtect", "3.1.x", 0.85),
+        "VMP_35_Handler_Prologue": ("VMProtect", "3.5.x", 0.80),
+        "VMP_38_Extended_Dispatch": ("VMProtect", "3.8.x", 0.75),
+        "VMP_Dispatcher_Loop": ("VMProtect", "unknown", 0.60),
+        "Themida_2x_Entry": ("Themida", "2.x", 0.80),
+        "Themida_3x_Entry": ("Themida", "3.x", 0.80),
+        "CodeVirtualizer_Handler": ("Themida", "unknown", 0.65),
+    }
+
+    # Confidence boost when both regex and YARA agree on the same version
+    _DUAL_ENGINE_BOOST = 0.10
+
     def version_fingerprint(
         self,
         instruction_bytes: str,
     ) -> Dict[str, Any]:
         """Identify the protector and version from prologue bytes.
 
+        Uses regex signatures, and — when the YARA engine is active —
+        cross-validates with YARA rule matches.  Confidence is boosted
+        when both engines agree on the same protector + version.
+
         Returns
         -------
         dict
-            ``{"protector": str, "version": str, "confidence": float}``
-            or ``{"protector": "unknown", "version": "unknown", "confidence": 0.0}``
+            ``{"protector": str, "version": str, "confidence": float,
+               "engines": list[str]}``
+            or ``{"protector": "unknown", "version": "unknown",
+                  "confidence": 0.0, "engines": []}``
         """
         best: Dict[str, Any] = {
             "protector": "unknown",
             "version": "unknown",
             "confidence": 0.0,
+            "engines": [],
         }
+
+        regex_hit: Optional[Dict[str, Any]] = None
+        yara_hit: Optional[Tuple[str, str, float]] = None
+
+        # 1. Regex-based detection
         normalised = instruction_bytes.replace(" ", "")
         for sig in self._VERSION_SIGS:
             try:
                 if re.search(sig["pattern"], normalised, re.IGNORECASE):
-                    if sig["confidence"] > best["confidence"]:
-                        best = {
+                    if sig["confidence"] > (regex_hit or {}).get("confidence", 0.0):
+                        regex_hit = {
                             "protector": sig["protector"],
                             "version": sig["version"],
                             "confidence": sig["confidence"],
                         }
             except re.error:
                 continue
+
+        # 2. YARA-based detection (when engine is available)
+        if self._yara is not None:
+            try:
+                raw = bytes.fromhex(normalised)
+                yara_matches = self._yara.scan(raw)
+                best_yara_conf = 0.0
+                for ym in yara_matches:
+                    rule_name = ym.rule if hasattr(ym, "rule") else str(ym)
+                    mapping = self._YARA_VERSION_MAP.get(rule_name)
+                    if mapping and mapping[2] > best_yara_conf:
+                        yara_hit = mapping
+                        best_yara_conf = mapping[2]
+            except (ValueError, Exception):
+                pass  # hex decode / YARA scan failure
+
+        # 3. Merge results — boost confidence when both agree
+        engines: List[str] = []
+        if regex_hit:
+            best = {**regex_hit, "engines": ["regex"]}
+            engines.append("regex")
+
+        if yara_hit:
+            yp, yv, yc = yara_hit
+            if regex_hit and regex_hit["protector"] == yp:
+                engines.append("yara")
+                # Both agree on protector
+                if regex_hit["version"] == yv or yv == "unknown":
+                    # Same version — boost
+                    best["confidence"] = min(
+                        1.0, best["confidence"] + self._DUAL_ENGINE_BOOST
+                    )
+                    best["engines"] = engines
+                else:
+                    # Different version — keep higher confidence
+                    if yc > best["confidence"]:
+                        best = {"protector": yp, "version": yv,
+                                "confidence": yc, "engines": engines}
+                    else:
+                        best["engines"] = engines
+            elif not regex_hit:
+                best = {"protector": yp, "version": yv,
+                        "confidence": yc, "engines": ["yara"]}
+
         return best
 
 
