@@ -108,10 +108,11 @@ class TestAPIKeyAuth:
             assert resp.status_code != 401
 
     @pytest.mark.anyio
-    async def test_protected_endpoint_allowed_with_query_key(self, client: AsyncClient):
+    async def test_protected_endpoint_rejects_query_key(self, client: AsyncClient):
+        """API key via query params is no longer accepted (security hardening)."""
         with patch("dragonslayer.api.server.API_KEY", "secret-key"):
             resp = await client.get("/analysis-types?api_key=secret-key")
-            assert resp.status_code != 401
+            assert resp.status_code == 401
 
     @pytest.mark.anyio
     async def test_no_auth_when_api_key_unset(self, client: AsyncClient):

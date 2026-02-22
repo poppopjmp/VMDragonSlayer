@@ -408,11 +408,7 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
 async def api_key_middleware(request: Request, call_next) -> Response:
     """Reject requests without a valid API key (when API_KEY is set)."""
     if API_KEY and request.url.path not in _PUBLIC_PATHS:
-        provided = (
-            request.headers.get("x-api-key")
-            or request.query_params.get("api_key")
-            or ""
-        )
+        provided = request.headers.get("x-api-key", "")
         if not _hmac.compare_digest(provided, API_KEY):
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,

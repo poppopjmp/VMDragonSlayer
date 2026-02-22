@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -159,6 +160,7 @@ class LocalFileBackend(StorageBackend):
         self._base = Path(base_dir)
         self._base.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._lock = threading.Lock()
 
     def _index_path(self, index: str) -> Path:
         safe_name = index.replace("/", "_").replace("\\", "_")
@@ -182,20 +184,22 @@ class LocalFileBackend(StorageBackend):
         p.write_text(json.dumps(self._cache.get(index, {}), indent=2), encoding="utf-8")
 
     def store(self, index: str, doc_id: str, document: Dict[str, Any]) -> bool:
-        bucket = self._load(index)
-        bucket[doc_id] = document
-        self._flush(index)
+        with self._lock:
+            bucket = self._load(index)
+            bucket[doc_id] = document
+            self._flush(index)
         return True
 
     def store_bulk(self, index: str, documents: List[Dict[str, Any]], id_field: str = "id") -> int:
         """Override to batch-flush: write the file only once after all inserts."""
-        bucket = self._load(index)
-        ok = 0
-        for doc in documents:
-            doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode()).hexdigest())
-            bucket[str(doc_id)] = doc
-            ok += 1
-        self._flush(index)
+        with self._lock:
+            bucket = self._load(index)
+            ok = 0
+            for doc in documents:
+                doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode()).hexdigest())
+                bucket[str(doc_id)] = doc
+                ok += 1
+            self._flush(index)
         return ok
 
     def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:

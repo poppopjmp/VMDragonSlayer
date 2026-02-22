@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import re
+import threading
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -51,20 +52,25 @@ logger = logging.getLogger(__name__)
 
 _litellm = None
 _LITELLM_AVAILABLE = False
+_litellm_lock = threading.Lock()
 
 
 def _ensure_litellm():
     global _litellm, _LITELLM_AVAILABLE
     if _litellm is not None:
         return _LITELLM_AVAILABLE
-    try:
-        import litellm as _ll
-        _litellm = _ll
-        _LITELLM_AVAILABLE = True
-        # Suppress litellm's noisy logger unless user wants it
-        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-    except ImportError:
-        _LITELLM_AVAILABLE = False
+    with _litellm_lock:
+        # Double-check after acquiring the lock
+        if _litellm is not None:
+            return _LITELLM_AVAILABLE
+        try:
+            import litellm as _ll
+            _litellm = _ll
+            _LITELLM_AVAILABLE = True
+            # Suppress litellm's noisy logger unless user wants it
+            logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+        except ImportError:
+            _LITELLM_AVAILABLE = False
     return _LITELLM_AVAILABLE
 
 
@@ -522,12 +528,14 @@ class LLMAnalyzer:
 # ---------------------------------------------------------------------------
 
 _analyzer: LLMAnalyzer | None = None
+_analyzer_lock = threading.Lock()
 
 
 def reset_llm_analyzer() -> None:
     """Reset the module-level singleton (useful for testing / config reload)."""
     global _analyzer
-    _analyzer = None
+    with _analyzer_lock:
+        _analyzer = None
 
 
 def get_llm_analyzer(**kwargs: Any) -> LLMAnalyzer:
@@ -535,29 +543,34 @@ def get_llm_analyzer(**kwargs: Any) -> LLMAnalyzer:
     Return the module-level :class:`LLMAnalyzer` singleton.
 
     On first call, reads config from ``get_config().llm.*`` and merges
-    with provided **kwargs**.
+    with provided **kwargs**.  Thread-safe via double-checked locking.
     """
     global _analyzer
     if _analyzer is not None:
         return _analyzer
 
-    # Try to merge config
-    try:
-        from ..core.config import get_config
-        cfg = get_config()
-        defaults = {
-            "model": cfg.get("llm.model"),
-            "api_base": cfg.get("llm.api_base"),
-            "temperature": cfg.get("llm.temperature", 0.2),
-            "max_tokens": cfg.get("llm.max_tokens", 4096),
-            "timeout": cfg.get("llm.timeout", 60),
-            "enabled": cfg.get("llm.enabled", True),
-        }
-        # Filter out None values from config
-        defaults = {k: v for k, v in defaults.items() if v is not None}
-        defaults.update(kwargs)
-        _analyzer = LLMAnalyzer(**defaults)
-    except (ValueError, TypeError, KeyError, RuntimeError, OSError):
-        _analyzer = LLMAnalyzer(**kwargs)
+    with _analyzer_lock:
+        # Double-check after acquiring the lock
+        if _analyzer is not None:
+            return _analyzer
+
+        # Try to merge config
+        try:
+            from ..core.config import get_config
+            cfg = get_config()
+            defaults = {
+                "model": cfg.get("llm.model"),
+                "api_base": cfg.get("llm.api_base"),
+                "temperature": cfg.get("llm.temperature", 0.2),
+                "max_tokens": cfg.get("llm.max_tokens", 4096),
+                "timeout": cfg.get("llm.timeout", 60),
+                "enabled": cfg.get("llm.enabled", True),
+            }
+            # Filter out None values from config
+            defaults = {k: v for k, v in defaults.items() if v is not None}
+            defaults.update(kwargs)
+            _analyzer = LLMAnalyzer(**defaults)
+        except (ValueError, TypeError, KeyError, RuntimeError, OSError):
+            _analyzer = LLMAnalyzer(**kwargs)
 
     return _analyzer
