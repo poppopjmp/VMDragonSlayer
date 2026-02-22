@@ -50,6 +50,8 @@ __all__ = [
     "get_plugin",
     "list_plugins",
     "get_all_plugins",
+    "validate_plugin_dependencies",
+    "sort_plugins_by_deps",
 ]
 
 
@@ -158,11 +160,24 @@ class Plugin(ABC):
     Subclasses *must* set ``name`` and ``stage`` as class attributes and
     implement :meth:`execute`.  Optionally override :meth:`available` to
     gate on heavy optional dependencies (angr, triton, …).
+
+    Dependency tracking
+    -------------------
+    ``depends_on`` — set of plugin **names** that must run before this
+    plugin (within the same stage).  ``provides`` — set of
+    ``shared_data`` **keys** this plugin writes, enabling downstream
+    dependency validation.
     """
 
     name: str = ""
     stage: Stage = Stage.STATIC
     description: str = ""
+    version: str = "0.0.0"
+
+    #: Names of plugins this plugin depends on (intra-stage ordering).
+    depends_on: set[str] = set()
+    #: ``shared_data`` keys this plugin provides to downstream plugins.
+    provides: set[str] = set()
 
     @abstractmethod
     def execute(
@@ -322,6 +337,75 @@ def get_all_plugins(stage: Stage | None = None, available_only: bool = True) -> 
         if p is not None:
             plugins.append(p)
     return plugins
+
+
+# ---------------------------------------------------------------------------
+# Dependency validation & topological sort
+# ---------------------------------------------------------------------------
+
+
+def validate_plugin_dependencies(
+    stage: Stage | None = None,
+) -> Dict[str, List[str]]:
+    """Check that every plugin's ``depends_on`` names are satisfiable.
+
+    Returns a mapping of ``{plugin_name: [missing_dep_names]}`` for
+    plugins whose declared dependencies are not present in the registry
+    (or not available).  An empty dict means all dependencies are met.
+    """
+    _ensure_discovered()
+    available_names = set(list_plugins(stage=stage, available_only=True))
+    problems: Dict[str, List[str]] = {}
+    for name in available_names:
+        cls = _REGISTRY.get(name)
+        if cls is None:
+            continue
+        missing = [d for d in cls.depends_on if d not in available_names]
+        if missing:
+            problems[name] = missing
+    return problems
+
+
+def sort_plugins_by_deps(plugins: List[Plugin]) -> List[Plugin]:
+    """Topological sort of *plugins* respecting ``depends_on``.
+
+    Plugins with no dependencies come first.  If a cycle is detected
+    the original order is returned unchanged with a warning logged.
+    """
+    if len(plugins) <= 1:
+        return list(plugins)
+
+    name_to_plugin = {p.name: p for p in plugins}
+    available = set(name_to_plugin.keys())
+
+    # Kahn's algorithm
+    in_degree: Dict[str, int] = {p.name: 0 for p in plugins}
+    dependents: Dict[str, List[str]] = {p.name: [] for p in plugins}
+    for p in plugins:
+        for dep in p.depends_on:
+            if dep in available:
+                in_degree[p.name] += 1
+                dependents[dep].append(p.name)
+
+    queue: list[str] = [n for n, d in in_degree.items() if d == 0]
+    ordered: list[str] = []
+    while queue:
+        # Stable sort: pick alphabetically first among zero-in-degree
+        queue.sort()
+        node = queue.pop(0)
+        ordered.append(node)
+        for dep_name in dependents[node]:
+            in_degree[dep_name] -= 1
+            if in_degree[dep_name] == 0:
+                queue.append(dep_name)
+
+    if len(ordered) != len(plugins):
+        logger.warning(
+            "Cycle detected in plugin dependencies — running in original order"
+        )
+        return list(plugins)
+
+    return [name_to_plugin[n] for n in ordered]
 
 
 # ---------------------------------------------------------------------------

@@ -117,6 +117,27 @@ except (ImportError, AttributeError):
     build_handler_classifier = None  # type: ignore[assignment,misc]
     HANDLER_CATEGORIES = None  # type: ignore[assignment,misc]
 
+try:
+    from .active_learning import (
+        UncertainSample,
+        UncertaintyStrategy,
+        FeedbackStore,
+        FeedbackEntry,
+        select_uncertain_samples,
+        compute_entropy,
+        compute_margin,
+        export_training_set,
+    )
+except (ImportError, AttributeError):
+    UncertainSample = None  # type: ignore[assignment,misc]
+    UncertaintyStrategy = None  # type: ignore[assignment,misc]
+    FeedbackStore = None  # type: ignore[assignment,misc]
+    FeedbackEntry = None  # type: ignore[assignment,misc]
+    select_uncertain_samples = None  # type: ignore[assignment,misc]
+    compute_entropy = None  # type: ignore[assignment,misc]
+    compute_margin = None  # type: ignore[assignment,misc]
+    export_training_set = None  # type: ignore[assignment,misc]
+
 __all__ = [
     'FeatureExtractor',
     'FeatureVector',
@@ -160,4 +181,12 @@ __all__ = [
     'classify_handlers',
     'build_handler_classifier',
     'HANDLER_CATEGORIES',
+    'UncertainSample',
+    'UncertaintyStrategy',
+    'FeedbackStore',
+    'FeedbackEntry',
+    'select_uncertain_samples',
+    'compute_entropy',
+    'compute_margin',
+    'export_training_set',
 ]

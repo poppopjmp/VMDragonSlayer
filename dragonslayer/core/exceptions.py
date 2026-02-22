@@ -142,3 +142,29 @@ class ValidationError(ConfigurationError):
         super().__init__(message, error_code=error_code, details=details)
         self.field = field
         self.constraint = constraint
+
+
+class PluginDependencyError(PluginError):
+    """Raised when a plugin's declared dependencies are unmet.
+
+    Attributes
+    ----------
+    missing : list[str]
+        Names of plugins that are required but unavailable.
+    """
+    error_code = "PLUGIN_DEPENDENCY_ERROR"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        plugin_name: str = "",
+        missing: list[str] | None = None,
+        error_code: str | None = None,
+        details: dict | None = None,
+    ):
+        super().__init__(
+            message, plugin_name=plugin_name,
+            error_code=error_code, details=details,
+        )
+        self.missing = missing or []

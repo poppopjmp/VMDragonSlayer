@@ -623,7 +623,7 @@ class AnalysisPipeline:
         ``ctx`` is passed to every stage, so plugins can read data deposited
         by previous stages via ``ctx.shared_data``.
         """
-        from ..plugins import Stage, get_all_plugins
+        from ..plugins import Stage, get_all_plugins, sort_plugins_by_deps
 
         t0 = time.monotonic()
         try:
@@ -635,6 +635,9 @@ class AnalysisPipeline:
                     data={"plugins_run": 0, "note": f"No plugins available for {label}"},
                     duration=time.monotonic() - t0,
                 )
+
+            # Sort plugins respecting declared depends_on ordering.
+            plugins = sort_plugins_by_deps(plugins)
 
             # Apply anti-evasion runtime hooks so dynamic plugins
             # (Qiling, Triton, angr) can neutralise anti-debug tricks.

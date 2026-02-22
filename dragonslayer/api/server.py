@@ -715,6 +715,10 @@ async def root() -> Dict[str, Any]:
             'analyze': '/analyze',
             'upload_analyze': '/upload-analyze',
             'pipeline': '/pipeline',
+            'feedback': '/feedback',
+            'uncertain': '/uncertain',
+            'plugins': '/plugins',
+            'plugins_health': '/plugins/health',
             'docs': '/docs',
             'redoc': '/redoc'
         }
@@ -1032,6 +1036,132 @@ async def run_pipeline(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Pipeline analysis failed: {str(exc)}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Active Learning endpoints
+# ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    """Body for ``POST /feedback``."""
+    sample_id: str
+    corrected_label: str
+    analyst_id: str = ""
+    original_label: str = ""
+    notes: str = ""
+
+
+@app.post("/feedback", tags=["Active Learning"])
+async def submit_feedback(
+    request: Request,
+    body: FeedbackRequest,
+) -> Dict[str, Any]:
+    """Record an analyst correction for a low-confidence prediction."""
+    if not await check_rate_limit(request):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded.",
+        )
+    try:
+        from dragonslayer.ml.active_learning import FeedbackStore
+        store = FeedbackStore()  # in-memory only for now
+        entry = store.ingest(
+            sample_id=body.sample_id,
+            corrected_label=body.corrected_label,
+            analyst_id=body.analyst_id,
+            original_label=body.original_label,
+            notes=body.notes,
+        )
+        return {"status": "ok", "entry": entry.to_dict()}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+class UncertainRequest(BaseModel):
+    """Query parameters for ``POST /uncertain``."""
+    predictions: List[Dict[str, Any]]
+    strategy: str = "entropy"
+    k: int = 10
+    confidence_threshold: float = 0.8
+
+
+@app.post("/uncertain", tags=["Active Learning"])
+async def get_uncertain_samples(body: UncertainRequest) -> Dict[str, Any]:
+    """Select the most uncertain predictions from a result set."""
+    try:
+        from dragonslayer.ml.active_learning import select_uncertain_samples
+        samples = select_uncertain_samples(
+            body.predictions,
+            strategy=body.strategy,
+            k=body.k,
+            confidence_threshold=body.confidence_threshold,
+        )
+        return {
+            "count": len(samples),
+            "samples": [s.to_dict() for s in samples],
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Plugin introspection endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/plugins", tags=["Plugins"])
+async def list_registered_plugins() -> Dict[str, Any]:
+    """Return all registered plugins with metadata."""
+    try:
+        from dragonslayer.plugins import (
+            list_plugins, get_plugin, Stage, validate_plugin_dependencies,
+        )
+        registry: List[Dict[str, Any]] = []
+        for name in list_plugins(available_only=False):
+            p = get_plugin(name)
+            if p is None:
+                # Plugin exists but unavailable
+                registry.append({"name": name, "available": False})
+                continue
+            registry.append({
+                "name": p.name,
+                "stage": p.stage.name,
+                "description": p.description,
+                "version": p.version,
+                "available": True,
+                "depends_on": sorted(p.depends_on),
+                "provides": sorted(p.provides),
+            })
+        return {"count": len(registry), "plugins": registry}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+@app.get("/plugins/health", tags=["Plugins"])
+async def check_plugin_health() -> Dict[str, Any]:
+    """Validate plugin dependency chains and report broken/missing deps."""
+    try:
+        from dragonslayer.plugins import validate_plugin_dependencies
+        problems = validate_plugin_dependencies()
+        return {
+            "healthy": len(problems) == 0,
+            "problems": problems,
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         )
 
 

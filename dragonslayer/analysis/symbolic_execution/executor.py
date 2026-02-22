@@ -83,6 +83,7 @@ class ExecutionResultDict(TypedDict, total=False):
     loops_detected: List[Dict[str, Any]]
     cfg: Optional[Dict[str, Any]]
     error: Optional[str]
+    speculative_paths_explored: int
 
 
 class HandlerSymbolicSummaryDict(TypedDict, total=False):
@@ -174,6 +175,7 @@ class ExecutionResult:
     loops_detected: List[Dict[str, Any]] = field(default_factory=list)
     cfg: Optional[Dict[str, Any]] = None  # B60: CFG graph structure
     error: Optional[str] = None
+    speculative_paths_explored: int = 0
 
     def to_dict(self) -> ExecutionResultDict:
         return {
@@ -190,6 +192,7 @@ class ExecutionResult:
             "loops_detected": self.loops_detected,
             "cfg": self.cfg,
             "error": self.error,
+            "speculative_paths_explored": self.speculative_paths_explored,
         }
 
 
@@ -286,6 +289,8 @@ class SymbolicExecutor:
         solver_timeout_ms: int = 10000,
         memory_limit_mb: int = 0,
         per_path_timeout_ms: int = 0,
+        speculative: bool = False,
+        max_speculative_forks: int = 8,
     ) -> None:
         self.arch = arch
         self.bit_width = 64 if "64" in arch else 32
@@ -293,6 +298,9 @@ class SymbolicExecutor:
         self.max_paths = max_paths
         self.max_loop_iters = max_loop_iters
         self.per_path_timeout_ms = per_path_timeout_ms  # B70: 0 = unlimited
+        self.speculative = speculative
+        self.max_speculative_forks = max_speculative_forks
+        self._speculative_fork_count: int = 0
         self._lifter = InstructionLifter(arch=arch)
         self._solver = Z3Solver(
             timeout_ms=solver_timeout_ms,
@@ -338,6 +346,8 @@ class SymbolicExecutor:
             max_loop_iters=config.get("symbolic_execution.max_loop_iters", 3),
             solver_timeout_ms=config.get("symbolic_execution.solver_timeout_ms", 10000),
             memory_limit_mb=config.get("symbolic_execution.memory_limit_mb", 0),
+            speculative=config.get("symbolic_execution.speculative", False),
+            max_speculative_forks=config.get("symbolic_execution.max_speculative_forks", 8),
         )
 
     def analyze(
@@ -361,6 +371,7 @@ class SymbolicExecutor:
             Z3 solver prune infeasible paths earlier.
         """
         self._seed_constraints = seed_constraints or []
+        self._speculative_fork_count = 0
         try:
             _m = self._metrics  # alias for brevity
 
@@ -466,6 +477,7 @@ class SymbolicExecutor:
                 loops_detected=[
                     li.to_dict() for li in self._detected_loops.values()
                 ],
+                speculative_paths_explored=self._speculative_fork_count,
             )
 
         except (AnalysisError, ResourceLimitError,
@@ -1624,6 +1636,22 @@ class SymbolicExecutor:
                                 if fall_feasible:
                                     state.add_constraint(neg_constraint)
                                 else:
+                                    # Speculative: try boundary concretization
+                                    if (
+                                        self.speculative
+                                        and self._speculative_fork_count < self.max_speculative_forks
+                                        and len(worklist) < self.max_paths
+                                    ):
+                                        spec = state.fork()
+                                        spec.pc = state.pc
+                                        spec.compute_priority()
+                                        spec._seq = self._state_seq
+                                        self._state_seq += 1
+                                        # Mark as speculative in metadata
+                                        if not hasattr(spec, '_speculative'):
+                                            spec._speculative = True
+                                        heapq.heappush(worklist, spec)
+                                        self._speculative_fork_count += 1
                                     state.halt("fall-through infeasible")
                                     break
                         else:
@@ -1645,6 +1673,24 @@ class SymbolicExecutor:
                                     heapq.heappush(worklist, fork)
                             state.pc = targets[0]
                         else:
+                            # Speculative: try boundary values for the
+                            # indirect target to explore hidden handlers.
+                            if (
+                                self.speculative
+                                and self._speculative_fork_count < self.max_speculative_forks
+                            ):
+                                _BOUNDARY_TARGETS = [0, 1, 0xFF, 0xFFFF]
+                                for bt in _BOUNDARY_TARGETS:
+                                    if bt in insn_map and len(worklist) < self.max_paths:
+                                        fork = state.fork()
+                                        fork.pc = bt
+                                        fork.compute_priority()
+                                        fork._seq = self._state_seq
+                                        self._state_seq += 1
+                                        if not hasattr(fork, '_speculative'):
+                                            fork._speculative = True
+                                        heapq.heappush(worklist, fork)
+                                        self._speculative_fork_count += 1
                             state.halt("indirect branch")
                             break
                 else:
