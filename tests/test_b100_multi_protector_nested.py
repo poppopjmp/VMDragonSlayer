@@ -630,30 +630,29 @@ class TestPipelineGenericDispatcherIntegration:
     """Verify the pipeline _run_devirtualize uses generic dispatcher."""
 
     def test_import_find_dispatcher_in_pipeline(self) -> None:
-        """Pipeline should import find_dispatcher."""
-        import dragonslayer.core.pipeline as pipeline_mod
-        source = Path(pipeline_mod.__file__).read_text(encoding="utf-8")
+        """Pipeline devirt stages should import find_dispatcher."""
+        import dragonslayer.core.devirt_stages as devirt_mod
+        source = Path(devirt_mod.__file__).read_text(encoding="utf-8")
         assert "find_dispatcher" in source
-        assert "find_dispatcher," in source or "find_dispatcher\n" in source
 
     def test_pipeline_references_generic_decryptor(self) -> None:
-        """Pipeline step 3b should reference make_generic_decryptor."""
-        import dragonslayer.core.pipeline as pipeline_mod
-        source = Path(pipeline_mod.__file__).read_text(encoding="utf-8")
+        """Pipeline devirt stages should reference make_generic_decryptor."""
+        import dragonslayer.core.devirt_stages as devirt_mod
+        source = Path(devirt_mod.__file__).read_text(encoding="utf-8")
         assert "make_generic_decryptor" in source
 
     def test_pipeline_has_nested_loop(self) -> None:
-        """Pipeline should have nested VM detection loop."""
-        import dragonslayer.core.pipeline as pipeline_mod
-        source = Path(pipeline_mod.__file__).read_text(encoding="utf-8")
+        """Pipeline devirt stages should have nested VM detection loop."""
+        import dragonslayer.core.devirt_stages as devirt_mod
+        source = Path(devirt_mod.__file__).read_text(encoding="utf-8")
         assert "_detect_inner_vm_entries" in source
         assert "_extract_inner_trace" in source
         assert "max_nesting_depth" in source or "max_nesting" in source
 
     def test_pipeline_stores_detected_protector(self) -> None:
-        """Pipeline should store detected_protector in shared_data."""
-        import dragonslayer.core.pipeline as pipeline_mod
-        source = Path(pipeline_mod.__file__).read_text(encoding="utf-8")
+        """Pipeline devirt stages should store detected_protector in shared_data."""
+        import dragonslayer.core.devirt_stages as devirt_mod
+        source = Path(devirt_mod.__file__).read_text(encoding="utf-8")
         assert 'detected_protector' in source
 
 

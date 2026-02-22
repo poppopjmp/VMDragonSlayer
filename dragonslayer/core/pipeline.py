@@ -1103,494 +1103,73 @@ class AnalysisPipeline:
         ``ctx.shared_data["devirtualize"]``.
         """
         def _do_devirt() -> Dict[str, Any]:
-            from ..analysis.trace_ingestion import from_shared_data, ExecutionTrace
-            from ..analysis.vm_discovery.handler_boundaries import (
-                identify_vip_register,
-                segment_trace,
+            from .devirt_stages import (
+                DevirtWorkspace,
+                step_ingest_trace,
+                step_build_hook_set,
+                step_locate_vm_entries,
+                step_identify_dispatcher,
+                step_decrypt_bytecode,
+                step_segment_handlers,
+                step_extract_handlers,
+                step_identify_context,
+                step_analyze_semantics,
+                step_build_cfgs,
+                step_emit_pseudocode,
+                step_detect_nested_vms,
+                step_assemble_result,
             )
-            from ..analysis.handler_semantics import analyse_handler_semantics
-            from ..analysis.pseudocode import emit_pseudocode
             from ..analysis.devirtualisation_result import DevirtualisationResult
 
-            # ── 1. Obtain an ExecutionTrace ──────────────────────────────
-            trace: ExecutionTrace | None = None
-            try:
-                trace = from_shared_data(ctx.shared_data)
-            except _STAGE_ERRORS:
-                pass
+            ws = DevirtWorkspace(
+                binary_data=binary_data,
+                shared_data=ctx.shared_data,
+            )
 
-            if trace is None or not trace.instructions:
+            # ── 1. Obtain an ExecutionTrace ──────────────────────────────
+            step_ingest_trace(ws)
+            if ws.trace is None or not ws.trace.instructions:
                 return DevirtualisationResult.skipped_result(
                     "No execution trace available — run dynamic analysis first",
                 ).to_dict()
 
-            # Derive base address from PE analysis or shared_data.
-            base_address: int = ctx.shared_data.get("image_base", 0)
-            if not base_address:
-                pe_info = ctx.shared_data.get("pe_analyzer", {})
-                if isinstance(pe_info, dict):
-                    base_address = pe_info.get("image_base", 0) or pe_info.get("base_address", 0)
-            if not base_address:
-                base_address = ctx.shared_data.get("base_address", 0)
+            # ── 2. Anti-evasion hook-set ─────────────────────────────────
+            step_build_hook_set(ws)
 
-            # ── 2. Anti-evasion hook-set (Batch 17) ──────────────────────
-            hook_set_data: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.anti_evasion.runtime_hooks import (
-                    build_hook_set_from_report,
+            # ── 2b. VM entry point locator ───────────────────────────────
+            step_locate_vm_entries(ws)
+
+            # ── 3. Dispatcher identification + 3b. Bytecode decrypt ──────
+            step_identify_dispatcher(ws)
+            step_decrypt_bytecode(ws)
+
+            # ── 4. vIP identification + segmentation ─────────────────────
+            if not step_segment_handlers(ws):
+                reason = (
+                    "Could not identify virtual instruction pointer register"
+                    if ws.vip_candidate is None
+                    else "Trace segmentation produced no handler boundaries"
                 )
-                ae_report = ctx.shared_data.get("anti_evasion")
-                if ae_report is not None:
-                    hook_set = build_hook_set_from_report(ae_report)
-                    hook_set_data = {
-                        "hook_count": len(hook_set.hooks),
-                        "categories": list({h.category.value for h in hook_set.hooks}),
-                        "hook_names": [h.name for h in hook_set.hooks],
-                    }
-            except _STAGE_ERRORS as exc:
-                logger.debug("Anti-evasion hook-set skipped: %s", exc)
+                return DevirtualisationResult.skipped_result(reason).to_dict()
 
-            # ── 2b. VM entry point locator (Batch 21) ────────────────────
-            vm_entry_data: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.vm_discovery.vm_entry_locator import (
-                    locate_entries_from_pe_result,
-                    locate_vm_entries,
-                )
-                pe_result = ctx.shared_data.get("pe_analyzer")
-                if pe_result and isinstance(pe_result, dict):
-                    entry_report = locate_entries_from_pe_result(
-                        binary_data, pe_result)
-                elif len(binary_data) > 64 and binary_data[:2] == b"MZ":
-                    entry_report = locate_vm_entries(binary_data)
-                else:
-                    entry_report = None
+            # ── 5. Handler extraction + 6. Context registers ─────────────
+            step_extract_handlers(ws)
+            step_identify_context(ws)
 
-                if entry_report is not None and entry_report.count > 0:
-                    vm_entry_data = entry_report.to_dict()
-                    ctx.shared_data["vm_entry_points"] = vm_entry_data
-            except _STAGE_ERRORS as exc:
-                logger.debug("VM entry locator skipped: %s", exc)
+            # ── 7. Semantic analysis + clustering + ML ───────────────────
+            step_analyze_semantics(ws)
 
-            # ── 3. Dispatcher identification (B100: multi-protector) ────
-            dispatcher_match: Optional[Dict[str, Any]] = None
-            detected_protector: str = "unknown"
-            vmprotect_match: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.vm_discovery.dispatcher import (
-                    find_dispatcher,
-                    find_vmprotect_dispatcher,
-                    find_dispatcher_in_trace,
-                )
-
-                # B100: Use the generic orchestrator which tries
-                # VMProtect → Themida → Code Virtualizer → generic.
-                protector_hint = ctx.shared_data.get("detected_protector")
-                generic_match = find_dispatcher(
-                    trace, bit_width=64,
-                    protector_hint=protector_hint,
-                )
-
-                if generic_match is not None:
-                    dispatcher_match = generic_match.to_dict()
-                    detected_protector = generic_match.protector
-                    ctx.shared_data["dispatcher_match"] = dispatcher_match
-                    ctx.shared_data["detected_protector"] = detected_protector
-
-                    # Backwards compat: if VMProtect, also store as vmprotect_dispatcher
-                    if detected_protector == "vmprotect":
-                        vmprotect_match = dispatcher_match
-                        ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
-                else:
-                    # Legacy fallback: try VMProtect-specific binary scan
-                    disp_match = find_vmprotect_dispatcher(binary_data)
-                    if disp_match is not None:
-                        vmprotect_match = disp_match.to_dict()
-                        dispatcher_match = vmprotect_match
-                        detected_protector = "vmprotect"
-                        ctx.shared_data.setdefault("vmprotect_dispatcher", vmprotect_match)
-                        ctx.shared_data["dispatcher_match"] = dispatcher_match
-                        ctx.shared_data["detected_protector"] = detected_protector
-            except _STAGE_ERRORS as exc:
-                logger.debug("VMProtect dispatcher identification skipped: %s", exc)
-
-            # ── 3b. Rolling-key decryptor + handler table decrypt (B24/25) ─
-            bytecode_decryptor = None
-            try:
-                from ..analysis.bytecode_decrypt import (
-                    make_decryptor_from_dispatcher,
-                    decrypt_handler_table,
-                    make_generic_decryptor,
-                )
-                if vmprotect_match is not None:
-                    bytecode_decryptor = make_decryptor_from_dispatcher(
-                        vmprotect_match, trace,
-                    )
-                elif dispatcher_match is not None:
-                    # B100: generic XOR key search for non-VMP protectors
-                    bytecode_decryptor = make_generic_decryptor(
-                        dispatcher_match, trace,
-                    )
-
-                if bytecode_decryptor is not None:
-                    ctx.shared_data["bytecode_decryptor"] = {
-                        "initial_key": bytecode_decryptor.initial_key,
-                        "key_width": bytecode_decryptor.key_width,
-                        "transform_count": len(bytecode_decryptor.transforms),
-                    }
-
-                # Decrypt handler table if table_base is available
-                src_match = vmprotect_match or dispatcher_match
-                if src_match is not None:
-                    tbl_base = src_match.get("table_base", 0)
-                    if tbl_base and binary_data and len(binary_data) > 64:
-                        known_addrs = src_match.get(
-                            "handler_addresses", [],
-                        )
-                        dec_table = decrypt_handler_table(
-                            binary_data, tbl_base, base_address,
-                            bit_width=64,
-                            known_handler_addresses=known_addrs or None,
-                        )
-                        if dec_table.count > 0:
-                            ctx.shared_data["decrypted_handler_table"] = (
-                                dec_table.to_dict()
-                            )
-            except _STAGE_ERRORS as exc:
-                logger.debug("Bytecode decryptor / table decrypt skipped: %s", exc)
-
-            # ── 4. Identify vIP and segment into handler boundaries ──────
-            dispatcher_addrs: list = list(
-                ctx.shared_data.get("vm_discovery", {}).get(
-                    "dispatcher_addresses", [],
-                )
-            )
-
-            # Supplement from DispatcherAnalyzer handler_table (Batch 4).
-            handler_table = ctx.shared_data.get("handler_table", [])
-            if handler_table:
-                ht_addrs = set(dispatcher_addrs)
-                for entry in handler_table:
-                    addr = entry.get("handler_address") if isinstance(entry, dict) else getattr(entry, "handler_address", None)
-                    if addr and addr not in ht_addrs:
-                        dispatcher_addrs.append(addr)
-                        ht_addrs.add(addr)
-
-            # Also supplement from the dispatcher match (generic or VMP).
-            src_disp = dispatcher_match or vmprotect_match
-            if src_disp is not None:
-                ht_addrs = set(dispatcher_addrs)
-                for ht_entry in src_disp.get("handler_table", []):
-                    addr = ht_entry.get("handler_address") if isinstance(ht_entry, dict) else getattr(ht_entry, "handler_address", None)
-                    if addr and addr not in ht_addrs:
-                        dispatcher_addrs.append(addr)
-                        ht_addrs.add(addr)
-
-            vip_candidate = identify_vip_register(trace, dispatcher_addrs)
-
-            if vip_candidate is None:
-                return DevirtualisationResult.skipped_result(
-                    "Could not identify virtual instruction pointer register",
-                ).to_dict()
-
-            seg = segment_trace(trace, vip_candidate, dispatcher_addrs)
-            boundaries = seg.boundaries
-
-            if not boundaries:
-                return DevirtualisationResult.skipped_result(
-                    "Trace segmentation produced no handler boundaries",
-                ).to_dict()
-
-            # ── 5. Handler extraction (Batch 14) ─────────────────────────
-            extraction_data: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.vm_discovery.handler_extraction import (
-                    extract_handler_bodies,
-                )
-                extraction = extract_handler_bodies(
-                    trace, boundaries, vip_candidate.name,
-                    dispatcher_addresses=tuple(dispatcher_addrs),
-                )
-                extraction_data = extraction.to_dict()
-                ctx.shared_data["handler_extraction"] = extraction_data
-            except _STAGE_ERRORS as exc:
-                logger.debug("Handler extraction skipped: %s", exc)
-
-            # ── 6. VM context register identification (Batch 15) ─────────
-            context_layout_data: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.vm_discovery.context_registers import (
-                    identify_vm_context,
-                )
-                context_layout = identify_vm_context(
-                    trace, dispatcher_addrs, boundaries,
-                    vip_register=vip_candidate.name,
-                )
-                context_layout_data = context_layout.to_dict()
-                ctx.shared_data["vm_context_layout"] = context_layout_data
-            except _STAGE_ERRORS as exc:
-                logger.debug("VM context register identification skipped: %s", exc)
-
-            # ── 7. Semantic analysis + clustering (Batch 16 + 22) ────────
-            # Use the symbolic depth bridge to extract per-handler summaries
-            # from all available sources (SE results, plugin traces,
-            # handler extraction deltas), running fresh SE when coverage
-            # is low.
-            sym_summaries: Optional[Dict[int, Any]] = None
-            try:
-                from ..analysis.symbolic_depth import collect_symbolic_summaries
-                ext_handlers = None
-                if extraction_data and isinstance(extraction_data, dict):
-                    ext_handlers = extraction_data.get("handlers")
-                sym_summaries = collect_symbolic_summaries(
-                    ctx.shared_data,
-                    boundaries=boundaries,
-                    handler_bodies=ext_handlers,
-                    bit_width=64,
-                    run_fresh=True,
-                ) or None
-            except _STAGE_ERRORS as exc:
-                logger.debug("Symbolic depth collection skipped: %s", exc)
-                sym_summaries = ctx.shared_data.get(
-                    "symbolic_execution", {},
-                ).get("handler_summaries", None)
-
-            opcode_table = analyse_handler_semantics(
-                trace, boundaries,
-                symbolic_summaries=sym_summaries,
-            )
-
-            # Cluster semantically-equivalent handler variants.
-            clustering_data: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.handler_clustering import (
-                    cluster_handlers_by_semantics,
-                    refine_opcode_table,
-                )
-                clustering_result = cluster_handlers_by_semantics(
-                    opcode_table,
-                    symbolic_summaries=sym_summaries,
-                )
-                clustering_data = clustering_result.to_dict()
-                ctx.shared_data["handler_clustering"] = clustering_data
-
-                # Refine the opcode table with cluster annotations.
-                opcode_table = refine_opcode_table(
-                    opcode_table, clustering_result,
-                )
-            except _STAGE_ERRORS as exc:
-                logger.debug("Handler clustering skipped: %s", exc)
-
-            # ── 7c. ML ensemble classification (Batch 39) ────────────────
-            ml_labels: Optional[Dict[str, str]] = None
-            try:
-                from ..ml.model import SymbolicClassifierModel, VMHandlerModel
-                from ..ml.ensemble import WeightedEnsemble
-
-                sym_model = SymbolicClassifierModel()
-                heur_model = VMHandlerModel()
-                ensemble = WeightedEnsemble(
-                    models=[heur_model, sym_model],
-                    weights=[0.4, 0.6],
-                )
-
-                ml_labels = {}
-                for entry in opcode_table.entries:
-                    features: Dict[str, Any] = {}
-                    # Attach symbolic summary if available
-                    if sym_summaries and entry.handler_address in sym_summaries:
-                        s = sym_summaries[entry.handler_address]
-                        features["symbolic_summary"] = (
-                            s.to_dict() if hasattr(s, "to_dict") else s
-                        )
-                    # Attach heuristic features from the semantic
-                    sem = entry.semantic
-                    if sem is not None:
-                        hist = getattr(sem, "mnemonic_histogram", {}) or {}
-                        total = max(sum(hist.values()), 1)
-                        features["values"] = [
-                            hist.get("add", 0) / total,
-                            hist.get("and", 0) / total,
-                            hist.get("mov", 0) / total,
-                            hist.get("push", 0) / total,
-                            0.0, 0.0, 0.0, 0.0, 0.0,
-                            float(total), 0.0, 0.0, 0.0,
-                        ]
-                        features["names"] = [
-                            "arith_ratio", "logic_ratio", "mem_ratio",
-                            "stack_ratio", "branch_ratio", "vip_delta",
-                            "nop_ratio", "junk_ratio", "reg_diversity",
-                            "insn_count", "avg_operands", "push_ratio",
-                            "pop_ratio",
-                        ]
-
-                    pred = ensemble.predict(features)
-                    addr_hex = f"0x{entry.handler_address:x}"
-                    ml_labels[addr_hex] = pred.label
-
-                    # Confidence boost when ML agrees with symbolic
-                    if (
-                        sem is not None
-                        and pred.label == sem.operation
-                        and pred.confidence > 0.7
-                    ):
-                        sem.confidence = min(sem.confidence + 0.05, 1.0)
-            except _STAGE_ERRORS as exc:
-                logger.debug("ML ensemble classification skipped: %s", exc)
-
-            # ── 7b. Handler-level CFG construction (Batch 19 + B24) ────
-            handler_cfg = None
-            handler_cfg_data: Optional[Dict[str, Any]] = None
-            try:
-                from ..analysis.bytecode_cfg import (
-                    build_handler_cfg,
-                    build_static_cfg,
-                )
-                handler_cfg_obj = build_handler_cfg(
-                    opcode_table, boundaries, trace,
-                )
-                if handler_cfg_obj.blocks:
-                    handler_cfg = handler_cfg_obj.graph  # networkx DiGraph
-                    handler_cfg_data = handler_cfg_obj.to_dict()
-                    ctx.shared_data["handler_cfg"] = handler_cfg_data
-
-                # If we have a decryptor and raw bytecode, also build
-                # a static CFG (covers paths not in the trace).
-                if bytecode_decryptor is not None and binary_data:
-                    vip_start = boundaries[0].vip_value if boundaries else 0
-                    # Extract bytecode region from binary
-                    bc_offset = vip_start - base_address
-                    if 0 <= bc_offset < len(binary_data):
-                        bc_end = min(len(binary_data), bc_offset + 0x10000)
-                        bc_bytes = binary_data[bc_offset:bc_end]
-                        static_cfg_obj = build_static_cfg(
-                            bc_bytes, opcode_table, vip_start,
-                            decryptor=bytecode_decryptor,
-                        )
-                        if static_cfg_obj.blocks:
-                            ctx.shared_data["static_handler_cfg"] = (
-                                static_cfg_obj.to_dict()
-                            )
-                            # If trace-based CFG was empty, use static
-                            if handler_cfg is None:
-                                handler_cfg = static_cfg_obj.graph
-                                handler_cfg_data = static_cfg_obj.to_dict()
-                                ctx.shared_data["handler_cfg"] = (
-                                    handler_cfg_data
-                                )
-            except _STAGE_ERRORS as exc:
-                logger.debug("Handler CFG construction skipped: %s", exc)
+            # ── 7b. Handler-level CFG ────────────────────────────────────
+            step_build_cfgs(ws)
 
             # ── 8. Pseudocode emission ───────────────────────────────────
-            pseudocode_result = emit_pseudocode(
-                opcode_table, boundaries, handler_cfg,
-                style="c_like",
-                context_layout=ctx.shared_data.get("vm_context_layout"),
-                clustering=ctx.shared_data.get("handler_clustering"),
-            )
+            step_emit_pseudocode(ws)
 
-            # ── 9. Nested VM detection + recursive deobfuscation (B100) ──
-            nested_layers: list[Dict[str, Any]] = []
-            max_nesting = int(
-                ctx.shared_data.get("max_nesting_depth", 3)
-            )
-            try:
-                inner_entries = _detect_inner_vm_entries(
-                    opcode_table, handler_cfg, ctx.shared_data,
-                )
-                nesting_depth = 0
-                while inner_entries and nesting_depth < max_nesting:
-                    nesting_depth += 1
-                    logger.info(
-                        "Nested VM layer %d: %d inner entry points detected",
-                        nesting_depth, len(inner_entries),
-                    )
-                    for inner_entry in inner_entries:
-                        inner_trace = _extract_inner_trace(
-                            trace, inner_entry, boundaries,
-                        )
-                        if not inner_trace:
-                            continue
-                        inner_match = find_dispatcher(
-                            inner_trace, bit_width=64,
-                        )
-                        if inner_match is None:
-                            continue
-                        inner_disp_addrs = inner_match.to_dict().get(
-                            "handler_addresses", [],
-                        )
-                        inner_vip = identify_vip_register(
-                            inner_trace, inner_disp_addrs,
-                        )
-                        if inner_vip is None:
-                            continue
-                        inner_seg = segment_trace(
-                            inner_trace, inner_vip, inner_disp_addrs,
-                        )
-                        if not inner_seg.boundaries:
-                            continue
-                        inner_opcode = analyse_handler_semantics(
-                            inner_trace, inner_seg.boundaries,
-                        )
-                        inner_pseudo = emit_pseudocode(
-                            inner_opcode, inner_seg.boundaries, None,
-                            style="c_like",
-                        )
-                        nested_layers.append({
-                            "depth": nesting_depth,
-                            "entry_address": inner_entry,
-                            "protector": inner_match.protector,
-                            "handler_count": len(inner_seg.boundaries),
-                            "unique_operations": inner_opcode.unique_operations,
-                            "pseudocode": inner_pseudo.text,
-                        })
-                    # Check for deeper nesting in the last layer
-                    if nested_layers:
-                        inner_entries = _detect_inner_vm_entries(
-                            inner_opcode, None, ctx.shared_data,
-                        )
-                    else:
-                        break
-            except _STAGE_ERRORS as exc:
-                logger.debug("Nested VM detection skipped: %s", exc)
+            # ── 9. Nested VM detection ───────────────────────────────────
+            step_detect_nested_vms(ws)
 
-            # ── Assemble result ──────────────────────────────────────────
-            result = DevirtualisationResult(
-                success=True,
-                vip_register=vip_candidate.name,
-                handler_count=len(boundaries),
-                unique_operations=opcode_table.unique_operations,
-                opcode_table=opcode_table.to_dict(),
-                pseudocode=pseudocode_result.to_dict(),
-                pseudocode_text=pseudocode_result.text,
-                anti_evasion_hooks=hook_set_data,
-                vmprotect_dispatcher=vmprotect_match,
-                dispatcher_match=dispatcher_match,
-                detected_protector=detected_protector,
-                handler_extraction=extraction_data,
-                vm_context_layout=context_layout_data,
-                handler_clustering=clustering_data,
-                handler_cfg=handler_cfg_data,
-                vm_entry_points=vm_entry_data,
-                decrypted_handler_table=ctx.shared_data.get("decrypted_handler_table"),
-                bytecode_decryptor=ctx.shared_data.get("bytecode_decryptor"),
-                static_handler_cfg=ctx.shared_data.get("static_handler_cfg"),
-                ml_classifications=ml_labels,
-                nested_layers=nested_layers or None,
-            )
-
-            # Store boundaries for downstream stages.
-            ctx.shared_data["devirt_boundaries"] = [
-                {
-                    "vip_value": b.vip_value,
-                    "handler_address": b.handler_address,
-                    "vip_delta": b.vip_delta,
-                    "instruction_count": b.instruction_count,
-                }
-                for b in boundaries
-            ]
-
-            return result.to_dict()
+            # ── 10. Assemble result ──────────────────────────────────────
+            return step_assemble_result(ws)
 
         return self._run_stage("devirtualize", _do_devirt, ctx)
 

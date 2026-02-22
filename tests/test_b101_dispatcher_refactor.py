@@ -474,14 +474,14 @@ class TestNestedDepthLimit:
     """Verify pipeline respects max_nesting_depth."""
 
     def test_pipeline_has_nesting_depth_default(self):
-        """Pipeline step 9 should honour a max depth."""
+        """Pipeline devirt stages should honour a max depth."""
         import ast
         from pathlib import Path
-        pipeline_path = Path(__file__).resolve().parent.parent / \
-            "dragonslayer" / "core" / "pipeline.py"
-        if not pipeline_path.exists():
-            pytest.skip("pipeline.py not found")
-        source = pipeline_path.read_text(encoding="utf-8")
+        devirt_path = Path(__file__).resolve().parent.parent / \
+            "dragonslayer" / "core" / "devirt_stages.py"
+        if not devirt_path.exists():
+            pytest.skip("devirt_stages.py not found")
+        source = devirt_path.read_text(encoding="utf-8")
         # Must contain max_nesting_depth or similar sentinel
         assert "max_nesting_depth" in source or "nesting_depth" in source
 
