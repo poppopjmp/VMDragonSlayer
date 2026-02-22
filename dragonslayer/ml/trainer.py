@@ -30,6 +30,21 @@ from .pipeline import (
 
 logger = logging.getLogger(__name__)
 
+# Module-level constant mapping canonical category → representative VM
+# operation.  Used by synthetic-data generators so every sample carries an
+# ``operation`` field that matches ``_HANDLER_TEMPLATES`` keys.
+_CAT_TO_OP: Dict[str, str] = {
+    "arithmetic": "vm_add",
+    "bitwise": "vm_xor",
+    "stack": "vm_push",
+    "memory": "vm_load",
+    "control_flow": "vm_jmp",
+    "vm_control": "vm_enter",
+    "comparison": "vm_cmp",
+    "crypto": "vm_decrypt",
+    "nop": "vm_nop",
+}
+
 _HAS_SKLEARN = False
 _HAS_GB = False
 try:
@@ -789,24 +804,11 @@ def generate_synthetic_handlers(
                 instructions.append({"mnemonic": mnem, "operands": ops})
                 mnemonics.append(mnem.lower())
 
-            # Map category to an operation name (B75: matches _HANDLER_TEMPLATES keys)
-            _cat_to_op = {
-                "arithmetic": "vm_add",
-                "bitwise": "vm_xor",
-                "stack": "vm_push",
-                "memory": "vm_load",
-                "control_flow": "vm_jmp",
-                "vm_control": "vm_enter",
-                "comparison": "vm_cmp",
-                "crypto": "vm_decrypt",
-                "nop": "vm_nop",
-            }
-
             handlers.append({
                 "instructions": instructions,
                 "mnemonics": mnemonics,
                 "category": cat,
-                "operation": _cat_to_op.get(cat, "vm_unknown"),
+                "operation": _CAT_TO_OP.get(cat, "vm_unknown"),
                 "operand_width": rng.choice([4, 8]),
                 "block_count": rng.randint(1, 3),
                 "reads": [],
@@ -1440,23 +1442,11 @@ def generate_multi_protector_data(
                     instructions.append({"mnemonic": mnem, "operands": ops})
                     mnemonics.append(mnem.lower())
 
-                _cat_to_op = {
-                    "arithmetic": "vm_add",
-                    "bitwise": "vm_xor",
-                    "stack": "vm_push",
-                    "memory": "vm_load",
-                    "control_flow": "vm_jmp",
-                    "vm_control": "vm_enter",
-                    "comparison": "vm_cmp",
-                    "crypto": "vm_decrypt",
-                    "nop": "vm_nop",
-                }
-
                 handlers.append({
                     "instructions": instructions,
                     "mnemonics": mnemonics,
                     "category": cat,
-                    "operation": _cat_to_op.get(cat, "vm_unknown"),
+                    "operation": _CAT_TO_OP.get(cat, "vm_unknown"),
                     "operand_width": rng.choice([4, 8]),
                     "block_count": rng.randint(1, 3),
                     "reads": [],

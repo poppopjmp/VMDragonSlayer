@@ -89,12 +89,6 @@ def _handler_feature_spec() -> Dict[str, Any]:
 # Heuristic model (no training needed)
 # ---------------------------------------------------------------------------
 
-# Heuristic classification table based on instruction count and vip_delta.
-# Thresholds are derived from common VMProtect/Themida handler patterns.
-_HEURISTIC_RULES: List[Tuple[str, float, Any]] = [
-    # (category, confidence, predicate(features_dict) -> bool)
-]
-
 # B87: Default heuristic thresholds — can be overridden via JSON config.
 _DEFAULT_HEURISTIC_CONFIG: Dict[str, Any] = {
     "rules": [

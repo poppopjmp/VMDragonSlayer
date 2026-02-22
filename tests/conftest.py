@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
@@ -14,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS_DIR = PROJECT_ROOT / "data" / "patterns"
 VMPROTECT_PATTERNS = PATTERNS_DIR / "vmprotect_handlers.json"
 THEMIDA_PATTERNS = PATTERNS_DIR / "themida_patterns.json"
+ARM_PATTERNS = PATTERNS_DIR / "arm_patterns.json"
 
 
 @pytest.fixture()
@@ -57,3 +59,37 @@ def sample_binary_with_pattern() -> bytes:
     nops = b"\x90" * 128
     payload = bytes.fromhex("4801C04889C1")
     return nops + payload + nops
+
+
+@pytest.fixture()
+def arm_patterns_path() -> Path:
+    """Return the path to the ARM handler patterns JSON."""
+    assert ARM_PATTERNS.exists(), f"Missing fixture data: {ARM_PATTERNS}"
+    return ARM_PATTERNS
+
+
+@pytest.fixture()
+def arm_patterns_data(arm_patterns_path: Path) -> dict:
+    """Load ARM patterns JSON into a dict."""
+    return json.loads(arm_patterns_path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture()
+def tmp_output_dir(tmp_path: Path) -> Path:
+    """Provide a temporary output directory for tests that write reports."""
+    out = tmp_path / "output"
+    out.mkdir()
+    return out
+
+
+@pytest.fixture()
+def fresh_config() -> Iterator[None]:
+    """Reset the Config singleton before and after each test.
+
+    Any test that mutates configuration should use this fixture so that
+    changes don't leak across the test session.
+    """
+    from dragonslayer.core.config import Config
+    Config._instance = None
+    yield
+    Config._instance = None

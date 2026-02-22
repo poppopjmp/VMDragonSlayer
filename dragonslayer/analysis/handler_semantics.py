@@ -582,34 +582,37 @@ def analyse_handler_semantics(
 #
 # The patterns intentionally ignore register-name specifics so that
 # "init_rax + init_rbx" and "init_r12 + init_rsi" both match ADD.
-_SYM_PATTERNS: List[Tuple[str, str, float]] = [
-    # (regex, VMOperation, confidence)
+_SYM_PATTERNS: List[Tuple[re.Pattern[str], str, float]] = [
+    # (compiled_regex, VMOperation, confidence)
     # Arithmetic
-    (r"init_\w+\s*\+\s*init_\w+", VMOperation.ADD, 0.92),
-    (r"init_\w+\s*-\s*init_\w+", VMOperation.SUB, 0.92),
-    (r"init_\w+\s*\*\s*init_\w+", VMOperation.MUL, 0.90),
-    (r"UDiv|udiv", VMOperation.DIV, 0.90),
-    (r"SDiv|sdiv", VMOperation.DIV, 0.90),
+    (re.compile(r"init_\w+\s*\+\s*init_\w+"), VMOperation.ADD, 0.92),
+    (re.compile(r"init_\w+\s*-\s*init_\w+"), VMOperation.SUB, 0.92),
+    (re.compile(r"init_\w+\s*\*\s*init_\w+"), VMOperation.MUL, 0.90),
+    (re.compile(r"UDiv|udiv"), VMOperation.DIV, 0.90),
+    (re.compile(r"SDiv|sdiv"), VMOperation.DIV, 0.90),
     # Bitwise
-    (r"init_\w+\s*&\s*init_\w+", VMOperation.AND, 0.92),
-    (r"init_\w+\s*\|\s*init_\w+", VMOperation.OR, 0.92),
-    (r"init_\w+\s*\^\s*init_\w+", VMOperation.XOR, 0.92),  # z3 uses Xor() but str may be ^
-    (r"Xor\(", VMOperation.XOR, 0.90),
-    (r"~init_\w+", VMOperation.NOT, 0.90),
-    (r"-init_\w+", VMOperation.NEG, 0.90),
+    (re.compile(r"init_\w+\s*&\s*init_\w+"), VMOperation.AND, 0.92),
+    (re.compile(r"init_\w+\s*\|\s*init_\w+"), VMOperation.OR, 0.92),
+    (re.compile(r"init_\w+\s*\^\s*init_\w+"), VMOperation.XOR, 0.92),  # z3 uses Xor() but str may be ^
+    (re.compile(r"Xor\("), VMOperation.XOR, 0.90),
+    (re.compile(r"~init_\w+"), VMOperation.NOT, 0.90),
+    (re.compile(r"-init_\w+"), VMOperation.NEG, 0.90),
     # Shifts
-    (r"init_\w+\s*<<\s*", VMOperation.SHL, 0.90),
-    (r"LShR\(", VMOperation.SHR, 0.90),
-    (r"init_\w+\s*>>\s*", VMOperation.SHR, 0.88),
-    (r"RotateLeft\(", VMOperation.ROL, 0.90),
-    (r"RotateRight\(", VMOperation.ROR, 0.90),
+    (re.compile(r"init_\w+\s*<<\s*"), VMOperation.SHL, 0.90),
+    (re.compile(r"LShR\("), VMOperation.SHR, 0.90),
+    (re.compile(r"init_\w+\s*>>\s*"), VMOperation.SHR, 0.88),
+    (re.compile(r"RotateLeft\("), VMOperation.ROL, 0.90),
+    (re.compile(r"RotateRight\("), VMOperation.ROR, 0.90),
     # Memory access (via symbolic memory symbols)
-    (r"mem_", VMOperation.LOAD, 0.80),
+    (re.compile(r"mem_"), VMOperation.LOAD, 0.80),
 ]
 
 # Patterns for detecting push/pop/store via memory_writes
 _SYM_MEM_PUSH = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
 _SYM_MEM_STORE = re.compile(r"init_\w+", re.IGNORECASE)
+
+# Precompiled: detect "lea reg, [reg]" nop-equivalents
+_RE_LEA_NOP = re.compile(r"(\w+),\s*\[\1\]$")
 
 
 def _classify_from_symbolic(
@@ -681,7 +684,7 @@ def _classify_from_symbolic(
     # Pattern-match the expression strings
     scores: Dict[str, float] = {}
     for pattern, vm_op, conf in _SYM_PATTERNS:
-        if re.search(pattern, combined):
+        if pattern.search(combined):
             scores[vm_op] = max(scores.get(vm_op, 0.0), conf)
 
     if not scores:
@@ -935,7 +938,7 @@ def _filter_junk(
             # lea rax, [rax] is a nop-equivalent
             ops = disasm.split(None, 1)
             operands = ops[1] if len(ops) > 1 else ""
-            match = re.match(r"(\w+),\s*\[\1\]$", operands)
+            match = _RE_LEA_NOP.match(operands)
             if match:
                 continue
 
@@ -1047,10 +1050,10 @@ def _taint_slice(
             from .trace_ingestion import _extract_reg_reads_writes
             reads, writes = _extract_reg_reads_writes(mnem, operands)
         except ImportError:
-            # Fallback: positional heuristic using sorted list
-            for reg in sorted(_COMMON_TAINT_REGS, key=len, reverse=True):
-                import re as _re
-                if _re.search(r"\b" + _re.escape(reg) + r"\b", operands.lower()):
+            # Fallback: positional heuristic using precompiled register patterns
+            ops_low = operands.lower()
+            for reg, reg_pat in _TAINT_REG_PATTERNS.items():
+                if reg_pat.search(ops_low):
                     if not writes:
                         writes.append(reg)
                     else:
@@ -1090,6 +1093,12 @@ _COMMON_TAINT_REGS = {
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+}
+
+# Precompiled word-boundary patterns for each register (fallback path)
+_TAINT_REG_PATTERNS: Dict[str, re.Pattern[str]] = {
+    reg: re.compile(r"\b" + re.escape(reg) + r"\b")
+    for reg in sorted(_COMMON_TAINT_REGS, key=len, reverse=True)
 }
 
 
