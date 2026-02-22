@@ -50,6 +50,13 @@ _LEGACY_MAP: Dict[str, str] = {
     # handler_classifier.py
     "call":          "control_flow",
     "compare":       "comparison",
+    # pattern-file legacies (themida, arm)
+    "misc":          "nop",
+    "vm_lifecycle":  "vm_control",
+    "key_transform": "crypto",
+    "native":        "control_flow",
+    "fetch":         "vm_control",
+    "dispatcher":    "vm_control",
     # any ad-hoc aliases seen in tests / plugin code
     "load":          "memory",
     "store":         "memory",

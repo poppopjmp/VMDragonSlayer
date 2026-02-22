@@ -607,10 +607,11 @@ class TestThemidaPatterns:
             assert hex_pattern.match(sig), f"Bad sig in {p['pattern_id']}: {sig}"
 
     def test_new_categories_present(self, patterns_data: Dict[str, Any]) -> None:
-        """B100 should add vm_lifecycle, context, key_transform categories."""
+        """B100 categories should now use canonical taxonomy names."""
         types = {p["handler_type"] for p in patterns_data["patterns"]}
-        for cat in ("vm_lifecycle", "context", "key_transform"):
-            assert cat in types, f"Missing category: {cat}"
+        # vm_lifecycle → vm_control, context → vm_control, key_transform → crypto
+        for cat in ("vm_control", "crypto", "nop"):
+            assert cat in types, f"Missing canonical category: {cat}"
 
     def test_mul_div_patterns_present(self, patterns_data: Dict[str, Any]) -> None:
         ops = {p["operation"] for p in patterns_data["patterns"]}

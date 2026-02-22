@@ -24,6 +24,11 @@
           "type": "string",
           "default": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
           "description": "Python logging format string."
+        },
+        "console": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also emit logs to the console."
         }
       }
     },
@@ -42,6 +47,11 @@
           "minimum": 1,
           "default": 4,
           "description": "Maximum number of concurrent analysis threads."
+        },
+        "enable_caching": {
+          "type": "boolean",
+          "default": false,
+          "description": "Cache intermediate analysis results for faster re-runs."
         }
       }
     },
@@ -62,12 +72,12 @@
         },
         "ia32_tool": {
           "type": "string",
-          "default": "VMDragonTaint.x32.dll",
+          "default": "VMDragonTaint.ia32.dll",
           "description": "32-bit Pin tool DLL name."
         },
         "intel64_tool": {
           "type": "string",
-          "default": "VMDragonTaint.x64.dll",
+          "default": "VMDragonTaint.intel64.dll",
           "description": "64-bit Pin tool DLL name."
         }
       }
@@ -93,6 +103,16 @@
           "minimum": 1,
           "default": 4,
           "description": "Number of Uvicorn workers."
+        },
+        "enable_cors": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable CORS middleware on the API server."
+        },
+        "debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug mode (verbose error responses)."
         }
       }
     },
@@ -128,6 +148,19 @@
           "maximum": 1.0,
           "default": 0.85,
           "description": "Minimum confidence for handler validation."
+        },
+        "confidence_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.8,
+          "description": "Minimum confidence to accept a classification result."
+        },
+        "max_handler_size": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10000,
+          "description": "Maximum basic-block instruction count per handler."
         }
       }
     },
@@ -170,12 +203,56 @@
     "data": {
       "type": "object",
       "description": "Data and model paths.",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "properties": {
+        "patterns_db": {
+          "type": "string",
+          "default": "data/patterns/vmprotect_handlers.json",
+          "description": "Path to the patterns directory or database file."
+        },
+        "models_dir": {
+          "type": "string",
+          "default": "data/models/",
+          "description": "Path to pre-trained model artefacts."
+        },
+        "samples_dir": {
+          "type": "string",
+          "default": "data/samples/",
+          "description": "Path to binary samples."
+        },
+        "schemas_dir": {
+          "type": "string",
+          "default": "data/schemas/",
+          "description": "Path to JSON schemas."
+        }
+      }
     },
     "paths": {
       "type": "object",
       "description": "Additional path overrides.",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "properties": {
+        "workspace_root": {
+          "type": "string",
+          "default": ".",
+          "description": "Project workspace root."
+        },
+        "logs_dir": {
+          "type": "string",
+          "default": "logs/",
+          "description": "Log file output directory."
+        },
+        "temp_dir": {
+          "type": "string",
+          "default": "temp/",
+          "description": "Temporary working directory."
+        },
+        "output_dir": {
+          "type": "string",
+          "default": "output/",
+          "description": "Analysis output directory."
+        }
+      }
     },
     "metroplex": {
       "type": "object",
@@ -185,7 +262,22 @@
     "dispatcher": {
       "type": "object",
       "description": "Dispatcher analysis settings.",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "properties": {
+        "max_trace_length": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 500000,
+          "description": "Traces longer than this are sub-sampled."
+        },
+        "early_exit_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.9,
+          "description": "Skip remaining finders above this confidence."
+        }
+      }
     }
   }
 }

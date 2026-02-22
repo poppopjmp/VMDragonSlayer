@@ -1341,37 +1341,43 @@
     {
       "pattern_id": "vmp_inc_64_v1",
       "name": "VMProtect INC qword",
-      "signature": "48 FF ?? 48 89 ??",
+      "signature": "48 FF C0 48 89 ??",
       "architecture": "x64",
       "handler_type": "arithmetic",
       "operation": "inc",
       "confidence": 0.9,
       "wildcards": true,
       "variants": [
-        "49 FF ??"
+        "49 FF C0",
+        "48 FF C1 48 89 ??",
+        "48 83 C0 01 48 89 ??"
       ],
       "metadata": {
         "vmprotect_version": "3.x",
         "width": 64,
-        "instruction_count": 2
+        "instruction_count": 2,
+        "note": "INC uses ModR/M /0 (C0-C7); distinguished from DEC /1 (C8-CF)"
       }
     },
     {
       "pattern_id": "vmp_dec_64_v1",
       "name": "VMProtect DEC qword",
-      "signature": "48 FF ?? 48 89 ??",
+      "signature": "48 FF C8 48 89 ??",
       "architecture": "x64",
       "handler_type": "arithmetic",
       "operation": "dec",
       "confidence": 0.9,
       "wildcards": true,
       "variants": [
-        "49 FF ??"
+        "49 FF C8",
+        "48 FF C9 48 89 ??",
+        "48 83 E8 01 48 89 ??"
       ],
       "metadata": {
         "vmprotect_version": "3.x",
         "width": 64,
-        "instruction_count": 2
+        "instruction_count": 2,
+        "note": "DEC uses ModR/M /1 (C8-CF); distinguished from INC /0 (C0-C7)"
       }
     },
     {

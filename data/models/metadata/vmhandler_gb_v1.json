@@ -1,10 +1,24 @@
 {
   "model_name": "vmhandler_gb_v1",
   "algorithm": "GradientBoosting",
+  "version": "1.0.0",
+  "trained_date": "2025-06-01",
+  "framework": "scikit-learn",
+  "taxonomy": "dragonslayer.ml.taxonomy.CANONICAL_CATEGORIES",
   "accuracy": 1.0,
   "n_samples": 800,
   "feature_count": 78,
-  "categories": 9,
+  "categories": [
+    "arithmetic",
+    "bitwise",
+    "comparison",
+    "control_flow",
+    "crypto",
+    "memory",
+    "nop",
+    "stack",
+    "vm_control"
+  ],
   "top_features": [
     {
       "name": "reg_only_ratio",

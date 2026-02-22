@@ -48,7 +48,7 @@ symbolic_execution:
   memory_limit_mb: 2048      # Z3 global memory cap
 
 data:
-  patterns_db: data/patterns/pattern_database_dev.json
+  patterns_db: data/patterns/vmprotect_handlers.json
   models_dir: data/models/
   samples_dir: data/samples/
   schemas_dir: data/schemas/

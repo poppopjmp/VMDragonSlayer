@@ -1,5 +1,9 @@
 {
   "model_path": "data/models/pretrained/handler_classifier.pkl",
+  "version": "2.0.0",
+  "trained_date": "2025-06-01",
+  "framework": "scikit-learn",
+  "taxonomy": "dragonslayer.ml.taxonomy.CANONICAL_CATEGORIES",
   "accuracy": 0.9852,
   "n_samples": 2160,
   "n_features": 132,

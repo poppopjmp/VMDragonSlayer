@@ -25,29 +25,39 @@ class Config:
         'logging': {
             'level': 'INFO',
             'file': 'logs/vmds.log',
-            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            'console': False,
         },
         'analysis': {
             'timeout': 1800,
-            'max_threads': 4
+            'max_threads': 4,
+            'enable_caching': False,
         },
         'pin': {
             'path': 'pin/pin.exe',
             'timeout': 900,
-            'ia32_tool': 'VMDragonTaint.x32.dll',
-            'intel64_tool': 'VMDragonTaint.x64.dll'
+            'ia32_tool': 'VMDragonTaint.ia32.dll',
+            'intel64_tool': 'VMDragonTaint.intel64.dll',
         },
         'api': {
             'host': '127.0.0.1',
             'port': 8000,
-            'workers': 4
+            'workers': 4,
+            'enable_cors': False,
+            'debug': False,
         },
         'vmprotect': {
             'trace_depth': 100000,
             'enable_symbolic': True,
             'llvm_opt_level': 'O3',
             'skip_optimization': False,
-            'validation_threshold': 0.85
+            'validation_threshold': 0.85,
+            'confidence_threshold': 0.8,
+            'max_handler_size': 10000,
+        },
+        'dispatcher': {
+            'max_trace_length': 500000,
+            'early_exit_confidence': 0.9,
         },
         'symbolic_execution': {
             'solver_timeout_ms': 10000,
@@ -55,6 +65,18 @@ class Config:
             'max_depth': 1000,
             'max_loop_iters': 3,
             'memory_limit_mb': 2048,
+        },
+        'data': {
+            'patterns_db': 'data/patterns/vmprotect_handlers.json',
+            'models_dir': 'data/models/',
+            'samples_dir': 'data/samples/',
+            'schemas_dir': 'data/schemas/',
+        },
+        'paths': {
+            'workspace_root': '.',
+            'logs_dir': 'logs/',
+            'temp_dir': 'temp/',
+            'output_dir': 'output/',
         },
     }
     
@@ -251,7 +273,7 @@ class Config:
 
         # --- Known top-level sections ---
         known_sections = set(self.DEFAULTS.keys()) | {
-            "data", "paths", "metroplex", "dispatcher",
+            "metroplex",
         }
         for key in self._config:
             if key not in known_sections:
