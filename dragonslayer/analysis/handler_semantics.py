@@ -80,6 +80,21 @@ class VMOperation:
     NOP = "vm_nop"
     UNKNOWN = "vm_unknown"
 
+    # --- SIMD / vector operations ---
+    SIMD_ADD = "vm_simd_add"
+    SIMD_SUB = "vm_simd_sub"
+    SIMD_MUL = "vm_simd_mul"
+    SIMD_XOR = "vm_simd_xor"
+    SIMD_AND = "vm_simd_and"
+    SIMD_OR = "vm_simd_or"
+    SIMD_SHUFFLE = "vm_simd_shuffle"
+    SIMD_AES = "vm_simd_aes"
+    SIMD_LOAD = "vm_simd_load"
+    SIMD_STORE = "vm_simd_store"
+    SIMD_CMP = "vm_simd_cmp"
+    SIMD_SHIFT = "vm_simd_shift"
+    SIMD_UNKNOWN = "vm_simd_unknown"
+
 
 # Map native x86 mnemonics → VM semantic operations.
 _MNEMONIC_MAP: Dict[str, str] = {
@@ -135,6 +150,179 @@ _MNEMONIC_MAP: Dict[str, str] = {
     # Exchange (common in handlers) — map to LOAD as it's data movement
     "xchg": VMOperation.LOAD,
     "bswap": VMOperation.LOAD,
+    # --- SSE / AVX SIMD instructions ---
+    # Packed integer arithmetic
+    "paddb": VMOperation.SIMD_ADD,
+    "paddw": VMOperation.SIMD_ADD,
+    "paddd": VMOperation.SIMD_ADD,
+    "paddq": VMOperation.SIMD_ADD,
+    "paddsb": VMOperation.SIMD_ADD,
+    "paddsw": VMOperation.SIMD_ADD,
+    "paddusb": VMOperation.SIMD_ADD,
+    "paddusw": VMOperation.SIMD_ADD,
+    "psubb": VMOperation.SIMD_SUB,
+    "psubw": VMOperation.SIMD_SUB,
+    "psubd": VMOperation.SIMD_SUB,
+    "psubq": VMOperation.SIMD_SUB,
+    "psubsb": VMOperation.SIMD_SUB,
+    "psubsw": VMOperation.SIMD_SUB,
+    "psubusb": VMOperation.SIMD_SUB,
+    "psubusw": VMOperation.SIMD_SUB,
+    "pmullw": VMOperation.SIMD_MUL,
+    "pmulld": VMOperation.SIMD_MUL,
+    "pmulhw": VMOperation.SIMD_MUL,
+    "pmuludq": VMOperation.SIMD_MUL,
+    # Packed floating-point arithmetic
+    "addps": VMOperation.SIMD_ADD,
+    "addpd": VMOperation.SIMD_ADD,
+    "addss": VMOperation.SIMD_ADD,
+    "addsd": VMOperation.SIMD_ADD,
+    "subps": VMOperation.SIMD_SUB,
+    "subpd": VMOperation.SIMD_SUB,
+    "subss": VMOperation.SIMD_SUB,
+    "subsd": VMOperation.SIMD_SUB,
+    "mulps": VMOperation.SIMD_MUL,
+    "mulpd": VMOperation.SIMD_MUL,
+    "mulss": VMOperation.SIMD_MUL,
+    "mulsd": VMOperation.SIMD_MUL,
+    # Packed bitwise
+    "pxor": VMOperation.SIMD_XOR,
+    "pand": VMOperation.SIMD_AND,
+    "pandn": VMOperation.SIMD_AND,
+    "por": VMOperation.SIMD_OR,
+    "xorps": VMOperation.SIMD_XOR,
+    "xorpd": VMOperation.SIMD_XOR,
+    "andps": VMOperation.SIMD_AND,
+    "andpd": VMOperation.SIMD_AND,
+    "andnps": VMOperation.SIMD_AND,
+    "andnpd": VMOperation.SIMD_AND,
+    "orps": VMOperation.SIMD_OR,
+    "orpd": VMOperation.SIMD_OR,
+    # Shuffle / permute
+    "pshufb": VMOperation.SIMD_SHUFFLE,
+    "pshufd": VMOperation.SIMD_SHUFFLE,
+    "pshuflw": VMOperation.SIMD_SHUFFLE,
+    "pshufhw": VMOperation.SIMD_SHUFFLE,
+    "shufps": VMOperation.SIMD_SHUFFLE,
+    "shufpd": VMOperation.SIMD_SHUFFLE,
+    "palignr": VMOperation.SIMD_SHUFFLE,
+    "punpcklbw": VMOperation.SIMD_SHUFFLE,
+    "punpckhbw": VMOperation.SIMD_SHUFFLE,
+    "punpckldq": VMOperation.SIMD_SHUFFLE,
+    "punpckhdq": VMOperation.SIMD_SHUFFLE,
+    "punpcklqdq": VMOperation.SIMD_SHUFFLE,
+    "punpckhqdq": VMOperation.SIMD_SHUFFLE,
+    "pblendvb": VMOperation.SIMD_SHUFFLE,
+    "blendps": VMOperation.SIMD_SHUFFLE,
+    "blendpd": VMOperation.SIMD_SHUFFLE,
+    # AES-NI (common in VM bytecode decryption)
+    "aesenc": VMOperation.SIMD_AES,
+    "aesenclast": VMOperation.SIMD_AES,
+    "aesdec": VMOperation.SIMD_AES,
+    "aesdeclast": VMOperation.SIMD_AES,
+    "aesimc": VMOperation.SIMD_AES,
+    "aeskeygenassist": VMOperation.SIMD_AES,
+    # SIMD data movement
+    "movdqa": VMOperation.SIMD_LOAD,
+    "movdqu": VMOperation.SIMD_LOAD,
+    "movaps": VMOperation.SIMD_LOAD,
+    "movups": VMOperation.SIMD_LOAD,
+    "movapd": VMOperation.SIMD_LOAD,
+    "movupd": VMOperation.SIMD_LOAD,
+    "movd": VMOperation.SIMD_LOAD,
+    "movq": VMOperation.SIMD_LOAD,
+    "movss": VMOperation.SIMD_LOAD,
+    "movsd": VMOperation.SIMD_LOAD,
+    "movlps": VMOperation.SIMD_LOAD,
+    "movhps": VMOperation.SIMD_LOAD,
+    "movlpd": VMOperation.SIMD_LOAD,
+    "movhpd": VMOperation.SIMD_LOAD,
+    "lddqu": VMOperation.SIMD_LOAD,
+    # SIMD comparison
+    "pcmpeqb": VMOperation.SIMD_CMP,
+    "pcmpeqw": VMOperation.SIMD_CMP,
+    "pcmpeqd": VMOperation.SIMD_CMP,
+    "pcmpeqq": VMOperation.SIMD_CMP,
+    "pcmpgtb": VMOperation.SIMD_CMP,
+    "pcmpgtw": VMOperation.SIMD_CMP,
+    "pcmpgtd": VMOperation.SIMD_CMP,
+    "pcmpgtq": VMOperation.SIMD_CMP,
+    "cmpps": VMOperation.SIMD_CMP,
+    "cmppd": VMOperation.SIMD_CMP,
+    # SIMD shift
+    "psllw": VMOperation.SIMD_SHIFT,
+    "pslld": VMOperation.SIMD_SHIFT,
+    "psllq": VMOperation.SIMD_SHIFT,
+    "pslldq": VMOperation.SIMD_SHIFT,
+    "psrlw": VMOperation.SIMD_SHIFT,
+    "psrld": VMOperation.SIMD_SHIFT,
+    "psrlq": VMOperation.SIMD_SHIFT,
+    "psrldq": VMOperation.SIMD_SHIFT,
+    "psraw": VMOperation.SIMD_SHIFT,
+    "psrad": VMOperation.SIMD_SHIFT,
+    # --- AVX VEX-encoded equivalents (v-prefix) ---
+    "vpaddb": VMOperation.SIMD_ADD,
+    "vpaddw": VMOperation.SIMD_ADD,
+    "vpaddd": VMOperation.SIMD_ADD,
+    "vpaddq": VMOperation.SIMD_ADD,
+    "vpsubb": VMOperation.SIMD_SUB,
+    "vpsubw": VMOperation.SIMD_SUB,
+    "vpsubd": VMOperation.SIMD_SUB,
+    "vpsubq": VMOperation.SIMD_SUB,
+    "vpmullw": VMOperation.SIMD_MUL,
+    "vpmulld": VMOperation.SIMD_MUL,
+    "vpxor": VMOperation.SIMD_XOR,
+    "vpxord": VMOperation.SIMD_XOR,
+    "vpxorq": VMOperation.SIMD_XOR,
+    "vpand": VMOperation.SIMD_AND,
+    "vpandn": VMOperation.SIMD_AND,
+    "vpor": VMOperation.SIMD_OR,
+    "vxorps": VMOperation.SIMD_XOR,
+    "vxorpd": VMOperation.SIMD_XOR,
+    "vandps": VMOperation.SIMD_AND,
+    "vandpd": VMOperation.SIMD_AND,
+    "vandnps": VMOperation.SIMD_AND,
+    "vandnpd": VMOperation.SIMD_AND,
+    "vorps": VMOperation.SIMD_OR,
+    "vorpd": VMOperation.SIMD_OR,
+    "vpshufb": VMOperation.SIMD_SHUFFLE,
+    "vpshufd": VMOperation.SIMD_SHUFFLE,
+    "vshufps": VMOperation.SIMD_SHUFFLE,
+    "vshufpd": VMOperation.SIMD_SHUFFLE,
+    "vperm2f128": VMOperation.SIMD_SHUFFLE,
+    "vperm2i128": VMOperation.SIMD_SHUFFLE,
+    "vpermd": VMOperation.SIMD_SHUFFLE,
+    "vpermq": VMOperation.SIMD_SHUFFLE,
+    "vaesenc": VMOperation.SIMD_AES,
+    "vaesenclast": VMOperation.SIMD_AES,
+    "vaesdec": VMOperation.SIMD_AES,
+    "vaesdeclast": VMOperation.SIMD_AES,
+    "vmovdqa": VMOperation.SIMD_LOAD,
+    "vmovdqu": VMOperation.SIMD_LOAD,
+    "vmovaps": VMOperation.SIMD_LOAD,
+    "vmovups": VMOperation.SIMD_LOAD,
+    "vmovapd": VMOperation.SIMD_LOAD,
+    "vmovupd": VMOperation.SIMD_LOAD,
+    "vmovd": VMOperation.SIMD_LOAD,
+    "vmovq": VMOperation.SIMD_LOAD,
+    "vaddps": VMOperation.SIMD_ADD,
+    "vaddpd": VMOperation.SIMD_ADD,
+    "vaddss": VMOperation.SIMD_ADD,
+    "vaddsd": VMOperation.SIMD_ADD,
+    "vsubps": VMOperation.SIMD_SUB,
+    "vsubpd": VMOperation.SIMD_SUB,
+    "vmulps": VMOperation.SIMD_MUL,
+    "vmulpd": VMOperation.SIMD_MUL,
+    "vpcmpeqb": VMOperation.SIMD_CMP,
+    "vpcmpeqd": VMOperation.SIMD_CMP,
+    "vpcmpgtb": VMOperation.SIMD_CMP,
+    "vpcmpgtd": VMOperation.SIMD_CMP,
+    "vpsllw": VMOperation.SIMD_SHIFT,
+    "vpslld": VMOperation.SIMD_SHIFT,
+    "vpsllq": VMOperation.SIMD_SHIFT,
+    "vpsrlw": VMOperation.SIMD_SHIFT,
+    "vpsrld": VMOperation.SIMD_SHIFT,
+    "vpsrlq": VMOperation.SIMD_SHIFT,
 }
 
 # Instructions that are typically VM infrastructure / junk code.
@@ -578,8 +766,9 @@ def _classify_handler(
     scores: Dict[str, float] = {}
 
     # push/pop are VM stack infrastructure — de-weight them so the
-    # "core" operation dominates.
-    infra_ops = {VMOperation.PUSH, VMOperation.POP}
+    # "core" operation dominates.  Same for SIMD load/store.
+    infra_ops = {VMOperation.PUSH, VMOperation.POP,
+                 VMOperation.SIMD_LOAD, VMOperation.SIMD_STORE}
 
     for mnem, count in hist.items():
         # Pass disasm context for mov resolution — use first instruction
@@ -765,6 +954,8 @@ def _mnemonic_to_vm_op(mnem: str, disasm: str = "") -> str:
 
     For ``mov`` and variants, resolves to LOAD or STORE based on
     whether the destination operand is a memory reference.
+    For SIMD data-movement instructions (movdqa, vmovaps, etc.),
+    resolves to SIMD_LOAD or SIMD_STORE analogously.
     """
     if mnem in _MNEMONIC_MAP:
         vm_op = _MNEMONIC_MAP[mnem]
@@ -773,6 +964,10 @@ def _mnemonic_to_vm_op(mnem: str, disasm: str = "") -> str:
             if _accesses_memory(disasm, "write"):
                 return VMOperation.STORE
             return VMOperation.LOAD
+        # Context-dependent resolution for SIMD data-movement
+        if vm_op == VMOperation.SIMD_LOAD and disasm:
+            if _accesses_memory(disasm, "write"):
+                return VMOperation.SIMD_STORE
         return vm_op
     if mnem in _JCC_PREFIXES:
         return VMOperation.JCC
@@ -932,6 +1127,12 @@ def _estimate_width(instructions: List[TraceInstruction]) -> int:
     """Estimate operand width from register names in disassembly."""
     for ti in instructions:
         text = ti.disassembly.lower()
+        # Check for YMM (256-bit = 32 bytes)
+        if any(f"ymm{i}" in text for i in range(16)):
+            return 32
+        # Check for XMM (128-bit = 16 bytes)
+        if any(f"xmm{i}" in text for i in range(16)):
+            return 16
         if any(r in text for r in ("rax", "rbx", "rcx", "rdx", "rsi", "rdi",
                                      "rsp", "rbp", "r8", "r9")):
             return 8

@@ -266,3 +266,141 @@ class TestDataClasses:
         d = e.to_dict()
         assert d["opcode"] == "0x10"
         assert d["operation"] == "vm_xor"
+
+
+# ---------------------------------------------------------------------------
+# SIMD / vector operation classification
+# ---------------------------------------------------------------------------
+
+class TestSIMDClassification:
+    """Tests for SSE/AVX SIMD mnemonic classification."""
+
+    def test_pxor_handler(self):
+        insns = [
+            _ti(0x8000, "movdqa xmm0, [rsi]"),
+            _ti(0x8004, "pxor xmm0, xmm1"),
+            _ti(0x8008, "movdqa [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_XOR
+
+    def test_paddb_handler(self):
+        insns = [
+            _ti(0x8000, "movdqu xmm0, [rsi]"),
+            _ti(0x8004, "paddb xmm0, xmm1"),
+            _ti(0x8008, "movdqu [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_ADD
+
+    def test_pshufb_handler(self):
+        insns = [
+            _ti(0x8000, "movdqa xmm0, [rsi]"),
+            _ti(0x8004, "pshufb xmm0, xmm2"),
+            _ti(0x8008, "movdqa [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_SHUFFLE
+
+    def test_aesenc_handler(self):
+        """AES-NI instructions map to SIMD_AES — common in VM bytecode decryptors."""
+        insns = [
+            _ti(0x8000, "movdqu xmm0, [rsi]"),
+            _ti(0x8004, "aesenc xmm0, xmm1"),
+            _ti(0x8008, "aesenc xmm0, xmm2"),
+            _ti(0x800C, "aesenclast xmm0, xmm3"),
+            _ti(0x8010, "movdqu [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_AES
+
+    def test_avx_vpxor_handler(self):
+        """AVX VEX-encoded instructions should also classify as SIMD."""
+        insns = [
+            _ti(0x8000, "vmovdqu xmm0, [rsi]"),
+            _ti(0x8004, "vpxor xmm0, xmm0, xmm1"),
+            _ti(0x8008, "vmovdqu [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_XOR
+
+    def test_simd_load_only(self):
+        """Handler that only loads SIMD registers → SIMD_LOAD."""
+        insns = [
+            _ti(0x8000, "movdqa xmm0, [rsi]"),
+            _ti(0x8004, "movdqa xmm1, [rsi+16]"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation in (VMOperation.SIMD_LOAD, VMOperation.SIMD_STORE)
+
+    def test_simd_store_detected(self):
+        """movdqa with memory destination should resolve to SIMD_STORE."""
+        insns = [
+            _ti(0x8000, "movdqa [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation in (VMOperation.SIMD_STORE, VMOperation.SIMD_LOAD)
+
+    def test_simd_cmp_handler(self):
+        insns = [
+            _ti(0x8000, "movdqa xmm0, [rsi]"),
+            _ti(0x8004, "pcmpeqb xmm0, xmm1"),
+            _ti(0x8008, "movdqa [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_CMP
+
+    def test_simd_shift_handler(self):
+        insns = [
+            _ti(0x8000, "movdqa xmm0, [rsi]"),
+            _ti(0x8004, "pslld xmm0, 4"),
+            _ti(0x8008, "movdqa [rdi], xmm0"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operation == VMOperation.SIMD_SHIFT
+
+    def test_xmm_operand_width(self):
+        """XMM register usage should yield 16-byte operand width."""
+        insns = [
+            _ti(0x8000, "pxor xmm0, xmm1"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operand_width == 16
+
+    def test_ymm_operand_width(self):
+        """YMM register usage should yield 32-byte operand width."""
+        insns = [
+            _ti(0x8000, "vpxor ymm0, ymm1, ymm2"),
+        ]
+        s = _classify_handler(0x8000, insns)
+        assert s.operand_width == 32
+
+    def test_simd_constants_exist(self):
+        """Verify all SIMD VMOperation constants are defined."""
+        assert VMOperation.SIMD_ADD == "vm_simd_add"
+        assert VMOperation.SIMD_SUB == "vm_simd_sub"
+        assert VMOperation.SIMD_MUL == "vm_simd_mul"
+        assert VMOperation.SIMD_XOR == "vm_simd_xor"
+        assert VMOperation.SIMD_AND == "vm_simd_and"
+        assert VMOperation.SIMD_OR == "vm_simd_or"
+        assert VMOperation.SIMD_SHUFFLE == "vm_simd_shuffle"
+        assert VMOperation.SIMD_AES == "vm_simd_aes"
+        assert VMOperation.SIMD_LOAD == "vm_simd_load"
+        assert VMOperation.SIMD_STORE == "vm_simd_store"
+        assert VMOperation.SIMD_CMP == "vm_simd_cmp"
+        assert VMOperation.SIMD_SHIFT == "vm_simd_shift"
+        assert VMOperation.SIMD_UNKNOWN == "vm_simd_unknown"
+
+    def test_mixed_scalar_simd_dominant(self):
+        """When SIMD instructions dominate, the handler should classify as SIMD."""
+        insns = [
+            _ti(0x8000, "push rbx"),             # scalar infra
+            _ti(0x8002, "movdqa xmm0, [rsi]"),   # SIMD
+            _ti(0x8006, "pxor xmm0, xmm1"),      # SIMD
+            _ti(0x800A, "paddb xmm0, xmm2"),     # SIMD
+            _ti(0x800E, "movdqa [rdi], xmm0"),    # SIMD
+            _ti(0x8012, "pop rbx"),               # scalar infra
+        ]
+        s = _classify_handler(0x8000, insns)
+        # SIMD ops dominate, so the classification should be SIMD-flavoured
+        assert s.operation.startswith("vm_simd_")
