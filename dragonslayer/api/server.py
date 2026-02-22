@@ -161,6 +161,59 @@ class StatusResponse(BaseModel):
     supported_types: List[str]
 
 
+# Valid pipeline stage names for request validation.
+_VALID_PIPELINE_STAGES = {
+    "binary_parse", "pattern_analysis", "vm_discovery", "anti_evasion",
+    "classify", "static", "dynamic", "taint_analysis", "symbolic_execution",
+    "dispatcher_analysis", "devirtualize", "enrichment", "llm_analysis",
+    "reporting", "llm_summary",
+}
+
+
+class PipelineRequest(BaseModel):
+    """Request model for the configurable analysis pipeline.
+
+    Unlike :class:`AnalysisRequest` (which always runs the orchestrator's
+    built-in engine dispatch), this exposes the full
+    :class:`~dragonslayer.core.pipeline.AnalysisPipeline` with per-stage
+    control, stage ordering, and timeouts.
+    """
+
+    sample_data: str = Field(..., description="Base64-encoded binary data")
+    stages: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Ordered list of pipeline stage keys to execute.  "
+            "If omitted, runs the full default pipeline."
+        ),
+    )
+    llm_enabled: bool = Field(default=True, description="Enable LLM-assisted stages")
+    max_workers: int = Field(default=4, ge=1, le=32, description="Intra-stage thread count")
+    timeout: float = Field(default=600, gt=0, description="Per-stage timeout (seconds)")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+
+    @field_validator("sample_data")
+    @classmethod
+    def validate_base64(cls, v: str) -> str:
+        try:
+            base64.b64decode(v)
+        except (ValueError, TypeError):
+            raise ValueError("Invalid base64 encoding")
+        return v
+
+    @field_validator("stages")
+    @classmethod
+    def validate_stages(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is not None:
+            invalid = set(v) - _VALID_PIPELINE_STAGES
+            if invalid:
+                raise ValueError(
+                    f"Invalid pipeline stages: {sorted(invalid)}.  "
+                    f"Valid stages: {sorted(_VALID_PIPELINE_STAGES)}"
+                )
+        return v
+
+
 # ---------------------------------------------------------------------------
 # Lifespan (replaces deprecated @app.on_event)
 # ---------------------------------------------------------------------------
@@ -661,6 +714,7 @@ async def root() -> Dict[str, Any]:
             'analysis_types': '/analysis-types',
             'analyze': '/analyze',
             'upload_analyze': '/upload-analyze',
+            'pipeline': '/pipeline',
             'docs': '/docs',
             'redoc': '/redoc'
         }
@@ -913,6 +967,72 @@ async def upload_and_analyze(
         )
     finally:
         await file.close()
+
+
+# ---------------------------------------------------------------------------
+# Configurable pipeline endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/pipeline", tags=["Analysis"])
+async def run_pipeline(
+    request: Request,
+    pipeline_request: PipelineRequest,
+) -> Dict[str, Any]:
+    """Run the configurable analysis pipeline.
+
+    Unlike ``/analyze`` (which uses the orchestrator's fixed engine
+    dispatch), this endpoint exposes the full
+    :class:`~dragonslayer.core.pipeline.AnalysisPipeline` with
+    stage selection, ordering, per-stage timeouts, and worker count.
+
+    Args:
+        pipeline_request: Pipeline configuration and binary data.
+
+    Returns:
+        Serialised :class:`PipelineResultDict` with per-stage results.
+    """
+    if not await check_rate_limit(request):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Please try again later.",
+        )
+
+    api = server_state.api
+
+    try:
+        binary_data = base64.b64decode(pipeline_request.sample_data)
+
+        max_size = MAX_REQUEST_BODY_BYTES
+        if len(binary_data) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum size: {max_size / (1024*1024)}MB",
+            )
+
+        result = await api.run_pipeline_async(
+            binary_data,
+            stages=pipeline_request.stages,
+            llm_enabled=pipeline_request.llm_enabled,
+            max_workers=pipeline_request.max_workers,
+            timeout=pipeline_request.timeout,
+            metadata=pipeline_request.metadata,
+        )
+
+        async with _counter_lock:
+            server_state.analysis_count += 1
+
+        return result
+
+    except HTTPException:
+        raise
+    except VMDragonSlayerError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
+        logger.error("Pipeline analysis failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Pipeline analysis failed: {str(exc)}",
+        )
 
 
 # Entry point for direct execution

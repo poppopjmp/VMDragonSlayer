@@ -248,6 +248,10 @@ class TestAPIExceptionHandlers:
         }
         mock_api.analyze_binary_data.return_value = _result
         mock_api.analyze_binary_data_async = AsyncMock(return_value=_result)
+        mock_api.run_pipeline_async = AsyncMock(return_value={
+            "success": True, "stages": [], "shared_data": {},
+            "llm_insights": {}, "total_duration": 0.0, "errors": [],
+        })
         server_state.api = mock_api
         # Reset rate limiter
         server_state.rate_limiter.clear()
@@ -393,6 +397,10 @@ class TestRateLimiterCleanup:
         }
         mock_api.analyze_binary_data.return_value = _result
         mock_api.analyze_binary_data_async = AsyncMock(return_value=_result)
+        mock_api.run_pipeline_async = AsyncMock(return_value={
+            "success": True, "stages": [], "shared_data": {},
+            "llm_insights": {}, "total_duration": 0.0, "errors": [],
+        })
         server_state.api = mock_api
         server_state.rate_limiter.clear()
         self.server_state = server_state

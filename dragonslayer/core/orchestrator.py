@@ -1010,6 +1010,86 @@ class VMDragonSlayerAPI:
         )
         return result.to_dict()
 
+    def run_pipeline(
+        self,
+        binary_data: bytes,
+        *,
+        stages: List[str] | None = None,
+        llm_enabled: bool = True,
+        max_workers: int = 4,
+        timeout: float = 600,
+        metadata: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Run the configurable analysis pipeline.
+
+        Unlike :meth:`analyze_binary_data` which always runs the
+        orchestrator's built-in engine dispatch, this exposes the
+        full :class:`~dragonslayer.core.pipeline.AnalysisPipeline`
+        with per-stage control.
+
+        Args:
+            binary_data: Raw bytes of the sample to analyse.
+            stages: Ordered list of stage keys to execute.
+                Valid keys: ``pattern_analysis``, ``vm_discovery``,
+                ``anti_evasion``, ``classify``, ``static``, ``dynamic``,
+                ``taint_analysis``, ``symbolic_execution``,
+                ``dispatcher_analysis``, ``devirtualize``,
+                ``enrichment``, ``llm_analysis``, ``reporting``,
+                ``llm_summary``.  Defaults to the full pipeline.
+            llm_enabled: Whether to enable LLM-assisted stages.
+            max_workers: Thread count for intra-stage parallelism.
+            timeout: Per-stage timeout in seconds.
+            metadata: Optional file metadata.
+
+        Returns:
+            Serialised :class:`PipelineResultDict`.
+        """
+        from ..core.pipeline import AnalysisPipeline, PipelineConfig
+
+        config_kwargs: Dict[str, Any] = {
+            "llm_enabled": llm_enabled,
+            "max_workers": max_workers,
+            "timeout": timeout,
+        }
+        if stages is not None:
+            config_kwargs["stages"] = stages
+
+        pipeline = AnalysisPipeline(config=self._orchestrator._config)
+        pipeline_config = PipelineConfig(**config_kwargs)
+        result = pipeline.run(
+            binary_data,
+            pipeline_config=pipeline_config,
+            metadata=metadata or {},
+        )
+        return result.to_dict()
+
+    async def run_pipeline_async(
+        self,
+        binary_data: bytes,
+        *,
+        stages: List[str] | None = None,
+        llm_enabled: bool = True,
+        max_workers: int = 4,
+        timeout: float = 600,
+        metadata: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Async variant of :meth:`run_pipeline`.
+
+        Offloads pipeline execution to a thread to avoid blocking
+        the ASGI event loop.
+        """
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.run_pipeline,
+            binary_data,
+            stages=stages,
+            llm_enabled=llm_enabled,
+            max_workers=max_workers,
+            timeout=timeout,
+            metadata=metadata,
+        )
+
     @staticmethod
     def get_supported_analysis_types() -> List[str]:
         return Orchestrator.get_supported_analysis_types()

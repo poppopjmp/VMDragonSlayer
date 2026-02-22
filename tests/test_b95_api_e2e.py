@@ -107,6 +107,16 @@ def _make_mock_api() -> MagicMock:
     mock.analyze_binary_data.return_value = _result
     # Server endpoints now use the async variant
     mock.analyze_binary_data_async = AsyncMock(return_value=_result)
+    # Pipeline endpoint
+    _pipeline_result: Dict[str, Any] = {
+        "success": True,
+        "stages": [],
+        "shared_data": {},
+        "llm_insights": {},
+        "total_duration": 0.05,
+        "errors": [],
+    }
+    mock.run_pipeline_async = AsyncMock(return_value=_pipeline_result)
     mock.shutdown.return_value = None
     return mock
 
@@ -310,6 +320,82 @@ class TestUploadAnalyzeEndpoint:
         async with _client() as c:
             resp = await c.post("/upload-analyze")
         assert resp.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pipeline endpoint tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPipelineEndpoint:
+    """POST /pipeline — configurable analysis pipeline."""
+
+    @pytest.mark.anyio
+    async def test_pipeline_default_stages(self, mock_api):
+        """Full pipeline with default stage list."""
+        payload = {
+            "sample_data": base64.b64encode(b"\x4d\x5a\x90\x00").decode(),
+        }
+        async with _client() as c:
+            resp = await c.post("/pipeline", json=payload)
+        assert resp.status_code == 200
+        mock_api.run_pipeline_async.assert_called_once()
+        body = resp.json()
+        assert body["success"] is True
+
+    @pytest.mark.anyio
+    async def test_pipeline_custom_stages(self, mock_api):
+        """Subset of stages with custom timeout."""
+        payload = {
+            "sample_data": base64.b64encode(b"\x4d\x5a").decode(),
+            "stages": ["pattern_analysis", "static", "reporting"],
+            "timeout": 120,
+            "max_workers": 2,
+            "llm_enabled": False,
+        }
+        async with _client() as c:
+            resp = await c.post("/pipeline", json=payload)
+        assert resp.status_code == 200
+        call_kwargs = mock_api.run_pipeline_async.call_args
+        assert call_kwargs.kwargs["stages"] == [
+            "pattern_analysis", "static", "reporting",
+        ]
+        assert call_kwargs.kwargs["llm_enabled"] is False
+        assert call_kwargs.kwargs["max_workers"] == 2
+        assert call_kwargs.kwargs["timeout"] == 120
+
+    @pytest.mark.anyio
+    async def test_pipeline_invalid_stage_rejected(self, mock_api):
+        """Invalid stage name triggers 422."""
+        payload = {
+            "sample_data": base64.b64encode(b"\x00").decode(),
+            "stages": ["pattern_analysis", "not_a_real_stage"],
+        }
+        async with _client() as c:
+            resp = await c.post("/pipeline", json=payload)
+        assert resp.status_code == 422
+
+    @pytest.mark.anyio
+    async def test_pipeline_invalid_base64_rejected(self, mock_api):
+        payload = {"sample_data": "!!!not-base64!!!"}
+        async with _client() as c:
+            resp = await c.post("/pipeline", json=payload)
+        assert resp.status_code == 422
+
+    @pytest.mark.anyio
+    async def test_pipeline_metadata_forwarded(self, mock_api):
+        payload = {
+            "sample_data": base64.b64encode(b"\xDE\xAD").decode(),
+            "metadata": {"source": "unit-test", "tag": "phase2c"},
+        }
+        async with _client() as c:
+            resp = await c.post("/pipeline", json=payload)
+        assert resp.status_code == 200
+        call_kwargs = mock_api.run_pipeline_async.call_args
+        assert call_kwargs.kwargs["metadata"] == {
+            "source": "unit-test",
+            "tag": "phase2c",
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
