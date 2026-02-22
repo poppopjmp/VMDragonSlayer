@@ -227,9 +227,15 @@ class CVBytecodeDecoder:
             key = ((key >> n) | (key << (self._key_width - n))) & self._mask
         elif op == "not":
             key = (~key) & self._mask
+        elif op == "neg":
+            key = (-key) & self._mask
+        elif op == "mul":
+            key = (key * operand) & self._mask
         elif op == "bswap":
             if self._key_width == 32:
                 key = struct.unpack("<I", struct.pack(">I", key & 0xFFFFFFFF))[0]
+            elif self._key_width == 64:
+                key = struct.unpack("<Q", struct.pack(">Q", key & 0xFFFFFFFFFFFFFFFF))[0]
         else:
             logger.warning("Unknown CV transform op: %s", op)
 
@@ -413,6 +419,7 @@ def classify_cv_handler_entries(
     image_base: int = 0,
     *,
     max_insns: int = 32,
+    mode_64: bool = False,
 ) -> int:
     """Classify CV handler entries using the semantic heuristic.
 
@@ -432,6 +439,8 @@ def classify_cv_handler_entries(
         Base address used to compute file offsets from RVAs.
     max_insns : int
         Maximum number of instructions to disassemble per handler.
+    mode_64 : bool
+        If ``True`` use 64-bit disassembly mode; otherwise 32-bit.
 
     Returns
     -------
@@ -449,7 +458,8 @@ def classify_cv_handler_entries(
         )
         return 0
 
-    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    cs_mode = capstone.CS_MODE_64 if mode_64 else capstone.CS_MODE_32
+    md = capstone.Cs(capstone.CS_ARCH_X86, cs_mode)
     md.detail = False
 
     classified = 0
@@ -581,7 +591,7 @@ def devirtualize_cv(
             key_width=32,
         )
         result.decrypted_bytecode = decoder.decrypt_to_bytes(bytecode)
-    except Exception as exc:
+    except (struct.error, ValueError, IndexError, OverflowError) as exc:
         result.errors.append(f"CV bytecode decryption failed: {exc}")
         logger.warning("CV bytecode decryption failed: %s", exc)
 
@@ -595,7 +605,7 @@ def devirtualize_cv(
                 encoding="absolute",
                 image_base=image_base,
             )
-        except Exception as exc:
+        except (struct.error, ValueError, IndexError, OverflowError) as exc:
             result.errors.append(f"CV handler table reconstruction failed: {exc}")
             logger.warning("CV handler table reconstruction failed: %s", exc)
 

@@ -6,6 +6,7 @@ FastAPI-based REST API server for binary analysis operations.
 
 import asyncio
 import base64
+import contextvars
 import json as _json
 import logging
 import os as _os
@@ -19,6 +20,14 @@ from pathlib import Path
 from typing import AsyncIterator, Dict, Any, Optional, List
 from collections import defaultdict
 import tempfile
+
+#: Module-level version constant (single source of truth).
+_API_VERSION: str = "2025.10"
+
+#: Async-safe request-ID context variable.
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-",
+)
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -258,7 +267,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore
 app = FastAPI(
     title="VMDragonSlayer API",
     description="Advanced Virtual Machine Detection and Analysis Framework",
-    version="2025.10",
+    version=_API_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -328,29 +337,31 @@ async def request_id_middleware(request: Request, call_next) -> Response:
     # Store on request state so downstream handlers can access it
     request.state.request_id = req_id
 
-    # B70: Inject request_id into logging context for correlation
-    _rid_filter = _RequestIDFilter(req_id)
-    logging.getLogger().addFilter(_rid_filter)
+    # B70: Inject request_id into logging context for correlation.
+    # Uses contextvars so concurrent async requests don't interfere.
+    _token = _request_id_var.set(req_id)
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = req_id
         return response
     finally:
-        logging.getLogger().removeFilter(_rid_filter)
+        _request_id_var.reset(_token)
 
 
 class _RequestIDFilter(logging.Filter):
-    """Inject ``request_id`` attribute into every log record."""
+    """Inject ``request_id`` attribute into every log record.
 
-    __slots__ = ("_request_id",)
-
-    def __init__(self, request_id: str) -> None:
-        super().__init__()
-        self._request_id = request_id
+    Reads from the async-safe :data:`_request_id_var` context variable
+    so that concurrent requests never overwrite each other's IDs.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = self._request_id  # type: ignore[attr-defined]
+        record.request_id = _request_id_var.get("-")  # type: ignore[attr-defined]
         return True
+
+
+# Install the filter once at module load (safe for concurrent requests).
+logging.getLogger().addFilter(_RequestIDFilter())
 
 
 # --- Per-request timeout middleware ------------------------------------------
@@ -568,6 +579,8 @@ async def check_rate_limit(request: Request) -> bool:
     B57: Also evicts stale IPs that have no recent requests to prevent
     unbounded memory growth in ``server_state.rate_limiter``.
     """
+    if request.client is None:
+        return True  # Allow requests from ASGI proxies with no client info
     client_ip = request.client.host
     now = time.time()
 
@@ -705,7 +718,7 @@ async def root() -> Dict[str, Any]:
     """Root endpoint with API information."""
     return {
         'name': 'VMDragonSlayer API',
-        'version': '2025.10',
+        'version': _API_VERSION,
         'description': 'Advanced Virtual Machine Detection and Analysis Framework',
         'endpoints': {
             'health': '/health',
@@ -756,8 +769,8 @@ async def health_check() -> HealthResponse:
 
     return HealthResponse(
         status=overall,
-        timestamp=datetime.now().isoformat(),
-        version='2025.10',
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        version=_API_VERSION,
         components=components,
     )
 
@@ -774,7 +787,7 @@ async def get_status() -> StatusResponse:
     
     return StatusResponse(
         status='operational',
-        version='2025.10',
+        version=_API_VERSION,
         uptime_seconds=uptime,
         total_requests=server_state.total_requests,
         active_requests=server_state.active_requests,
@@ -872,6 +885,12 @@ async def analyze_binary(
             )
 
         # Perform analysis (async to avoid blocking the ASGI event loop)
+        if api is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Analysis API not initialised. Server is starting up.",
+            )
+
         result = await api.analyze_binary_data_async(
             binary_data,
             analysis_type=analysis_request.analysis_type,
@@ -1013,6 +1032,12 @@ async def run_pipeline(
                 detail=f"File too large. Maximum size: {max_size / (1024*1024)}MB",
             )
 
+        if api is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Analysis API not initialised. Server is starting up.",
+            )
+
         result = await api.run_pipeline_async(
             binary_data,
             stages=pipeline_request.stages,
@@ -1066,7 +1091,9 @@ async def submit_feedback(
         )
     try:
         from dragonslayer.ml.active_learning import FeedbackStore
-        store = FeedbackStore()  # in-memory only for now
+        if not hasattr(server_state, '_feedback_store'):
+            server_state._feedback_store = FeedbackStore()  # type: ignore[attr-defined]
+        store: FeedbackStore = server_state._feedback_store  # type: ignore[attr-defined]
         entry = store.ingest(
             sample_id=body.sample_id,
             corrected_label=body.corrected_label,
@@ -1075,7 +1102,7 @@ async def submit_feedback(
             notes=body.notes,
         )
         return {"status": "ok", "entry": entry.to_dict()}
-    except Exception as exc:
+    except (ImportError, ValueError, TypeError, KeyError) as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
@@ -1105,7 +1132,7 @@ async def get_uncertain_samples(body: UncertainRequest) -> Dict[str, Any]:
             "count": len(samples),
             "samples": [s.to_dict() for s in samples],
         }
-    except Exception as exc:
+    except (ImportError, ValueError, TypeError, KeyError) as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),

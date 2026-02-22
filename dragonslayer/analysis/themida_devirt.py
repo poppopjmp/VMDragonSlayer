@@ -462,6 +462,7 @@ def classify_handler_entries(
     image_base: int = 0,
     *,
     max_insns: int = 32,
+    mode_64: bool = False,
 ) -> int:
     """Classify Themida handler entries using the semantic heuristic.
 
@@ -481,6 +482,8 @@ def classify_handler_entries(
         Base address used to compute file offsets from RVAs.
     max_insns : int
         Maximum number of instructions to disassemble per handler.
+    mode_64 : bool
+        If ``True`` use 64-bit disassembly mode; otherwise 32-bit.
 
     Returns
     -------
@@ -498,7 +501,8 @@ def classify_handler_entries(
         )
         return 0
 
-    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    cs_mode = capstone.CS_MODE_64 if mode_64 else capstone.CS_MODE_32
+    md = capstone.Cs(capstone.CS_ARCH_X86, cs_mode)
     md.detail = False
 
     classified = 0
@@ -632,7 +636,7 @@ def devirtualize_themida(
             opcode_width=profile.opcode_width,
         )
         result.decrypted_bytecode = decoder.decrypt_to_bytes(bytecode)
-    except Exception as exc:
+    except (struct.error, ValueError, IndexError, OverflowError) as exc:
         result.errors.append(f"Bytecode decryption failed: {exc}")
         logger.warning("Themida bytecode decryption failed: %s", exc)
 
@@ -646,7 +650,7 @@ def devirtualize_themida(
                 encoding="base_relative",
                 image_base=image_base,
             )
-        except Exception as exc:
+        except (struct.error, ValueError, IndexError, OverflowError) as exc:
             result.errors.append(f"Opcode table reconstruction failed: {exc}")
             logger.warning("Themida opcode table reconstruction failed: %s", exc)
 

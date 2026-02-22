@@ -24,14 +24,28 @@ class TestPluginDependencyAttributes:
     """Plugin ABC exposes depends_on, provides, and version."""
 
     def test_plugin_has_depends_on(self) -> None:
-        from dragonslayer.plugins import Plugin
-        assert hasattr(Plugin, "depends_on")
-        assert isinstance(Plugin.depends_on, set)
+        from dragonslayer.plugins import Plugin, Stage, PluginResult
+
+        class _Dep(Plugin):
+            name = "dep_test"
+            stage = Stage.STATIC
+            def execute(self, fp, fd, ctx):
+                return PluginResult(plugin=self.name, success=True)
+
+        assert hasattr(_Dep, "depends_on")
+        assert isinstance(_Dep.depends_on, set)
 
     def test_plugin_has_provides(self) -> None:
-        from dragonslayer.plugins import Plugin
-        assert hasattr(Plugin, "provides")
-        assert isinstance(Plugin.provides, set)
+        from dragonslayer.plugins import Plugin, Stage, PluginResult
+
+        class _Prov(Plugin):
+            name = "prov_test"
+            stage = Stage.STATIC
+            def execute(self, fp, fd, ctx):
+                return PluginResult(plugin=self.name, success=True)
+
+        assert hasattr(_Prov, "provides")
+        assert isinstance(_Prov.provides, set)
 
     def test_plugin_has_version(self) -> None:
         from dragonslayer.plugins import Plugin

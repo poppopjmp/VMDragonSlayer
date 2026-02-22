@@ -59,19 +59,24 @@ from dragonslayer.api.server import _RequestIDFilter
 
 
 class TestRequestIDFilter:
-    """``_RequestIDFilter`` sets request_id on log records."""
+    """``_RequestIDFilter`` reads request_id from contextvar."""
 
     def test_filter_sets_attribute(self):
-        filt = _RequestIDFilter("req-abc")
-        record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="t.py",
-            lineno=1, msg="hello", args=(), exc_info=None,
-        )
-        assert filt.filter(record) is True
-        assert record.request_id == "req-abc"  # type: ignore[attr-defined]
+        from dragonslayer.api.server import _request_id_var
+        token = _request_id_var.set("req-abc")
+        try:
+            filt = _RequestIDFilter()
+            record = logging.LogRecord(
+                name="test", level=logging.INFO, pathname="t.py",
+                lineno=1, msg="hello", args=(), exc_info=None,
+            )
+            assert filt.filter(record) is True
+            assert record.request_id == "req-abc"  # type: ignore[attr-defined]
+        finally:
+            _request_id_var.reset(token)
 
     def test_filter_always_returns_true(self):
-        filt = _RequestIDFilter("x")
+        filt = _RequestIDFilter()
         record = logging.LogRecord(
             name="test", level=logging.DEBUG, pathname="t.py",
             lineno=1, msg="", args=(), exc_info=None,

@@ -355,10 +355,24 @@ def get_config(environment: Optional[str] = None) -> Config:
     """
     Get global configuration instance.
 
+    Warns if *environment* differs from the already-created singleton.
     """
     global _config_instance
 
     if _config_instance is not None:
+        if (
+            environment is not None
+            and environment != _config_instance.environment
+        ):
+            import warnings
+            warnings.warn(
+                f"get_config(environment={environment!r}) called but "
+                f"singleton already created with "
+                f"environment={_config_instance.environment!r}. "
+                f"Returning existing instance.  Call reset_config() first "
+                f"to change environments.",
+                stacklevel=2,
+            )
         return _config_instance
 
     with _config_lock:

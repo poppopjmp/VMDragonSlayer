@@ -759,11 +759,7 @@ class AnalysisPipeline:
 
             matches = ctx.shared_data.get("pattern_matches", [])
             if not matches:
-                return StageResult(
-                    stage="classify",
-                    success=True,
-                    data={"skipped": True, "reason": "No pattern matches to classify"},
-                )
+                return {"skipped": True, "reason": "No pattern matches to classify"}
 
             classifier = PatternClassifier(use_llm=False)
             report = classifier.classify_matches(matches)
@@ -848,11 +844,7 @@ class AnalysisPipeline:
                 trace_source = "binary"
 
             if not instructions:
-                return StageResult(
-                    stage="taint_analysis",
-                    success=True,
-                    data={"skipped": True, "reason": "No instructions lifted from binary"},
-                )
+                return {"skipped": True, "reason": "No instructions lifted from binary"}
 
             vm_detected = vm_info.get("vm_detected", False)
 

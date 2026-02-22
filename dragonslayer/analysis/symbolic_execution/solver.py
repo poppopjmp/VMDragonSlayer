@@ -143,12 +143,12 @@ class Z3Solver:
         """Restore constraints to the last :meth:`push` checkpoint.
 
         Raises:
-            IndexError: Implicitly, if called without a matching :meth:`push`
-                (z3 solver will raise).
+            IndexError: If called without a matching :meth:`push`.
         """
-        if self._constraint_stack:
-            idx = self._constraint_stack.pop()
-            self._constraints = self._constraints[:idx]
+        if not self._constraint_stack:
+            raise IndexError("pop() called without a matching push()")
+        idx = self._constraint_stack.pop()
+        self._constraints = self._constraints[:idx]
         self._solver.pop()
 
     # -- B59: Named constraints & unsat core --------------------------------

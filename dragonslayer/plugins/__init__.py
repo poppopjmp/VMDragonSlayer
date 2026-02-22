@@ -175,9 +175,18 @@ class Plugin(ABC):
     version: str = "0.0.0"
 
     #: Names of plugins this plugin depends on (intra-stage ordering).
-    depends_on: set[str] = set()
+    depends_on: set[str]
     #: ``shared_data`` keys this plugin provides to downstream plugins.
-    provides: set[str] = set()
+    provides: set[str]
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Ensure each subclass gets its own copy of mutable defaults
+        # to avoid the classic shared-mutable-class-attribute bug.
+        if "depends_on" not in cls.__dict__:
+            cls.depends_on = set()
+        if "provides" not in cls.__dict__:
+            cls.provides = set()
 
     @abstractmethod
     def execute(

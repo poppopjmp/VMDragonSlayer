@@ -445,8 +445,6 @@ class SymbolicExecutor:
                     "Symbolic executor used %d Triton seed constraints",
                     len(self._seed_constraints),
                 )
-            if _m:
-                _m.stop_phase("exploration", item_count=paths_explored)
 
             # Step 7: Detect opaque predicates — now with path constraints
             # collected during exploration.
