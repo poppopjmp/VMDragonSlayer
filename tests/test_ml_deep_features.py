@@ -4,7 +4,7 @@ Tests for B56 — ML Deep Features + Handler Body Signatures.
 Covers:
   1. Trigram feature extraction
   2. Opcode histogram feature extraction
-  3. Extended feature vector (130 features)
+  3. Extended feature vector (146 features)
   4. Instruction-sequence signature matching
   5. PatternClassifier with instruction-sequence pass
 """
@@ -109,15 +109,15 @@ class TestOpcodeHistogram:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 3. Extended features — 130 dimensions
+# 3. Extended features — 146 dimensions
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestExtendedFeatures:
     """Extended feature vector includes n-gram + histogram features."""
 
     def test_feature_count(self):
-        # 15 base + 25 bigram + 32 reg_effects + 6 operand + 20 trigram + 32 histogram
-        assert len(EXTENDED_FEATURE_NAMES) == 17 + 25 + 32 + 6 + len(VMPROTECT_TRIGRAMS) + len(OPCODE_VOCAB)
+        # 17 base + 25 bigram + 32 reg_effects + 6 operand + 20 trigram + 32 histogram + 7 cfg + 7 taint
+        assert len(EXTENDED_FEATURE_NAMES) == 17 + 25 + 32 + 6 + len(VMPROTECT_TRIGRAMS) + len(OPCODE_VOCAB) + 7 + 7
 
     def test_extract_extended_returns_correct_length(self):
         handler = {

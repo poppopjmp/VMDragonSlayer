@@ -469,6 +469,114 @@ OPCODE_HIST_NAMES: List[str] = [
     f"freq_{op}" for op in OPCODE_VOCAB
 ]
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CFG-derived features
+# ═══════════════════════════════════════════════════════════════════════════
+
+CFG_FEATURE_NAMES: List[str] = [
+    "cfg_edge_count",
+    "cfg_edge_density",       # edge_count / block_count
+    "cfg_loop_count",
+    "cfg_max_loop_depth",
+    "cfg_has_back_edge",
+    "cfg_exit_block_count",
+    "cfg_cyclomatic_complexity",  # edges - nodes + 2
+]
+
+
+def extract_cfg_features(handler: Dict[str, Any]) -> List[float]:
+    """Extract CFG-derived features from handler data.
+
+    The handler dict may contain ``cfg`` (a dict with ``edge_count``,
+    ``loop_headers``, ``back_edges``, ``loop_tree_depth``, ``exit_blocks``)
+    populated by :mod:`dragonslayer.analysis.bytecode_cfg`.
+    """
+    cfg = handler.get("cfg", {})
+    if not cfg:
+        # Fallback: use scalar block_count if available
+        bc = float(handler.get("block_count", 1))
+        return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, max(0.0, 0. - bc + 2.0)]
+
+    edge_count = float(cfg.get("edge_count", 0))
+    block_count = float(cfg.get("block_count", handler.get("block_count", 1)))
+    edge_density = edge_count / max(block_count, 1.0)
+
+    loop_headers = cfg.get("loop_headers", [])
+    loop_count = float(len(loop_headers))
+    max_loop_depth = float(cfg.get("loop_tree_depth", cfg.get("max_loop_depth", 0)))
+
+    back_edges = cfg.get("back_edges", [])
+    has_back_edge = 1.0 if back_edges else 0.0
+
+    exit_blocks = cfg.get("exit_blocks", [])
+    exit_block_count = float(len(exit_blocks))
+
+    # Cyclomatic complexity: M = E - N + 2P (P=1 for single component)
+    cyclomatic = max(0.0, edge_count - block_count + 2.0)
+
+    return [
+        edge_count,
+        edge_density,
+        loop_count,
+        max_loop_depth,
+        has_back_edge,
+        exit_block_count,
+        cyclomatic,
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Taint-derived features
+# ═══════════════════════════════════════════════════════════════════════════
+
+TAINT_FEATURE_NAMES: List[str] = [
+    "taint_def_count",
+    "taint_use_count",
+    "taint_kill_count",
+    "taint_net_spread",      # |taint_out| - |taint_in|
+    "taint_memory_def_count",
+    "taint_memory_use_count",
+    "taint_transfer_fan_out",
+]
+
+
+def extract_taint_features(handler: Dict[str, Any]) -> List[float]:
+    """Extract taint-analysis features from handler data.
+
+    The handler dict may contain ``taint`` (a dict from
+    :class:`HandlerTaintSummary.to_dict()`).
+    """
+    taint = handler.get("taint", {})
+    if not taint:
+        return [0.0] * len(TAINT_FEATURE_NAMES)
+
+    defs = taint.get("defs", [])
+    uses = taint.get("uses", [])
+    kill = taint.get("kill", [])
+    taint_in = taint.get("taint_in", [])
+    taint_out = taint.get("taint_out", [])
+    memory_defs = taint.get("memory_defs", [])
+    memory_uses = taint.get("memory_uses", [])
+    transfer = taint.get("transfer", [])
+
+    net_spread = float(len(taint_out)) - float(len(taint_in))
+
+    return [
+        float(len(defs)),
+        float(len(uses)),
+        float(len(kill)),
+        net_spread,
+        float(len(memory_defs)),
+        float(len(memory_uses)),
+        float(len(transfer)),
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Combined extended feature names (all groups)
+# ═══════════════════════════════════════════════════════════════════════════
+
 EXTENDED_FEATURE_NAMES: List[str] = (
     list(HANDLER_FEATURE_NAMES)
     + BIGRAM_FEATURE_NAMES
@@ -476,15 +584,18 @@ EXTENDED_FEATURE_NAMES: List[str] = (
     + OPERAND_PATTERN_NAMES
     + TRIGRAM_FEATURE_NAMES
     + OPCODE_HIST_NAMES
+    + CFG_FEATURE_NAMES
+    + TAINT_FEATURE_NAMES
 )
 
 
 def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
     """Extract a rich feature vector for ML training.
 
-    Combines the base 15 handler features with mnemonic bigrams (25),
-    register effects (32), operand patterns (6), trigrams (20), and
-    opcode histogram (32) for a total of **130 features** (B56).
+    Combines the base 17 handler features with mnemonic bigrams (25),
+    register effects (32), operand patterns (6), trigrams (20),
+    opcode histogram (32), CFG features (7), and taint features (7)
+    for a total of **146 features**.
     """
     base = extract_handler_features(handler)
 
@@ -501,13 +612,27 @@ def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
     op_vals = extract_operand_pattern_features(handler)
     trigram_vals = extract_trigram_features(mnemonics)
     histogram_vals = extract_opcode_histogram(mnemonics)
+    cfg_vals = extract_cfg_features(handler)
+    taint_vals = extract_taint_features(handler)
 
     all_values = (
         base.values + bigram_vals + reg_vals + op_vals
-        + trigram_vals + histogram_vals
+        + trigram_vals + histogram_vals + cfg_vals + taint_vals
     )
+
+    all_names = (
+        list(HANDLER_FEATURE_NAMES)
+        + BIGRAM_FEATURE_NAMES
+        + REGISTER_FEATURE_NAMES
+        + OPERAND_PATTERN_NAMES
+        + TRIGRAM_FEATURE_NAMES
+        + OPCODE_HIST_NAMES
+        + CFG_FEATURE_NAMES
+        + TAINT_FEATURE_NAMES
+    )
+
     return FeatureVector(
         values=all_values,
-        feature_names=list(EXTENDED_FEATURE_NAMES),
+        feature_names=all_names,
         metadata={"source": "handler_extended"},
     )
