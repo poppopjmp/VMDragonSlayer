@@ -216,8 +216,11 @@ def collect_trace(
         elif resolved == TraceBackend.FILE:
             # binary_data is treated as trace text
             trace = parse_trace_text(binary_data.decode("utf-8", errors="replace"))
+        elif resolved in (
+            TraceBackend.TRITON, TraceBackend.ANGR, TraceBackend.QILING,
+        ):
+            trace = _collect_via_plugin(binary_data, entry, config, resolved)
         else:
-            # External backend — not yet directly integrated, create stub trace
             trace = _collect_external_stub(binary_data, entry, config, resolved)
 
         elapsed = time.monotonic() - t0
@@ -270,10 +273,10 @@ def _collect_external_stub(
     config: TraceConfig,
     backend: TraceBackend,
 ) -> ExecutionTrace:
-    """Placeholder for external backends (Triton, angr, Qiling).
+    """Placeholder for unknown/future backends.
 
-    When these tools are integrated, they will produce ``shared_data``
-    dicts that :func:`from_shared_data` converts to :class:`ExecutionTrace`.
+    Known backends (Triton, angr, Qiling) are routed through
+    :func:`_collect_via_plugin` instead.
     """
     logger.warning(
         "External backend %r not yet directly integrated — "
@@ -284,6 +287,78 @@ def _collect_external_stub(
         source=backend.value,
         metadata={"entry": entry, "arch": config.arch, "stub": True},
     )
+
+
+def _collect_via_plugin(
+    binary_data: bytes,
+    entry: int,
+    config: TraceConfig,
+    backend: TraceBackend,
+) -> ExecutionTrace:
+    """Collect a trace by invoking the corresponding dynamic plugin.
+
+    Instead of returning a stub, this function instantiates the real
+    ``TritonAnalyzer`` / ``QilingAnalyzer`` / ``AngrExplorer`` plugin,
+    executes it with a temporary :class:`PluginContext`, and converts
+    the deposited ``shared_data`` to an :class:`ExecutionTrace`.
+
+    Falls back to :func:`_collect_external_stub` when the plugin is
+    unavailable (dependency not installed).
+    """
+    from dragonslayer.plugins import get_all_plugins, PluginContext, Stage
+
+    # Map backend → plugin name
+    _backend_name = {
+        TraceBackend.TRITON: "triton",
+        TraceBackend.ANGR: "angr",
+        TraceBackend.QILING: "qiling",
+    }
+    target_name = _backend_name.get(backend)
+
+    # Find the plugin by name and check availability
+    plugin = None
+    for p in get_all_plugins(stage=Stage.DYNAMIC, available_only=True):
+        if p.name == target_name:
+            plugin = p
+            break
+
+    if plugin is None:
+        logger.warning(
+            "%s plugin not available (dependency not installed) — "
+            "returning stub trace",
+            backend.value,
+        )
+        return _collect_external_stub(binary_data, entry, config, backend)
+
+    # Build a lightweight plugin context
+    ctx = PluginContext(
+        binary_data=binary_data,
+        shared_data={
+            "vm_discovery": {"dispatcher_addresses": [entry] if entry else []},
+        },
+    )
+
+    # Execute the plugin
+    pr = plugin.safe_execute("", binary_data, ctx)
+    if not pr.success:
+        logger.warning(
+            "%s plugin execution failed: %s — returning stub trace",
+            backend.value, pr.error,
+        )
+        return _collect_external_stub(binary_data, entry, config, backend)
+
+    # Convert deposited shared_data → ExecutionTrace
+    plugin_data = ctx.shared_data.get(target_name, {})
+    if not plugin_data:
+        return _collect_external_stub(binary_data, entry, config, backend)
+
+    from dragonslayer.analysis.trace_ingestion import from_shared_data
+    trace = from_shared_data(ctx.shared_data)
+    logger.info(
+        "Collected %d instructions via %s plugin",
+        len(trace.instructions) if trace else 0, backend.value,
+    )
+    return trace
 
 
 # ═══════════════════════════════════════════════════════════════════════════

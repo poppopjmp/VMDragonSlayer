@@ -656,7 +656,7 @@ class AnalysisPipeline:
         ``ctx`` is passed to every stage, so plugins can read data deposited
         by previous stages via ``ctx.shared_data``.
         """
-        from ..plugins import get_all_plugins
+        from ..plugins import Stage, get_all_plugins
 
         t0 = time.monotonic()
         try:
@@ -668,6 +668,21 @@ class AnalysisPipeline:
                     data={"plugins_run": 0, "note": f"No plugins available for {label}"},
                     duration=time.monotonic() - t0,
                 )
+
+            # Apply anti-evasion runtime hooks so dynamic plugins
+            # (Qiling, Triton, angr) can neutralise anti-debug tricks.
+            if stage == Stage.DYNAMIC:
+                hook_set = ctx.shared_data.get("runtime_hook_set")
+                if hook_set is not None:
+                    ctx.shared_data.setdefault("_active_hooks", {
+                        "hook_count": len(hook_set.hooks),
+                        "hook_names": [h.name for h in hook_set.hooks],
+                    })
+                    logger.info(
+                        "Dynamic stage: %d anti-evasion hooks available "
+                        "for plugins",
+                        len(hook_set.hooks),
+                    )
 
             plugin_results: Dict[str, Any] = {}
             successes = 0
@@ -833,6 +848,11 @@ class AnalysisPipeline:
         and its :meth:`to_lifted_instructions` is used — this preserves
         concrete register snapshots and Triton taint flags.
 
+        When the **Triton** plugin has produced ``taint_flow`` data, the
+        :class:`DTTExecutor` is used so that Triton's per-instruction
+        taint flags seed the tracker — giving a more accurate analysis
+        that fuses static and dynamic taint results.
+
         Falls back to raw-binary lifting when no dynamic data is present.
 
         When a VM protector is detected, uses :class:`VMTaintTracker` which
@@ -843,6 +863,7 @@ class AnalysisPipeline:
         try:
             from ..analysis.taint_tracking.analyzer import TaintAnalyzer
             from ..analysis.taint_tracking.vm_taint_tracker import VMTaintTracker
+            from ..analysis.taint_tracking.dtt_executor import DTTExecutor
             from ..analysis.symbolic_execution.lifter import InstructionLifter
             from ..analysis.trace_ingestion import from_shared_data
 
@@ -896,6 +917,37 @@ class AnalysisPipeline:
 
             vm_detected = vm_info.get("vm_detected", False)
 
+            # ----------------------------------------------------------
+            # When Triton provided taint_flow, fuse it into the analysis
+            # via DTTExecutor so that per-instruction taint flags from
+            # the Triton engine seed our tracker.
+            # ----------------------------------------------------------
+            triton_data = ctx.shared_data.get("triton", {})
+            triton_taint = (
+                triton_data.get("taint_flow")
+                if isinstance(triton_data, dict) else None
+            )
+
+            dtt_result = None
+            if triton_taint and instructions:
+                try:
+                    dtt = DTTExecutor()
+                    dtt_result = dtt.execute(
+                        instructions,
+                        triton_taint_flow=triton_taint,
+                    )
+                    logger.info(
+                        "DTTExecutor: %d snapshots from Triton taint flow "
+                        "(%d seeded regs)",
+                        dtt_result.get("snapshots_total", 0),
+                        len(dtt_result.get("triton_seeded_registers", [])),
+                    )
+                except _STAGE_ERRORS:
+                    logger.debug(
+                        "DTTExecutor failed, falling back to standard taint",
+                        exc_info=True,
+                    )
+
             if vm_detected:
                 # Use VM-aware tracker with virtual register mapping
                 vm_type = vm_info.get("vm_type", "").lower()
@@ -923,6 +975,14 @@ class AnalysisPipeline:
                     shared_data=ctx.shared_data,
                 )
                 ctx.shared_data["taint_results"] = result
+
+            # Merge DTTExecutor's Triton-seeded snapshots into the taint
+            # result so downstream stages see the fused analysis.
+            if dtt_result is not None and isinstance(result, dict):
+                result["dtt_snapshots"] = dtt_result.get("snapshots", [])
+                result["dtt_triton_seeded"] = dtt_result.get(
+                    "triton_seeded_registers", [],
+                )
 
             # Annotate result with trace provenance.
             if isinstance(result, dict):
@@ -1026,7 +1086,16 @@ class AnalysisPipeline:
                         exc_info=True,
                     )
 
-            result = executor.analyze(code_to_analyze, entry_point=entry)
+            # Collect Triton path constraints to seed the Z3 solver.
+            seed_constraints = ctx.shared_data.get(
+                "_triton_path_constraints", [],
+            )
+
+            result = executor.analyze(
+                code_to_analyze,
+                entry_point=entry,
+                seed_constraints=seed_constraints or None,
+            )
 
             result_data = result.to_dict() if hasattr(result, "to_dict") else {
                 "handlers": [

@@ -234,6 +234,27 @@ class TritonAnalyzer(Plugin):
         except (ValueError, TypeError, AttributeError, RuntimeError):
             logger.debug("Triton memory callbacks not available")
 
+        # ---- Anti-evasion runtime hooks ------------------------------------
+        # If the anti-evasion stage produced a HookSet, install the hooks
+        # into the Triton context so RDTSC/CPUID tricks are neutralised.
+        _hook_install_result = None
+        _runtime_hook_set = ctx.shared_data.get("runtime_hook_set")
+        if _runtime_hook_set is not None:
+            try:
+                from dragonslayer.analysis.anti_evasion.runtime_hooks import (
+                    apply_hooks_to_triton,
+                )
+                _hook_install_result = apply_hooks_to_triton(
+                    tc, _runtime_hook_set, is_64=is_64,
+                )
+                logger.info(
+                    "Triton anti-evasion hooks: %d installed, %d skipped",
+                    _hook_install_result.success_count,
+                    len(_hook_install_result.skipped),
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("Anti-evasion hook installation failed", exc_info=True)
+
         # ---- Symbolic execution (limited to prevent explosion) -------------
         MAX_INSNS = 5_000
         insn_count = 0
@@ -408,6 +429,11 @@ class TritonAnalyzer(Plugin):
             "instruction_trace": instruction_trace,
             "memory_accesses": mem_accesses,
             "confidence": round(confidence, 4),
+            "anti_evasion_hooks": (
+                _hook_install_result.to_dict()
+                if _hook_install_result is not None
+                else None
+            ),
         }
 
         # Publish enriched data to shared context for downstream stages

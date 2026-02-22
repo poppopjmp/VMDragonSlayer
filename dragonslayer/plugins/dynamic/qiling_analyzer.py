@@ -262,6 +262,23 @@ class QilingAnalyzer(Plugin):
         except (ValueError, TypeError, AttributeError, RuntimeError):
             logger.debug("Qiling memory hooks not fully available")
 
+        # ---- Anti-evasion runtime hooks ------------------------------------
+        _hook_install_result = None
+        _runtime_hook_set = ctx.shared_data.get("runtime_hook_set")
+        if _runtime_hook_set is not None:
+            try:
+                from dragonslayer.analysis.anti_evasion.runtime_hooks import (
+                    apply_hooks_to_qiling,
+                )
+                _hook_install_result = apply_hooks_to_qiling(ql, _runtime_hook_set)
+                logger.info(
+                    "Qiling anti-evasion hooks: %d installed, %d skipped",
+                    _hook_install_result.success_count,
+                    len(_hook_install_result.skipped),
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("Anti-evasion hook installation failed", exc_info=True)
+
         try:
             ql.run(timeout=timeout * 1_000_000)  # microseconds
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
@@ -277,4 +294,9 @@ class QilingAnalyzer(Plugin):
             "instruction_trace": instruction_trace,
             "memory_accesses": mem_accesses,
             "confidence": round(confidence, 4),
+            "anti_evasion_hooks": (
+                _hook_install_result.to_dict()
+                if _hook_install_result is not None
+                else None
+            ),
         }

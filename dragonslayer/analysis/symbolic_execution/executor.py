@@ -344,13 +344,23 @@ class SymbolicExecutor:
         self,
         code: bytes,
         entry_point: int = 0,
+        seed_constraints: Optional[List[Any]] = None,
     ) -> ExecutionResult:
         """
         Analyse *code* starting from *entry_point*.
 
         Lifts instructions, identifies basic blocks, detects the dispatcher
         pattern, classifies handlers, and checks for opaque predicates.
+
+        Parameters
+        ----------
+        seed_constraints : list | None
+            Optional z3 expressions to inject into the initial symbolic
+            state before path exploration.  When the Triton plugin has
+            collected path predicates, forwarding them here lets the
+            Z3 solver prune infeasible paths earlier.
         """
+        self._seed_constraints = seed_constraints or []
         try:
             _m = self._metrics  # alias for brevity
 
@@ -415,6 +425,15 @@ class SymbolicExecutor:
             paths_explored, total_insns, snapshots = self._explore_paths(
                 insn_map, entry_point,
             )
+            if _m:
+                _m.stop_phase("exploration", item_count=paths_explored)
+
+            # Note: seed_constraints count is informational — logged below.
+            if self._seed_constraints:
+                logger.info(
+                    "Symbolic executor used %d Triton seed constraints",
+                    len(self._seed_constraints),
+                )
             if _m:
                 _m.stop_phase("exploration", item_count=paths_explored)
 
@@ -1456,6 +1475,14 @@ class SymbolicExecutor:
         )
         initial_state._seq = self._state_seq
         self._state_seq += 1
+
+        # Inject Triton seed constraints into the initial state so the
+        # Z3 solver can prune infeasible paths from the start.
+        for sc in getattr(self, "_seed_constraints", []):
+            try:
+                initial_state.add_constraint(sc)
+            except (ValueError, TypeError, AttributeError):
+                pass  # non-z3 expressions are silently skipped
 
         # B54: Priority-based worklist (heapq — min-heap on state.priority)
         worklist: List[SymbolicState] = [initial_state]
