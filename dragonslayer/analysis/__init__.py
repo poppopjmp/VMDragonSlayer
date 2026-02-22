@@ -44,12 +44,12 @@ __all__ = [
     "ThemidaVariant", "ThemidaVMProfile", "ThemidaBytecodeDecoder",
     "ThemidaOpcodeTable", "ThemidaDevirtResult",
     "identify_themida_variant", "reconstruct_opcode_table",
-    "devirtualize_themida",
+    "classify_handler_entries", "devirtualize_themida",
     # cv_devirt (B104)
     "CVVersion", "CVVMProfile", "CVBytecodeDecoder",
     "CVOpcodeTable", "CVDevirtResult",
     "identify_cv_version", "reconstruct_cv_handler_table",
-    "devirtualize_cv",
+    "classify_cv_handler_entries", "devirtualize_cv",
     # trace_collector (B106)
     "TraceBackend", "TraceConfig", "CollectionResult",
     "collect_trace", "collect_trace_from_plugin", "collect_trace_from_file",
@@ -210,14 +210,14 @@ _try_import("themida_devirt", [
     "ThemidaVariant", "ThemidaVMProfile", "ThemidaBytecodeDecoder",
     "ThemidaOpcodeTable", "ThemidaDevirtResult",
     "identify_themida_variant", "reconstruct_opcode_table",
-    "devirtualize_themida",
+    "classify_handler_entries", "devirtualize_themida",
 ])
 
 _try_import("cv_devirt", [
     "CVVersion", "CVVMProfile", "CVBytecodeDecoder",
     "CVOpcodeTable", "CVDevirtResult",
     "identify_cv_version", "reconstruct_cv_handler_table",
-    "devirtualize_cv",
+    "classify_cv_handler_entries", "devirtualize_cv",
 ])
 
 _try_import("trace_collector", [

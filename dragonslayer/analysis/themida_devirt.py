@@ -452,6 +452,93 @@ def reconstruct_opcode_table(
 
 
 # ---------------------------------------------------------------------------
+# Handler classification bridge
+# ---------------------------------------------------------------------------
+
+
+def classify_handler_entries(
+    table: ThemidaOpcodeTable,
+    binary_data: bytes,
+    image_base: int = 0,
+    *,
+    max_insns: int = 32,
+) -> int:
+    """Classify Themida handler entries using the semantic heuristic.
+
+    Attempts to disassemble the native code at each handler address and
+    classify it via :func:`handler_semantics._classify_handler`.
+
+    Falls back gracefully when ``capstone`` is not installed or when
+    disassembly produces no valid instructions.
+
+    Parameters
+    ----------
+    table : ThemidaOpcodeTable
+        Opcode table whose entries will be classified *in place*.
+    binary_data : bytes
+        Raw binary image data.
+    image_base : int
+        Base address used to compute file offsets from RVAs.
+    max_insns : int
+        Maximum number of instructions to disassemble per handler.
+
+    Returns
+    -------
+    int
+        Number of entries successfully classified (classification != "unknown").
+    """
+    try:
+        import capstone
+        from dragonslayer.analysis.handler_semantics import _classify_handler
+        from dragonslayer.analysis.trace_ingestion import TraceInstruction
+    except ImportError:
+        logger.debug(
+            "Capstone or handler_semantics not available — "
+            "skipping Themida handler classification"
+        )
+        return 0
+
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = False
+
+    classified = 0
+
+    for entry in table.entries:
+        # Convert VA → file offset
+        offset = entry.handler_address - image_base
+        if offset < 0 or offset >= len(binary_data):
+            continue
+
+        # Disassemble a window of instructions
+        code = binary_data[offset : offset + max_insns * 15]  # ~15 bytes max per x86 insn
+        insns = []
+        for addr, size, mnem, op_str in md.disasm_lite(code, entry.handler_address):
+            insns.append(TraceInstruction(
+                address=addr,
+                size=size,
+                raw_bytes=binary_data[addr - image_base : addr - image_base + size],
+                disassembly=f"{mnem} {op_str}".strip(),
+            ))
+            if len(insns) >= max_insns:
+                break
+
+        if not insns:
+            continue
+
+        sem = _classify_handler(entry.handler_address, insns)
+        if sem.operation != "vm_unknown":
+            entry.classification = sem.operation
+            classified += 1
+
+    if classified:
+        logger.info(
+            "Classified %d / %d Themida handler entries",
+            classified, len(table.entries),
+        )
+    return classified
+
+
+# ---------------------------------------------------------------------------
 # End-to-end devirtualisation
 # ---------------------------------------------------------------------------
 
@@ -494,6 +581,7 @@ def devirtualize_themida(
     table_data: Optional[bytes] = None,
     image_base: int = 0x400000,
     entry_mnemonics: Optional[Sequence[str]] = None,
+    binary_data: Optional[bytes] = None,
 ) -> ThemidaDevirtResult:
     """End-to-end Themida devirtualisation.
 
@@ -516,6 +604,8 @@ def devirtualize_themida(
         PE image base address.
     entry_mnemonics : Sequence[str], optional
         VM entry mnemonics for variant identification.
+    binary_data : bytes, optional
+        Full PE image for handler disassembly/classification.
 
     Returns
     -------
@@ -560,7 +650,13 @@ def devirtualize_themida(
             result.errors.append(f"Opcode table reconstruction failed: {exc}")
             logger.warning("Themida opcode table reconstruction failed: %s", exc)
 
-    # Step 4: Map opcodes → classifications (using table if available)
+    # Step 4: Classify handlers + map opcodes → classifications
+    if result.opcode_table.entries and binary_data:
+        classify_handler_entries(
+            result.opcode_table,
+            binary_data,
+            image_base=image_base,
+        )
     for entry in result.opcode_table.entries:
         result.handler_classifications[entry.opcode] = entry.classification
 

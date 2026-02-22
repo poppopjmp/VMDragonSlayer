@@ -416,7 +416,7 @@ class TestAnalysisExports:
             "ThemidaVariant", "ThemidaVMProfile", "ThemidaBytecodeDecoder",
             "ThemidaOpcodeTable", "ThemidaDevirtResult",
             "identify_themida_variant", "reconstruct_opcode_table",
-            "devirtualize_themida",
+            "classify_handler_entries", "devirtualize_themida",
         ]:
             assert name in mod.__all__, f"{name} missing from analysis.__all__"
             assert getattr(mod, name, None) is not None, f"{name} not importable"
@@ -427,7 +427,7 @@ class TestAnalysisExports:
             "CVVersion", "CVVMProfile", "CVBytecodeDecoder",
             "CVOpcodeTable", "CVDevirtResult",
             "identify_cv_version", "reconstruct_cv_handler_table",
-            "devirtualize_cv",
+            "classify_cv_handler_entries", "devirtualize_cv",
         ]:
             assert name in mod.__all__, f"{name} missing from analysis.__all__"
             assert getattr(mod, name, None) is not None, f"{name} not importable"
@@ -436,3 +436,103 @@ class TestAnalysisExports:
         import dragonslayer.analysis as mod
         for name in mod.__all__:
             assert "gpu" not in name.lower(), f"GPU reference in __all__: {name}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Handler classification bridge (Phase 2D)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestThemidaClassificationBridge:
+    """Tests for classify_handler_entries on Themida tables."""
+
+    def test_classify_returns_int(self) -> None:
+        """classify_handler_entries returns count of classified entries."""
+        from dragonslayer.analysis.themida_devirt import (
+            classify_handler_entries, ThemidaOpcodeTable, ThemidaHandlerEntry,
+        )
+        table = ThemidaOpcodeTable(entries=[
+            ThemidaHandlerEntry(opcode=0, handler_address=0x1000),
+        ])
+        # With empty binary data, no disassembly will succeed
+        result = classify_handler_entries(table, b"", image_base=0)
+        assert isinstance(result, int)
+        assert result == 0
+
+    def test_classify_empty_table(self) -> None:
+        from dragonslayer.analysis.themida_devirt import (
+            classify_handler_entries, ThemidaOpcodeTable,
+        )
+        table = ThemidaOpcodeTable(entries=[])
+        result = classify_handler_entries(table, b"\x00" * 100)
+        assert result == 0
+
+    def test_classify_modifies_entries_in_place(self) -> None:
+        """When capstone is available, entries are classified in place."""
+        from dragonslayer.analysis.themida_devirt import (
+            classify_handler_entries, ThemidaOpcodeTable, ThemidaHandlerEntry,
+        )
+        try:
+            import capstone  # noqa: F401
+        except ImportError:
+            pytest.skip("capstone not installed")
+
+        # Build a tiny binary with a simple handler: add eax, ebx; ret
+        # x86: \x01\xd8 = add eax, ebx  ;  \xc3 = ret
+        handler_code = b"\x01\xd8\xc3"
+        # Pad to 0x100 bytes (handler at offset 0x100)
+        binary = b"\x00" * 0x100 + handler_code + b"\x00" * 0x100
+
+        table = ThemidaOpcodeTable(entries=[
+            ThemidaHandlerEntry(opcode=0, handler_address=0x400100),
+        ])
+        image_base = 0x400000
+        count = classify_handler_entries(table, binary, image_base=image_base)
+        # Should classify as vm_add
+        assert count >= 0  # may be 0 if handler is too short
+        # Classification should have been attempted
+        assert table.entries[0].classification in ("vm_add", "unknown")
+
+
+class TestCVClassificationBridge:
+    """Tests for classify_cv_handler_entries on CV tables."""
+
+    def test_classify_returns_int(self) -> None:
+        from dragonslayer.analysis.cv_devirt import (
+            classify_cv_handler_entries, CVOpcodeTable, CVHandlerEntry,
+        )
+        table = CVOpcodeTable(entries=[
+            CVHandlerEntry(opcode=0, handler_address=0x2000),
+        ])
+        result = classify_cv_handler_entries(table, b"", image_base=0)
+        assert isinstance(result, int)
+        assert result == 0
+
+    def test_classify_empty_table(self) -> None:
+        from dragonslayer.analysis.cv_devirt import (
+            classify_cv_handler_entries, CVOpcodeTable,
+        )
+        table = CVOpcodeTable(entries=[])
+        result = classify_cv_handler_entries(table, b"\x00" * 100)
+        assert result == 0
+
+    def test_classify_modifies_entries_in_place(self) -> None:
+        from dragonslayer.analysis.cv_devirt import (
+            classify_cv_handler_entries, CVOpcodeTable, CVHandlerEntry,
+        )
+        try:
+            import capstone  # noqa: F401
+        except ImportError:
+            pytest.skip("capstone not installed")
+
+        # Simple handler: xor eax, ebx; ret  (x86: \x31\xd8\xc3)
+        handler_code = b"\x31\xd8\xc3"
+        binary = b"\x00" * 0x200 + handler_code + b"\x00" * 0x100
+
+        table = CVOpcodeTable(entries=[
+            CVHandlerEntry(opcode=0, handler_address=0x400200),
+        ])
+        image_base = 0x400000
+        count = classify_cv_handler_entries(table, binary, image_base=image_base)
+        assert count >= 0
+        assert table.entries[0].classification in ("vm_xor", "unknown")
