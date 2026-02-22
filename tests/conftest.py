@@ -89,7 +89,7 @@ def fresh_config() -> Iterator[None]:
     Any test that mutates configuration should use this fixture so that
     changes don't leak across the test session.
     """
-    from dragonslayer.core.config import Config
-    Config._instance = None
+    from dragonslayer.core.config import reset_config
+    reset_config()
     yield
-    Config._instance = None
+    reset_config()

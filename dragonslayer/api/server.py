@@ -643,11 +643,12 @@ async def invalid_data_handler(request: Request, exc: InvalidDataError) -> JSONR
 @app.exception_handler(AnalysisError)
 async def analysis_error_handler(request: Request, exc: AnalysisError) -> JSONResponse:
     """Handle analysis errors."""
+    logger.error("Analysis error: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             'error': 'Analysis failed',
-            'detail': str(exc),
+            'detail': 'An internal analysis error occurred.',
             'error_code': exc.error_code if hasattr(exc, 'error_code') else 'ANALYSIS_ERROR'
         }
     )
@@ -658,11 +659,12 @@ async def analysis_error_handler(request: Request, exc: AnalysisError) -> JSONRe
 @app.exception_handler(ConfigurationError)
 async def configuration_error_handler(request: Request, exc: ConfigurationError) -> JSONResponse:
     """Handle configuration errors (e.g. invalid config at startup)."""
+    logger.error("Configuration error: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             'error': 'Configuration error',
-            'detail': str(exc),
+            'detail': 'A configuration error occurred.',
             'error_code': getattr(exc, 'error_code', 'CONFIGURATION_ERROR'),
         }
     )
@@ -671,11 +673,12 @@ async def configuration_error_handler(request: Request, exc: ConfigurationError)
 @app.exception_handler(ResourceLimitError)
 async def resource_limit_handler(request: Request, exc: ResourceLimitError) -> JSONResponse:
     """Handle resource-limit exceeded (memory, paths, loop iterations)."""
+    logger.error("Resource limit exceeded: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             'error': 'Resource limit exceeded',
-            'detail': str(exc),
+            'detail': 'A resource limit was exceeded.',
             'error_code': getattr(exc, 'error_code', 'RESOURCE_LIMIT'),
         }
     )
@@ -684,11 +687,12 @@ async def resource_limit_handler(request: Request, exc: ResourceLimitError) -> J
 @app.exception_handler(AnalysisTimeoutError)
 async def analysis_timeout_handler(request: Request, exc: AnalysisTimeoutError) -> JSONResponse:
     """Handle analysis-timeout exceeded."""
+    logger.error("Analysis timeout: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
         content={
             'error': 'Analysis timed out',
-            'detail': str(exc),
+            'detail': 'The analysis operation timed out.',
             'error_code': getattr(exc, 'error_code', 'ANALYSIS_TIMEOUT'),
         }
     )
@@ -697,11 +701,12 @@ async def analysis_timeout_handler(request: Request, exc: AnalysisTimeoutError) 
 @app.exception_handler(VMDragonSlayerError)
 async def generic_vmds_error_handler(request: Request, exc: VMDragonSlayerError) -> JSONResponse:
     """Catch-all for any VMDragonSlayerError subclass not handled above."""
+    logger.error("Internal error: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             'error': 'Internal error',
-            'detail': str(exc),
+            'detail': 'An internal error occurred.',
             'error_code': getattr(exc, 'error_code', 'VMDS_ERROR'),
         }
     )
@@ -911,7 +916,7 @@ async def analyze_binary(
         logger.error("Analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(exc)}"
+            detail="Analysis failed due to an internal error."
         )
 
 
@@ -982,7 +987,7 @@ async def upload_and_analyze(
         logger.error("Upload analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(exc)}"
+            detail="Analysis failed due to an internal error."
         )
     finally:
         await file.close()
@@ -1056,7 +1061,7 @@ async def run_pipeline(
         logger.error("Pipeline analysis failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Pipeline analysis failed: {str(exc)}",
+            detail="Pipeline analysis failed due to an internal error.",
         )
 
 
@@ -1099,9 +1104,10 @@ async def submit_feedback(
         )
         return {"status": "ok", "entry": entry.to_dict()}
     except (ImportError, ValueError, TypeError, KeyError) as exc:
+        logger.error("Feedback ingestion failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Feedback processing failed.",
         )
 
 
@@ -1129,9 +1135,10 @@ async def get_uncertain_samples(body: UncertainRequest) -> Dict[str, Any]:
             "samples": [s.to_dict() for s in samples],
         }
     except (ImportError, ValueError, TypeError, KeyError) as exc:
+        logger.error("Uncertain sample selection failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Uncertain sample selection failed.",
         )
 
 
@@ -1165,9 +1172,10 @@ async def list_registered_plugins() -> Dict[str, Any]:
             })
         return {"count": len(registry), "plugins": registry}
     except Exception as exc:
+        logger.error("Plugin listing failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Failed to list plugins.",
         )
 
 
@@ -1182,9 +1190,10 @@ async def check_plugin_health() -> Dict[str, Any]:
             "problems": problems,
         }
     except Exception as exc:
+        logger.error("Plugin health check failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Plugin health check failed.",
         )
 
 

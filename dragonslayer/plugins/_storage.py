@@ -203,34 +203,38 @@ class LocalFileBackend(StorageBackend):
         return ok
 
     def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
-        return self._load(index).get(doc_id)
+        with self._lock:
+            return self._load(index).get(doc_id)
 
     def delete(self, index: str, doc_id: str) -> bool:
-        bucket = self._load(index)
-        if doc_id in bucket:
-            del bucket[doc_id]
-            self._flush(index)
-            return True
+        with self._lock:
+            bucket = self._load(index)
+            if doc_id in bucket:
+                del bucket[doc_id]
+                self._flush(index)
+                return True
         return False
 
     def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
-        bucket = self._load(index)
-        match = query.get("match", {})
-        hits: list[Dict[str, Any]] = []
-        for doc in bucket.values():
-            ok = True
-            for k, v in match.items():
-                if str(doc.get(k, "")) != str(v):
-                    ok = False
-                    break
-            if ok:
-                hits.append(doc)
-                if len(hits) >= size:
-                    break
+        with self._lock:
+            bucket = self._load(index)
+            match = query.get("match", {})
+            hits: list[Dict[str, Any]] = []
+            for doc in bucket.values():
+                ok = True
+                for k, v in match.items():
+                    if str(doc.get(k, "")) != str(v):
+                        ok = False
+                        break
+                if ok:
+                    hits.append(doc)
+                    if len(hits) >= size:
+                        break
         return hits
 
     def ensure_index(self, index: str, mapping: Optional[Dict[str, Any]] = None) -> None:
-        self._load(index)  # creates file if needed
+        with self._lock:
+            self._load(index)  # creates file if needed
 
 
 # ---------------------------------------------------------------------------
