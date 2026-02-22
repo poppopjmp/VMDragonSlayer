@@ -4,7 +4,20 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
-### Deep Review Quality Cycle — 135-Issue Audit (Phases A–F)
+### Dependency Audit + Intel PIN → Tracing Migration (`3d4fabf`)
+
+Comprehensive dependency reconciliation and backend replacement to remove
+the hard dependency on Intel PIN (not universally available).
+
+- **`pyproject.toml`**: Removed unused core deps (`cryptography`, `psutil`); removed unused optional deps (`pandas`, `torch`, `tensorflow` from `[ml]`; `websockets`, `aiohttp`, `jinja2` from `[web]`; `graphene`, `schedule` from `[enterprise]`); added `qiling>=1.4.6` + `triton-library>=1.0` to `[emulation]`; added `requests>=2.31.0` to `[web]`; added new `[enrichment]` extra (`pyelftools`, `macholib`, `pefile`, `python-magic`, `ssdeep`, `oletools`, `binexport2`, `multidecoder`); added `elasticsearch>=8.0.0` to `[enterprise]`; updated `[all]`
+- **`requirements.txt`**: Synced with pyproject.toml core deps; optional groups listed as comments
+- **`config/vmdragonslayer.yml`**: Replaced `pin:` section with `tracing:` section — `backend: auto` (enum: `auto|unicorn|triton|angr|qiling|file`), `timeout`, `max_instructions`, `capture_registers/memory`, `trace_output_dir`, per-backend subsections
+- **`config/analysis_profiles.json`**: Added `tracing_backend` preference per profile (fast→unicorn, deep/debug→auto/triton)
+- **`dragonslayer/core/config.py`**: `DEFAULTS['pin']` → `DEFAULTS['tracing']`; env var `VMDS_PIN_PATH` → `VMDS_TRACING_BACKEND`; validation updated (backend enum check + timeout + max_instructions); `'pin'` kept in `known_sections` for backward compat
+- **`data/schemas/config_schema.json`**: `pin` schema replaced with full `tracing` schema (backend enum, per-backend typed objects)
+- **Tests `test_b64`, `test_b66`**: Updated env var and config key references
+
+
 
 Comprehensive 135-issue deep review across 3 parallel analysis streams,
 triaged into 6 implementation phases. Each phase committed with full test
@@ -35,15 +48,15 @@ Quality Gate: **97.65 → 99.74** (composite score across 10 dimensions).
 - **Active learning validation**: Strategy validation with descriptive error messages
 - **Model load exception broadening**: `model.load()` catches `(OSError, ValueError, RuntimeError, KeyError)`
 - **CLI validation**: File read error handling, `AnalysisType` enum validation
-- **Config.validate() expansion**: Added checks for `pin.timeout`, dispatcher settings
+- **Config.validate() expansion**: Added checks for `tracing.backend` (enum), `tracing.timeout`, `tracing.max_instructions`, dispatcher settings
 
 #### Phase C — Config & Data Consolidation (`c9283ee`)
 
 13 fixes for configuration, pattern, and model consistency:
 
 - **Config.DEFAULTS expanded**: 9 sections — `logging.console`, `analysis.enable_caching`, `api.enable_cors`/`debug`, `vmprotect.confidence_threshold`/`max_handler_size`, `dispatcher`, `data`, `paths`
-- **Pin DLL naming**: Unified to `.ia32.dll`/`.intel64.dll` convention
-- **Config schema typed**: `config_schema.json` fully updated with `data`/`paths`/`dispatcher` sections
+- **Tracing config**: `tracing:` section introduced (`backend`, `timeout`, `max_instructions`, per-engine dicts); replaces removed `pin:` section
+- **Config schema typed**: `config_schema.json` fully updated with `data`/`paths`/`dispatcher`/`tracing` sections
 - **YAML patterns_db fix**: Corrected path to `vmprotect_handlers.json`
 - **ARM patterns canonical**: `logic` → `bitwise`, `load_store` → `memory`, `branch` → `control_flow`
 - **Themida patterns canonical**: `misc` → `nop`, `vm_lifecycle`/`context` → `vm_control`, `key_transform` → `crypto`, `native` → `control_flow`, `fetch` → `vm_control`

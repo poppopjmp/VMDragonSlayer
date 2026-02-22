@@ -5,6 +5,8 @@ on:
     branches: [main, dev-*]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'  # Weekly on Monday at 03:00 UTC
 
 
 concurrency:

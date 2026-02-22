@@ -1,6 +1,4 @@
 # VMDragonSlayer
-**Project will be public by mid-October Refactoring In Progress**
-
 **Advanced Virtual Machine Detection and Analysis Framework**
 
 VMDragonSlayer is a comprehensive framework for analyzing binaries protected by Virtual Machine (VM) based protectors such as VMProtect 2.x/3.x, Themida, and custom malware VMs. The framework combines multiple analysis engines including Dynamic Taint Tracking (DTT), Symbolic Execution (SE), Pattern Classification, and Machine Learning to automate the reverse engineering process.
@@ -10,9 +8,10 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 ## Key Features
 
 - **Multi-Engine Analysis**: Combines static, dynamic, and hybrid analysis techniques
-- **VM Detection**: Automated detection of commercial and custom VM protectors  
+- **VM Detection**: Automated detection of commercial and custom VM protectors
+- **Multi-Backend Tracing**: Unicorn, Triton, angr, Qiling — auto-selected based on availability
 - **Plugin Ecosystem**: Integrations with Ghidra, IDA Pro, and Binary Ninja
-- **Machine Learning**: Proof-of-concept ML models for pattern classification
+- **Machine Learning**: Handler classifier with scikit-learn + active learning feedback loop
 - **Extensible Architecture**: Modular design for custom analysis workflows
 - **Research Framework**: Built for malware research and reverse engineering education
 
@@ -27,7 +26,7 @@ VMDragonSlayer is a comprehensive framework for analyzing binaries protected by 
 | Symbolic Execution | `analysis.symbolic_execution.executor` | Real instruction semantics (mov/add/xor/push/pop/lea/cmp/jcc…), explicit EFLAGS modelling (ZF/CF/SF/OF), **full x86-64 sub-register aliasing** (al/ah/ax/eax, r8b-r15b, sil/dil/bpl/spl), **byte-granular memory model** (LE byte store with z3 Concat), **SIB addressing** (`[base+index*scale+disp]` tokenizer), z3 branch constraints, opaque predicate detection, dispatcher back-edge scoring, concrete SP for push/pop, handler-local symbolic execution with MBA simplification |
 | Anti-Evasion | `analysis.anti_evasion` | Section-aware instruction scanning (PE/ELF), anti-debug/VM/sandbox detection, binary patching |
 | Binary Parsing | `analysis.binary_format` | Shared LIEF-based PE/ELF parser, **VA ↔ file-offset mapping** (`va_to_offset`, `offset_to_va`, `section_at_va`), `load_sections`, `read_va` |
-| Trace Production | `analysis.trace_engine` | **Built-in Unicorn-based trace engine** for x86/x86-64, `TraceConfig` (max_insns, register/memory capture, stop_addresses), auto-maps unmapped memory, Capstone disassembly, `trace_parsed` integration with ParsedBinary |
+| Trace Production | `analysis.trace_engine` / `analysis.trace_collector` | **Multi-backend tracing**: Unicorn (built-in), Triton (symbolic+taint), angr (CFG-driven), Qiling (OS emulation), File (pre-recorded). `TraceBackend.AUTO` probes in order. Per-backend config in `vmdragonslayer.yml` |
 | Trace Ingestion | `analysis.trace_ingestion` | Unified `ExecutionTrace` model; ingestion from text files, angr, Triton, Qiling, and shared plugin data |
 | Handler Boundaries | `analysis.vm_discovery.handler_boundaries` | vIP register identification (monotonic + alignment + **symbolic self-advance** scoring), `score_vip_from_symbolic` for handler-summary-based vIP detection, trace segmentation into per-handler slices |
 | CFG Reconstruction | `analysis.cfg` | Instruction-level and handler-level CFGs via networkx, basic-block extraction, dominator analysis |
@@ -161,10 +160,10 @@ graph TD
 - **Components**: `VMClassifier` (high-level entry point), `FeatureExtractor`/`FeatureVector`, `EnsembleClassifier` with majority-vote and weighted strategies
 - **Architecture**: Abstract `BaseModel` / `VMHandlerModel` base with `train()`/`predict()`/`save()`/`load()` contract
 
-#### 7. **GPU Acceleration** (`dragonslayer.gpu`)
-- **Purpose**: Optional GPU-accelerated analysis when CUDA hardware is available
-- **Components**: `GPUEngine` (device management), `GPUMemoryManager` (allocation tracking), `GPUOptimizer` (block-size tuning), `GPUProfiler` (wall-clock timing — works without GPU hardware)
-- **Detection**: Runtime `gpu_available()` with guarded torch/CUDA imports; graceful CPU fallback
+#### 7. **REST API & Active Learning** (`dragonslayer.api`)
+- **Endpoints**: `POST /analyze`, `POST /upload-analyze`, `POST /pipeline`, `POST /feedback`, `POST /uncertain`, `GET /plugins`, `GET /plugins/health`, `GET /health`, `GET /metrics`
+- **Security**: Header-only API key (`x-api-key`); sanitised error responses; per-IP rate limiting; `asyncio.to_thread()` for CPU-bound analysis
+- **Active Learning**: `FeedbackStore` JSON persistence; `select_uncertain_samples()` with entropy/margin/least-confidence strategies; analyst corrections exportable as training data
 
 ## Repository Structure
 
@@ -190,7 +189,6 @@ VMDragonSlayer/
 │   ├── core/                      # Pipeline, orchestrator, config
 │   ├── llm/                       # LLM-assisted analysis (litellm)
 │   ├── ml/                        # Machine learning pipeline + handler classifier
-│   ├── gpu/                       # GPU acceleration support
 │   ├── plugins/                   # 16 plugins (static/dynamic/enrichment/reporting)
 │   └── utils/                     # Utility functions
 ├── config/                        # YAML configuration
@@ -203,7 +201,7 @@ VMDragonSlayer/
 │   ├── ghidra/                   # Ghidra plugin (Java/Gradle)
 │   ├── idapro/                   # IDA Pro plugin (Python)
 │   └── binaryninja/              # Binary Ninja plugin (Python)
-├── tests/                         # 430 tests (430 pass, 7 skip)
+├── tests/                         # 3886+ tests (3886 pass, 46 skip, 1 xfail)
 ├── documentation/                 # Documentation
 └── LICENSE                        # GPL v3 License
 ```
@@ -249,23 +247,13 @@ VMDragonSlayer integrates with major reverse engineering tools:
 - **Storage**: 5GB free space
 - **OS**: Windows 10/11, Linux (Ubuntu 20.04+), macOS 11+
 
-### GPU Requirements (Optional but Recommended)
-- **NVIDIA GPU**: GTX 1060 or newer for optimal performance
-- **CUDA**: Version 11.8 or 12.1+ (installed automatically with PyTorch)
-- **VRAM**: 4GB minimum for ML models
-
-### Important Limitations
-- **Virtual Machines**: GPU-accelerated features require direct hardware access and may not work in VMs
-- **WSL**: Some GPU features may have limited functionality in WSL environments
-- **Remote Servers**: Ensure CUDA drivers are properly installed for headless GPU access
-
 ## Current Status
 
 ### Test Suite
-- **430 tests** across 24+ test files
-- **362 passed**, 7 skipped (7 yara-python optional; z3 skip eliminated)
-- All Phase 8 commits verified green before merge
-- Coverage: config, exceptions, orchestrator, pattern database, pattern recognizer, plugins, pipeline, analysis modules, CLI, trace ingestion, handler boundaries, CFG, bytecode extraction, handler semantics, pseudocode, handler classifier, pipeline devirt, MBA simplifier, integration tests
+- **3 886 tests** across 100+ test files
+- **3 886 passed**, 46 skipped (optional deps: yara-python, unicorn, sklearn), 1 xfailed
+- All phases verified green before merge
+- Coverage: config, exceptions, orchestrator, pipeline, analysis engines, CLI, API (FastAPI TestClient), trace collection/export, handler semantics, MBA simplifier, ML pipeline, active learning, plugin framework, RE tool plugins, devirt integration
 
 ### What's Implemented and Working
 
@@ -316,59 +304,47 @@ result = orchestrator.analyze_binary(
     analysis_type=AnalysisType.VM_DISCOVERY,
 )
 ```
-### Quick Start
-
-```bash
-# 1. Install with all dependencies
-pip install -r requirements.txt
-pip install -e .
-
-```
-
 ### Core Framework
 ```bash
 # Clone repository
 git clone https://github.com/poppopjmp/VMDragonSlayer.git
 cd VMDragonSlayer
 
-# UPDATED INSTALLATION
-# Install all required dependencies including z3-solver
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+venv\Scripts\activate     # Windows
+
+# Install core dependencies
 pip install -r requirements.txt
 
 # Install framework in development mode
 pip install -e .
-
 ```
 
-### Installation for Different Hardware
+### Installing Optional Extras
 ```bash
-# CPU-only installation (basic functionality)
-pip install -r requirements.txt
-pip install -e .
+# Emulation backends (Unicorn, angr, Qiling, Triton)
+pip install -e ".[emulation]"
 
-# NVIDIA GPU with CUDA 12.x (RTX 30xx/40xx series) 
-pip install -r requirements.txt
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-pip install -e .
+# Machine learning (scikit-learn, joblib)
+pip install -e ".[ml]"
 
-# NVIDIA GPU with CUDA 11.8 (older GPUs)
-pip install -r requirements.txt  
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-pip install -e .
+# REST API server (FastAPI, uvicorn)
+pip install -e ".[web]"
+
+# YARA pattern matching
+pip install -e ".[yara]"
+
+# LLM-assisted analysis (litellm)
+pip install -e ".[llm]"
+
+# Binary enrichment analysis (pyelftools, macholib, ssdeep, oletools…)
+pip install -e ".[enrichment]"
+
+# Everything
+pip install -e ".[all]"
 ```
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/macOS
-# or
-venv\Scripts\activate     # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install framework
-cd dragonslayer
-pip install -e .
 
 ### Plugin Installation
 Choose your preferred disassembler:
@@ -408,60 +384,20 @@ print(f"Analysis Success: {result.get('success', False)}")
 
 ### Reverse Engineering Tool Integrations
 
-| Tool | Status | ETA | Notes |
-|------|---------|-----|-------|
-| **Direct API** | Stable | Available Now | Recommended approach |
-| **Ghidra Plugin** | In Progress | October 2025 | Basic functionality available |
-| **IDA Pro Plugin** | Under Development | November 2025 | Work in progress - not functional |
-| **Binary Ninja Plugin** | Under Development | November 2025 | Work in progress - not functional |
+| Tool | Status | Notes |
+|------|---------|-------|
+| **Direct API / CLI** | Stable | Recommended approach |
+| **Ghidra Plugin** | Functional | Jython 2.7 compatible; transaction-safe `apply_annotations()`, bookmarks, function renames |
+| **IDA Pro Plugin** | Functional | `DragonSlayerPlugin` class, `Ctrl+Shift+D` hotkey, live analysis + JSON import |
+| **Binary Ninja Plugin** | Functional | `PluginCommand.register()`, highlight colours, dragon tags, file dialog |
 
 ---
-## Architecture
-
-VMDragonSlayer uses a modular architecture with multiple analysis engines:
-
-### Analysis Engines
-
-#### VM Discovery Engine
-- **Dispatcher Detection**: Identifies VM dispatcher loops using control flow analysis
-- **Handler Mapping**: Maps VM handlers and their relationships  
-- **Architecture Recognition**: Detects VMProtect, Themida, and custom VM architectures
-
-#### Taint Tracking Engine  
-- **Dynamic Analysis**: Tracks data flow through VM handlers
-- **Precision Control**: Byte-level or instruction-level granularity
-- **Anti-Evasion**: Bypasses common analysis detection techniques
-
-#### Pattern Analysis Engine
-- **Signature Matching**: Rule-based pattern recognition
-- **ML Classification**: Machine learning-based handler classification
-- **Similarity Analysis**: Fuzzy matching for variant detection
-
-#### Symbolic Execution Engine
-- **Path Exploration**: Systematic exploration of execution paths
-- **Constraint Solving**: Z3-based constraint resolution
-- **VM-Aware Analysis**: Specialized handling for virtualized code
-
-### Machine Learning Models
-
-The framework includes several proof-of-concept models:
-
-#### Available Models
-- **Bytecode Classifier**: Pattern recognition in VM bytecode sequences
-- **VM Detector**: Binary classification for VM protection presence  
-- **Handler Classifier**: Classification of VM handler types
-- **VMProtect Detector**: Specialized detector for VMProtect patterns
-- **Ensemble Model**: Combines multiple classifiers for improved accuracy
-
-#### Model Characteristics
-- **Format**: Scikit-learn compatible (joblib serialization)
-- **Size**: Small models suitable for rapid prototyping
-- **Purpose**: Educational examples and research baselines
-- **Training Data**: Synthetic and limited real-world samples
 
 ### Thread Safety & Robustness
-- **Config singleton** — Double-checked locking with `threading.Lock`
-- **Storage backends** — `MemoryBackend` and `LocalFileBackend` guarded with locks; batch flush for bulk writes
+- **Config singleton** — Double-checked locking (`threading.Lock`) with environment mismatch warning
+- **Storage backends** — `MemoryBackend` and `LocalFileBackend`: all CRUD methods (`store`, `get`, `delete`, `query`, `ensure_index`) hold `self._lock`
+- **LLM analyzer** — `_ensure_litellm()` and `get_llm_analyzer()` with double-checked locking
+- **Metrics** — `MetricsCollector.stop_phase()` all mutations inside lock
 - **Plugin shared_data** — Thread-safe accessors via `PluginContext`
 - **API rate limiter** — `asyncio.Lock`-protected async rate limit handler
 - **Taint state** — `TaintTracker.reset()` ensures clean state between runs
@@ -472,25 +408,31 @@ The framework includes several proof-of-concept models:
 
 ### Environment Variables
 ```bash
-# Core configuration
-export VMDS_CONFIG_PATH="/path/to/config"
-export VMDS_MODEL_PATH="/path/to/models"  
-export VMDS_LOG_LEVEL="INFO"
+# Core
+export VMDS_CONFIG_DIR="/path/to/config"    # Override config directory
+export VMDS_ENVIRONMENT="production"         # development | production | testing
+export VMDS_LOGGING_LEVEL="INFO"             # DEBUG | INFO | WARNING | ERROR
 
-# Database configuration
-export VMDS_DB_URL="sqlite:///vmds.db"
+# Tracing backend
+export VMDS_TRACING_BACKEND="unicorn"        # auto | unicorn | triton | angr | qiling | file
 
-# API configuration
-export VMDS_API_HOST="localhost"
+# API server
+export VMDS_API_HOST="0.0.0.0"
 export VMDS_API_PORT="8000"
+export VMDS_API__WORKERS="4"
+
+# Generic section.key override (VMDS_<SECTION>__<KEY>)
+export VMDS_SYMBOLIC_EXECUTION__MAX_PATHS="128"
+export VMDS_VMPROTECT__CONFIDENCE_THRESHOLD="0.85"
 ```
 
 ### Configuration Files
-- `config/vmdragonslayer.yml`: Main configuration (analysis, API, logging, paths)
-- `config/analysis_profiles.json`: Pipeline profile definitions
-- `data/patterns/vmprotect_handlers.json`: VMProtect handler signatures
-- `data/patterns/themida_patterns.json`: Themida pattern database
-- `data/schemas/analysis_result_schema.json`: JSON schema for analysis output
+- [config/vmdragonslayer.yml](config/vmdragonslayer.yml): Main config — analysis, API, logging, tracing backends, paths
+- [config/analysis_profiles.json](config/analysis_profiles.json): Pipeline profiles (fast / balanced / deep / debug)
+- [data/schemas/config_schema.json](data/schemas/config_schema.json): JSON Schema draft-07 for config validation
+- [data/patterns/vmprotect_handlers.json](data/patterns/vmprotect_handlers.json): VMProtect handler signatures (144 patterns)
+- [data/patterns/themida_patterns.json](data/patterns/themida_patterns.json): Themida pattern database
+- [data/patterns/arm_patterns.json](data/patterns/arm_patterns.json): ARM/AArch64 VM handler patterns
 
 ---
 ## Examples
