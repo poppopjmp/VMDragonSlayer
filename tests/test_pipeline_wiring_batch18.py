@@ -257,13 +257,12 @@ class TestDevirtWiringFull:
         patches["dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher"] = MagicMock(return_value=None)
 
         ctx = _make_ctx()
-        with patch.dict("sys.modules", {}):
-            for target, mock_obj in patches.items():
-                patch(target, mock_obj).start()
-            try:
-                result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
-            finally:
-                patch.stopall()
+        for target, mock_obj in patches.items():
+            patch(target, mock_obj).start()
+        try:
+            result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
+        finally:
+            patch.stopall()
 
         assert result.success is True
         assert "vmprotect_dispatcher" in result.data
@@ -283,13 +282,12 @@ class TestDevirtWiringFull:
         patches["dragonslayer.analysis.vm_discovery.handler_extraction.extract_handler_bodies"] = MagicMock(return_value=fake_extraction)
 
         ctx = _make_ctx()
-        with patch.dict("sys.modules", {}):
-            for target, mock_obj in patches.items():
-                patch(target, mock_obj).start()
-            try:
-                result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
-            finally:
-                patch.stopall()
+        for target, mock_obj in patches.items():
+            patch(target, mock_obj).start()
+        try:
+            result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
+        finally:
+            patch.stopall()
 
         assert result.success is True
         assert "handler_extraction" in result.data
@@ -310,13 +308,12 @@ class TestDevirtWiringFull:
         patches["dragonslayer.analysis.vm_discovery.context_registers.identify_vm_context"] = MagicMock(return_value=fake_ctx_layout)
 
         ctx = _make_ctx()
-        with patch.dict("sys.modules", {}):
-            for target, mock_obj in patches.items():
-                patch(target, mock_obj).start()
-            try:
-                result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
-            finally:
-                patch.stopall()
+        for target, mock_obj in patches.items():
+            patch(target, mock_obj).start()
+        try:
+            result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
+        finally:
+            patch.stopall()
 
         assert result.success is True
         assert "vm_context_layout" in result.data
@@ -340,13 +337,12 @@ class TestDevirtWiringFull:
         patches["dragonslayer.analysis.handler_clustering.refine_opcode_table"] = MagicMock(return_value=refined)
 
         ctx = _make_ctx()
-        with patch.dict("sys.modules", {}):
-            for target, mock_obj in patches.items():
-                patch(target, mock_obj).start()
-            try:
-                result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
-            finally:
-                patch.stopall()
+        for target, mock_obj in patches.items():
+            patch(target, mock_obj).start()
+        try:
+            result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
+        finally:
+            patch.stopall()
 
         assert result.success is True
         assert "handler_clustering" in result.data
@@ -371,13 +367,12 @@ class TestDevirtWiringFull:
         ae_report = {"risk_score": 0.6, "techniques": ["rdtsc"]}
         ctx = _make_ctx(anti_evasion=ae_report)
 
-        with patch.dict("sys.modules", {}):
-            for target, mock_obj in patches.items():
-                patch(target, mock_obj).start()
-            try:
-                result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
-            finally:
-                patch.stopall()
+        for target, mock_obj in patches.items():
+            patch(target, mock_obj).start()
+        try:
+            result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
+        finally:
+            patch.stopall()
 
         assert result.success is True
         assert "anti_evasion_hooks" in result.data
