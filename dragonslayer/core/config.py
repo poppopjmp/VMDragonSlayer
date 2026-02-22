@@ -323,14 +323,24 @@ class Config:
                     f"vmprotect.validation_threshold must be in [0,1], got {vt!r}"
                 )
 
-        # Raise first error for backwards compat (single-error contract)
+        # Raise with ALL errors summarised
         if errors:
+            summary = "; ".join(errors)
             raise ValidationError(
-                errors[0],
+                f"{len(errors)} config error(s): {summary}",
                 field=errors[0].split(" ")[0],
                 constraint="range/type check",
                 details={"all_errors": errors},
             )
+
+    # ------------------------------------------------------------------
+    # Serialisation helpers
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a deep-copy of the active configuration dict."""
+        with self._lock:
+            return copy.deepcopy(self._config)
     
     def __repr__(self) -> str:
         return f"Config(environment='{self.environment}', config_dir='{self.config_dir}')"

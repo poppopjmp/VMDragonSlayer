@@ -1,0 +1,191 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VMDragonSlayer Configuration",
+  "description": "Schema for vmdragonslayer.yml configuration file.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+          "default": "INFO",
+          "description": "Python logging level."
+        },
+        "file": {
+          "type": "string",
+          "default": "logs/vmds.log",
+          "description": "Path to the log file."
+        },
+        "format": {
+          "type": "string",
+          "default": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+          "description": "Python logging format string."
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1800,
+          "description": "Maximum analysis duration in seconds."
+        },
+        "max_threads": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4,
+          "description": "Maximum number of concurrent analysis threads."
+        }
+      }
+    },
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "default": "pin/pin.exe",
+          "description": "Path to the Intel Pin binary."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 900,
+          "description": "Pin execution timeout in seconds."
+        },
+        "ia32_tool": {
+          "type": "string",
+          "default": "VMDragonTaint.x32.dll",
+          "description": "32-bit Pin tool DLL name."
+        },
+        "intel64_tool": {
+          "type": "string",
+          "default": "VMDragonTaint.x64.dll",
+          "description": "64-bit Pin tool DLL name."
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "API server bind address."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 8000,
+          "description": "API server port."
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4,
+          "description": "Number of Uvicorn workers."
+        }
+      }
+    },
+    "vmprotect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trace_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100000,
+          "description": "Maximum trace instructions to record."
+        },
+        "enable_symbolic": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable z3-based symbolic execution."
+        },
+        "llvm_opt_level": {
+          "type": "string",
+          "enum": ["O0", "O1", "O2", "O3"],
+          "default": "O3",
+          "description": "LLVM optimization level for IR lifting."
+        },
+        "skip_optimization": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip LLVM optimization passes."
+        },
+        "validation_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.85,
+          "description": "Minimum confidence for handler validation."
+        }
+      }
+    },
+    "symbolic_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "solver_timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "default": 10000,
+          "description": "z3 solver timeout in milliseconds."
+        },
+        "max_paths": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 64,
+          "description": "Maximum number of symbolic paths to explore."
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000,
+          "description": "Maximum symbolic exploration depth."
+        },
+        "max_loop_iters": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Maximum loop unrolling iterations."
+        },
+        "memory_limit_mb": {
+          "type": "integer",
+          "minimum": 64,
+          "default": 2048,
+          "description": "Memory limit for symbolic engine in MB."
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "description": "Data and model paths.",
+      "additionalProperties": true
+    },
+    "paths": {
+      "type": "object",
+      "description": "Additional path overrides.",
+      "additionalProperties": true
+    },
+    "metroplex": {
+      "type": "object",
+      "description": "Metroplex integration settings.",
+      "additionalProperties": true
+    },
+    "dispatcher": {
+      "type": "object",
+      "description": "Dispatcher analysis settings.",
+      "additionalProperties": true
+    }
+  }
+}
