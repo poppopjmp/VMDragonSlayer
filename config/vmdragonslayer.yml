@@ -11,12 +11,28 @@ analysis:
   max_threads: 4
   enable_caching: true
 
-pin:
-  path: pin/pin.exe
-  timeout: 300  # 5 minutes
-  ia32_tool: VMDragonTaint.ia32.dll
-  intel64_tool: VMDragonTaint.intel64.dll
+# Tracing backend configuration
+# Supported backends: unicorn, triton, angr, qiling, file, auto
+# "auto" probes available backends in order: unicorn → triton → angr → qiling
+tracing:
+  backend: auto
+  timeout: 300  # 5 minutes wall-clock timeout per trace
+  max_instructions: 100000
+  capture_registers: true
+  capture_memory: true
   trace_output_dir: traces/
+
+  # Per-backend settings (optional, override defaults when that backend is active)
+  unicorn:
+    follow_calls: true
+  triton:
+    symbolic: true
+    taint: true
+  angr:
+    auto_load_libs: false
+  qiling:
+    rootfs: ""           # Qiling rootfs path (e.g. "rootfs/x86_linux")
+    multithread: false
 
 api:
   host: 127.0.0.1

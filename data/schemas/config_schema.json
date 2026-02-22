@@ -55,30 +55,97 @@
         }
       }
     },
-    "pin": {
+    "tracing": {
       "type": "object",
+      "description": "Trace collection backend configuration.",
       "additionalProperties": false,
       "properties": {
-        "path": {
+        "backend": {
           "type": "string",
-          "default": "pin/pin.exe",
-          "description": "Path to the Intel Pin binary."
+          "enum": ["auto", "unicorn", "triton", "angr", "qiling", "file"],
+          "default": "auto",
+          "description": "Trace collection backend. 'auto' probes in order: unicorn, triton, angr, qiling."
         },
         "timeout": {
           "type": "integer",
           "minimum": 1,
-          "default": 900,
-          "description": "Pin execution timeout in seconds."
+          "default": 300,
+          "description": "Wall-clock timeout per trace in seconds."
         },
-        "ia32_tool": {
-          "type": "string",
-          "default": "VMDragonTaint.ia32.dll",
-          "description": "32-bit Pin tool DLL name."
+        "max_instructions": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100000,
+          "description": "Maximum instructions to trace before stopping."
         },
-        "intel64_tool": {
+        "capture_registers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record register snapshots at each instruction."
+        },
+        "capture_memory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record memory reads/writes."
+        },
+        "trace_output_dir": {
           "type": "string",
-          "default": "VMDragonTaint.intel64.dll",
-          "description": "64-bit Pin tool DLL name."
+          "default": "traces/",
+          "description": "Directory for trace output files."
+        },
+        "unicorn": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "follow_calls": {
+              "type": "boolean",
+              "default": true,
+              "description": "Follow CALL instructions into subroutines."
+            }
+          }
+        },
+        "triton": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "symbolic": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable Triton symbolic execution mode."
+            },
+            "taint": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable Triton taint analysis mode."
+            }
+          }
+        },
+        "angr": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "auto_load_libs": {
+              "type": "boolean",
+              "default": false,
+              "description": "Auto-load libraries in angr analysis."
+            }
+          }
+        },
+        "qiling": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "rootfs": {
+              "type": "string",
+              "default": "",
+              "description": "Qiling rootfs path (e.g. 'rootfs/x86_linux')."
+            },
+            "multithread": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable multi-threaded Qiling emulation."
+            }
+          }
         }
       }
     },

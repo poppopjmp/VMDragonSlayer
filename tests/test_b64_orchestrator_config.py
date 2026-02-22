@@ -122,10 +122,10 @@ class TestGenericEnvVarMapping:
         assert cfg.get("vmprotect.validation_threshold") == 0.95
 
     def test_string_value_preserved(self):
-        env = {"VMDS_PIN__PATH": "/usr/local/bin/pin"}
+        env = {"VMDS_TRACING__BACKEND": "triton"}
         with patch.dict(os.environ, env, clear=False):
             cfg = Config(validate_on_load=False)
-        assert cfg.get("pin.path") == "/usr/local/bin/pin"
+        assert cfg.get("tracing.backend") == "triton"
 
     def test_single_underscore_ignored(self):
         """Keys without __ in the env var name are skipped by generic mapper."""

@@ -85,10 +85,10 @@ class TestConfigBoolEnv:
         assert cfg.get("analysis.max_things") == 42
 
     def test_env_string_preserved(self, monkeypatch):
-        monkeypatch.setenv("VMDS_PIN__CUSTOM_PATH", "/usr/bin/pin")
+        monkeypatch.setenv("VMDS_TRACING__BACKEND", "qiling")
         cfg = _make_config()
         cfg._load_env_variables()
-        assert cfg.get("pin.custom_path") == "/usr/bin/pin"
+        assert cfg.get("tracing.backend") == "qiling"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

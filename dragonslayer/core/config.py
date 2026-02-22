@@ -33,11 +33,17 @@ class Config:
             'max_threads': 4,
             'enable_caching': False,
         },
-        'pin': {
-            'path': 'pin/pin.exe',
-            'timeout': 900,
-            'ia32_tool': 'VMDragonTaint.ia32.dll',
-            'intel64_tool': 'VMDragonTaint.intel64.dll',
+        'tracing': {
+            'backend': 'auto',
+            'timeout': 300,
+            'max_instructions': 100000,
+            'capture_registers': True,
+            'capture_memory': True,
+            'trace_output_dir': 'traces/',
+            'unicorn': {'follow_calls': True},
+            'triton': {'symbolic': True, 'taint': True},
+            'angr': {'auto_load_libs': False},
+            'qiling': {'rootfs': '', 'multithread': False},
         },
         'api': {
             'host': '127.0.0.1',
@@ -178,8 +184,8 @@ class Config:
             except ValueError:
                 logger.warning("Invalid VMDS_ANALYSIS_TIMEOUT value")
         
-        if 'VMDS_PIN_PATH' in os.environ:
-            self._config['pin']['path'] = os.environ['VMDS_PIN_PATH']
+        if 'VMDS_TRACING_BACKEND' in os.environ:
+            self._config['tracing']['backend'] = os.environ['VMDS_TRACING_BACKEND']
         
         if 'VMDS_API_HOST' in os.environ:
             self._config['api']['host'] = os.environ['VMDS_API_HOST']
@@ -274,15 +280,36 @@ class Config:
         # --- Known top-level sections ---
         known_sections = set(self.DEFAULTS.keys()) | {
             "metroplex",
+            # Legacy — kept for backward compat if users still have pin: in YAML
+            "pin",
         }
         for key in self._config:
             if key not in known_sections:
                 logger.warning("Unknown config section '%s' — typo?", key)
 
-        # -- pin path --
-        pin_path = self.get('pin.path')
-        if pin_path and not Path(pin_path).exists():
-            logger.warning("Pin binary not found at: %s", pin_path)
+        # -- tracing.backend --
+        valid_backends = {"auto", "unicorn", "triton", "angr", "qiling", "file"}
+        trace_backend = self.get('tracing.backend', 'auto')
+        if isinstance(trace_backend, str) and trace_backend.lower() not in valid_backends:
+            errors.append(
+                f"tracing.backend must be one of {valid_backends}, got {trace_backend!r}"
+            )
+
+        # -- tracing.timeout --
+        trace_timeout = self.get('tracing.timeout')
+        if trace_timeout is not None:
+            if not isinstance(trace_timeout, int) or trace_timeout <= 0:
+                errors.append(
+                    f"tracing.timeout must be a positive int, got {trace_timeout!r}"
+                )
+
+        # -- tracing.max_instructions --
+        max_instr = self.get('tracing.max_instructions')
+        if max_instr is not None:
+            if not isinstance(max_instr, int) or max_instr < 1:
+                errors.append(
+                    f"tracing.max_instructions must be >= 1, got {max_instr!r}"
+                )
 
         # -- analysis.timeout --
         timeout = self.get('analysis.timeout')
@@ -343,14 +370,6 @@ class Config:
             if not isinstance(vt, (int, float)) or not (0.0 <= vt <= 1.0):
                 errors.append(
                     f"vmprotect.validation_threshold must be in [0,1], got {vt!r}"
-                )
-
-        # -- pin.timeout --
-        pin_timeout = self.get('pin.timeout')
-        if pin_timeout is not None:
-            if not isinstance(pin_timeout, int) or pin_timeout <= 0:
-                errors.append(
-                    f"pin.timeout must be a positive int, got {pin_timeout!r}"
                 )
 
         # -- dispatcher settings --
