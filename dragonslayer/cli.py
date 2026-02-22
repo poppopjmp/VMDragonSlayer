@@ -30,6 +30,14 @@ import click
 from dragonslayer.core.exceptions import VMDragonSlayerError
 
 # ---------------------------------------------------------------------------
+# Exit codes (CI-friendly)
+# ---------------------------------------------------------------------------
+
+EX_OK = 0          # No issues
+EX_ERROR = 1       # Runtime / analysis error
+EX_DETECTED = 2    # VM protection detected
+
+# ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
 
@@ -73,17 +81,27 @@ def scan(ctx: click.Context, file: str, json_output: bool) -> None:
     click.echo(f"[*] Scanning {file} ({len(binary_data):,} bytes)...\n")
 
     t0 = time.perf_counter()
-    pipe, cfg = create_quick_scan_pipeline()
-    pipeline_result = pipe.run(binary_data=binary_data, pipeline_config=cfg)
+    try:
+        pipe, cfg = create_quick_scan_pipeline()
+        pipeline_result = pipe.run(binary_data=binary_data, pipeline_config=cfg)
+    except (VMDragonSlayerError, OSError) as exc:
+        click.secho(f"Scan failed: {exc}", fg="red", err=True)
+        raise SystemExit(EX_ERROR) from exc
     elapsed = time.perf_counter() - t0
 
     result = pipeline_result.to_dict()
 
     if json_output:
         click.echo(json.dumps(result, indent=2, default=str))
-        return
+    else:
+        _print_scan_summary(pipeline_result.shared_data, elapsed)
 
-    _print_scan_summary(pipeline_result.shared_data, elapsed)
+    # Non-zero exit when VM protection is detected (useful in CI).
+    vm_detected = pipeline_result.shared_data.get("vm_discovery", {}).get(
+        "vm_detected", False,
+    )
+    if vm_detected:
+        raise SystemExit(EX_DETECTED)
 
 
 def _print_scan_summary(result: dict, elapsed: float) -> None:
@@ -160,7 +178,7 @@ def analyze(
         )
     except (VMDragonSlayerError, OSError) as exc:
         click.secho(f"Analysis failed: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
+        raise SystemExit(EX_ERROR) from exc
     elapsed = time.perf_counter() - t0
 
     result_dict = result.to_dict()
@@ -173,6 +191,11 @@ def analyze(
         click.echo(json.dumps(result_dict, indent=2, default=str))
     else:
         _print_analysis_summary(result_dict, elapsed)
+
+    # Non-zero exit when VM protection is detected (useful in CI).
+    vm_info = result_dict.get("results", {}).get("vm_discovery", {})
+    if vm_info.get("vm_detected", False):
+        raise SystemExit(EX_DETECTED)
 
 
 def _print_analysis_summary(result: dict, elapsed: float) -> None:
@@ -313,7 +336,7 @@ def export_cmd(
         result = orch.analyze_binary(binary_data, analysis_type=analysis_type)
     except (VMDragonSlayerError, OSError) as exc:
         click.secho(f"Analysis failed: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
+        raise SystemExit(EX_ERROR) from exc
     elapsed = time.perf_counter() - t0
 
     # Build an ExecutionTrace from analysis results for export
