@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, TypedDict
 import shutil as _shutil
 
 from .exceptions import VMDragonSlayerError
+from .pipeline_state import PipelineState, validate_stage_order
 
 logger = logging.getLogger(__name__)
 
@@ -312,15 +313,19 @@ class AnalysisPipeline:
 
         sha256 = hashlib.sha256(binary_data).hexdigest()
 
+        # Validate stage dependency order before execution
+        dep_warnings = validate_stage_order(cfg.stages)
+        for w in dep_warnings:
+            logger.warning("Stage dependency: %s", w)
+
         ctx = PluginContext(
             storage=storage,
             config=dict(self._cfg._config) if hasattr(self._cfg, "_config") else {},
-            shared_data={
-                "binary_size": len(binary_data),
-                "sha256": sha256,
-                "metadata": metadata,
-                "pipeline_stages_completed": [],
-            },
+            shared_data=PipelineState(
+                binary_size=len(binary_data),
+                sha256=sha256,
+                metadata=metadata,
+            ),
             sample_hash=sha256,
             work_dir=work_dir,
         )
@@ -412,7 +417,9 @@ class AnalysisPipeline:
         return PipelineResult(
             success=any_success,
             stages=stage_results,
-            shared_data=ctx.shared_data,
+            shared_data=ctx.shared_data.to_dict()
+                if hasattr(ctx.shared_data, "to_dict")
+                else ctx.shared_data,
             llm_insights=llm_insights,
             total_duration=elapsed,
             errors=errors,
@@ -477,8 +484,7 @@ class AnalysisPipeline:
         and ``sections`` so downstream stages can access them
         without redoing PE parsing.
         """
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.binary_format import parse_binary
             parsed = parse_binary(binary_data)
             ctx.shared_data["parsed_binary"] = parsed
@@ -500,22 +506,13 @@ class AnalysisPipeline:
                 }
                 for s in parsed.sections
             ]
-            data = {
+            return {
                 "image_base": parsed.image_base,
                 "entry_point": parsed.entry_point,
                 "architecture": arch_val,
                 "section_count": len(parsed.sections),
             }
-            return StageResult(
-                stage="binary_parse", success=True, data=data,
-                duration=time.monotonic() - t0,
-            )
-        except _STAGE_ERRORS as exc:
-            logger.debug("Binary parse stage failed: %s", exc)
-            return StageResult(
-                stage="binary_parse", success=False, error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+        return self._run_stage("binary_parse", _do)
 
     def _run_pattern_analysis(
         self,
@@ -523,8 +520,7 @@ class AnalysisPipeline:
         ctx: Any,
     ) -> StageResult:
         """Run the local pattern recogniser and store results in shared_data."""
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.pattern_analysis.database import PatternDatabase
             from ..analysis.pattern_analysis.recognizer import PatternRecognizer
 
@@ -571,24 +567,10 @@ class AnalysisPipeline:
             }
 
             # Store in shared_data for downstream stages
-            ctx.shared_data["pattern_analysis"] = result_data
             ctx.shared_data["pattern_matches"] = matches_data
 
-            return StageResult(
-                stage="pattern_analysis",
-                success=True,
-                data=result_data,
-                duration=time.monotonic() - t0,
-            )
-
-        except _STAGE_ERRORS as exc:
-            logger.exception("Pattern analysis stage failed")
-            return StageResult(
-                stage="pattern_analysis",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result_data
+        return self._run_stage("pattern_analysis", _do, ctx)
 
     def _run_vm_discovery(
         self,
@@ -596,8 +578,7 @@ class AnalysisPipeline:
         ctx: Any,
     ) -> StageResult:
         """Run VM discovery heuristics and store results in shared_data."""
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.vm_discovery.detector import VMDetector
             from ..analysis.vm_discovery.database import VMSignatureDatabase
 
@@ -619,25 +600,11 @@ class AnalysisPipeline:
             ]
             result["dispatcher_addresses"] = dispatcher_addrs
 
-            ctx.shared_data["vm_discovery"] = result
             ctx.shared_data["vm_detected"] = result.get("vm_detected", False)
             ctx.shared_data["vm_confidence"] = result.get("confidence", 0.0)
 
-            return StageResult(
-                stage="vm_discovery",
-                success=True,
-                data=result,
-                duration=time.monotonic() - t0,
-            )
-
-        except _STAGE_ERRORS as exc:
-            logger.exception("VM discovery stage failed")
-            return StageResult(
-                stage="vm_discovery",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result
+        return self._run_stage("vm_discovery", _do, ctx)
 
     # -- plugin stage runner -----------------------------------------------
 
@@ -755,15 +722,13 @@ class AnalysisPipeline:
         Also builds the runtime hook-set (Batch 17) so downstream
         stages can install hooks into Qiling / angr / Triton.
         """
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.anti_evasion.environment_normalizer import EnvironmentNormalizer
 
             normalizer = EnvironmentNormalizer()
             report = normalizer.analyze(binary_data)
             result_data = report.to_dict()
 
-            ctx.shared_data["anti_evasion"] = result_data
             ctx.shared_data["evasion_risk"] = report.risk_score
 
             # Build runtime hook-set from the report (Batch 17).
@@ -781,25 +746,12 @@ class AnalysisPipeline:
             except (*_STAGE_ERRORS, RuntimeError, ValueError) as exc:
                 logger.debug("Runtime hook-set generation skipped: %s", exc)
 
-            return StageResult(
-                stage="anti_evasion",
-                success=True,
-                data=result_data,
-                duration=time.monotonic() - t0,
-            )
-        except _STAGE_ERRORS as exc:
-            logger.exception("Anti-evasion stage failed")
-            return StageResult(
-                stage="anti_evasion",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result_data
+        return self._run_stage("anti_evasion", _do, ctx)
 
     def _run_classify(self, ctx: Any) -> StageResult:
         """Classify pattern matches into handler categories."""
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.pattern_analysis.classifier import PatternClassifier
 
             matches = ctx.shared_data.get("pattern_matches", [])
@@ -808,33 +760,19 @@ class AnalysisPipeline:
                     stage="classify",
                     success=True,
                     data={"skipped": True, "reason": "No pattern matches to classify"},
-                    duration=time.monotonic() - t0,
                 )
 
             classifier = PatternClassifier(use_llm=False)
             report = classifier.classify_matches(matches)
             result_data = report.to_dict()
 
-            ctx.shared_data["classification"] = result_data
             ctx.shared_data["dominant_handler_type"] = (
                 report.dominant_type.value if report.dominant_type else None
             )
             ctx.shared_data["vm_complexity"] = report.complexity_score
 
-            return StageResult(
-                stage="classify",
-                success=True,
-                data=result_data,
-                duration=time.monotonic() - t0,
-            )
-        except _STAGE_ERRORS as exc:
-            logger.exception("Classification stage failed")
-            return StageResult(
-                stage="classify",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result_data
+        return self._run_stage("classify", _do, ctx)
 
     def _run_taint_analysis(
         self,
@@ -859,8 +797,7 @@ class AnalysisPipeline:
         provides virtual register mapping and handler boundary detection.
         Otherwise falls back to the generic :class:`TaintAnalyzer`.
         """
-        t0 = time.monotonic()
-        try:
+        def _do():
             from ..analysis.taint_tracking.analyzer import TaintAnalyzer
             from ..analysis.taint_tracking.vm_taint_tracker import VMTaintTracker
             from ..analysis.taint_tracking.dtt_executor import DTTExecutor
@@ -912,7 +849,6 @@ class AnalysisPipeline:
                     stage="taint_analysis",
                     success=True,
                     data={"skipped": True, "reason": "No instructions lifted from binary"},
-                    duration=time.monotonic() - t0,
                 )
 
             vm_detected = vm_info.get("vm_detected", False)
@@ -990,20 +926,8 @@ class AnalysisPipeline:
             elif hasattr(result, "to_dict"):
                 pass  # provenance added by caller if needed
 
-            return StageResult(
-                stage="taint_analysis",
-                success=True,
-                data=result,
-                duration=time.monotonic() - t0,
-            )
-        except _STAGE_ERRORS as exc:
-            logger.exception("Taint analysis stage failed")
-            return StageResult(
-                stage="taint_analysis",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result
+        return self._run_stage("taint_analysis", _do)
 
     def _run_symbolic_execution(
         self,
@@ -1019,8 +943,7 @@ class AnalysisPipeline:
         constraints they are forwarded to the Z3 solver as seed
         constraints, giving the explorer a head start.
         """
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.symbolic_execution.executor import SymbolicExecutor
             from ..analysis.trace_ingestion import from_shared_data
 
@@ -1117,22 +1040,8 @@ class AnalysisPipeline:
                 result_data["trace_source"] = "plugin"
                 result_data["trace_region_count"] = len(trace_regions)
 
-            ctx.shared_data["symbolic_execution"] = result_data
-
-            return StageResult(
-                stage="symbolic_execution",
-                success=True,
-                data=result_data,
-                duration=time.monotonic() - t0,
-            )
-        except _STAGE_ERRORS as exc:
-            logger.exception("Symbolic execution stage failed")
-            return StageResult(
-                stage="symbolic_execution",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result_data
+        return self._run_stage("symbolic_execution", _do, ctx)
 
     def _run_dispatcher_analysis(
         self,
@@ -1146,31 +1055,17 @@ class AnalysisPipeline:
         classifications.  Stores the dispatch table in shared_data for
         the LLM analyzer and reporter.
         """
-        t0 = time.monotonic()
-        try:
+        def _do() -> dict:
             from ..analysis.vm_discovery.dispatcher import DispatcherAnalyzer
 
             analyzer = DispatcherAnalyzer()
             result = analyzer.analyze(binary_data, shared_data=ctx.shared_data)
             result_data = result.to_dict()
 
-            ctx.shared_data["dispatcher_analysis"] = result_data
             ctx.shared_data["handler_table"] = result_data.get("handler_table", [])
 
-            return StageResult(
-                stage="dispatcher_analysis",
-                success=result.success,
-                data=result_data,
-                duration=time.monotonic() - t0,
-            )
-        except _STAGE_ERRORS as exc:
-            logger.exception("Dispatcher analysis stage failed")
-            return StageResult(
-                stage="dispatcher_analysis",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return result_data
+        return self._run_stage("dispatcher_analysis", _do, ctx)
 
     # -- LLM stages --------------------------------------------------------
 
@@ -1712,8 +1607,7 @@ class AnalysisPipeline:
         2. Deobfuscation hints if VM is detected.
         3. Code recovery if instruction traces are available.
         """
-        t0 = time.monotonic()
-        try:
+        def _do():
             from ..llm import get_llm_analyzer
 
             llm = get_llm_analyzer()
@@ -1722,7 +1616,6 @@ class AnalysisPipeline:
                     stage="llm_analysis",
                     success=True,
                     data={"skipped": True, "reason": "LLM not available"},
-                    duration=time.monotonic() - t0,
                 )
 
             insights: Dict[str, Any] = {}
@@ -1781,30 +1674,14 @@ class AnalysisPipeline:
                         if "error" not in recovered:
                             insights.setdefault("code_recovery", {})[plugin_name] = recovered
 
-            ctx.shared_data["llm_analysis"] = insights
-
-            return StageResult(
-                stage="llm_analysis",
-                success=True,
-                data=insights,
-                duration=time.monotonic() - t0,
-            )
-
-        except _STAGE_ERRORS as exc:
-            logger.exception("LLM analysis stage failed")
-            return StageResult(
-                stage="llm_analysis",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return insights
+        return self._run_stage("llm_analysis", _do, ctx)
 
     def _run_llm_summary(self, ctx: Any) -> StageResult:
         """
         Generate an executive summary of all analysis results using LLM.
         """
-        t0 = time.monotonic()
-        try:
+        def _do():
             from ..llm import get_llm_analyzer
 
             llm = get_llm_analyzer()
@@ -1813,7 +1690,6 @@ class AnalysisPipeline:
                     stage="llm_summary",
                     success=True,
                     data={"skipped": True, "reason": "LLM not available"},
-                    duration=time.monotonic() - t0,
                 )
 
             # Build a summary of all accumulated data
@@ -1829,24 +1705,8 @@ class AnalysisPipeline:
                 "stages_completed": ctx.shared_data.get("pipeline_stages_completed", []),
             }
 
-            summary = llm.summarise_analysis(summary_input)
-            ctx.shared_data["llm_summary"] = summary
-
-            return StageResult(
-                stage="llm_summary",
-                success=True,
-                data=summary,
-                duration=time.monotonic() - t0,
-            )
-
-        except _STAGE_ERRORS as exc:
-            logger.exception("LLM summary stage failed")
-            return StageResult(
-                stage="llm_summary",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+            return llm.summarise_analysis(summary_input)
+        return self._run_stage("llm_summary", _do, ctx)
 
 
 # ---------------------------------------------------------------------------
