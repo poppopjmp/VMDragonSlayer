@@ -51,7 +51,7 @@ Index of primary packages and key modules.
 
 ### `symbolic_execution/`
 
-- `executor.py` — Symbolic executor: drives z3 state through instructions, forks on branches
+- `executor.py` — Symbolic executor: drives z3 state through instructions, forks on branches; speculative path exploration with boundary concretisation
 - `state.py` — Symbolic state: registers (sub-register aliasing), memory (symbolic aliasing), path constraints
 - `lifter.py` — Capstone-based lifting of x86/x64 to simplified IR
 - `solver.py` — z3 constraint solving for opaque predicates and expression simplification
@@ -62,17 +62,27 @@ Index of primary packages and key modules.
 
 ## Machine Learning (`dragonslayer/ml/`)
 
-- `pipeline.py` — Feature extraction from analysis artefacts
+- `pipeline.py` — Feature extraction (146 dimensions): extended features, bigrams, register effects, operand patterns, CFG topology (7 features), taint propagation (7 features)
 - `model.py` — `VMHandlerModel` weighted-rule classifier (+ optional scikit-learn)
 - `handler_classifier.py` — Bridge connecting ML pipeline to devirtualisation
 - `classifier.py` — `VMClassifier` high-level entry point
 - `trainer.py` — Training infrastructure: multi-protector synthetic data generation (VMProtect, Themida, Code Virtualizer), jitter transforms (NOP insertion, register renaming, dead-code injection), `train_and_save_model()` with GradientBoosting
-- `ensemble.py` — Multi-model combination (majority/weighted vote)
+- `ensemble.py` — Multi-model combination (majority/weighted vote, stacked ensemble)
+- `evaluate.py` — P/R/F1/confusion matrix evaluation against ground truth
+- `active_learning.py` — Uncertainty sampling (`entropy`/`margin`/`least_confidence`); `FeedbackStore` for analyst corrections with JSON persistence; `export_training_set()` for merging corrections into training data
+- `taxonomy.py` — Canonical handler category normalisation (`canonicalize()`, `CANONICAL_CATEGORIES`)
 
 ## Devirtualisation Pipelines (`dragonslayer/analysis/`)
 
-- `themida_devirt.py` — Themida / WinLicense VMs: variant detection, bytecode decode, handler extraction, opcode map, devirtualise pipeline
-- `cv_devirt.py` — Oreans Code Virtualizer: version detection, LODSB/XLAT fetch-decrypt decode, handler extraction, opcode map, devirtualise pipeline
+- `themida_devirt.py` — Themida / WinLicense VMs: variant detection, bytecode decode, handler extraction, opcode map, devirtualise pipeline; `classify_handler_entries()` capstone-based classification bridge
+- `cv_devirt.py` — Oreans Code Virtualizer: version detection, LODSB/XLAT fetch-decrypt decode, handler extraction, opcode map, devirtualise pipeline; `classify_cv_handler_entries()` classification bridge
+
+## Handler Semantics (`dragonslayer/analysis/handler_semantics.py`)
+
+- 13 scalar VM operations (ADD, SUB, XOR, CMP, LOAD, STORE, PUSH, POP, etc.)
+- 13 SIMD VM operations (SIMD_ADD, SIMD_XOR, SIMD_SHUFFLE, SIMD_AES, etc.)
+- ~160 SSE/AVX mnemonic mappings; XMM (16B) and YMM (32B) width detection
+- SIMD_LOAD/SIMD_STORE de-weighted as infrastructure operations
 
 ## Trace Collection & Export (`dragonslayer/analysis/`)
 
@@ -91,7 +101,7 @@ Index of primary packages and key modules.
 
 ## Plugin Framework (`dragonslayer/plugins/`)
 
-- `__init__.py` — `Plugin` ABC, `PluginRegistry`, `PluginContext`
+- `__init__.py` — `Plugin` ABC (with `depends_on`, `provides`, `version`), `PluginRegistry`, `PluginContext`, `validate_plugin_dependencies()`, `sort_plugins_by_deps()` (Kahn's topological sort)
 - `_storage.py` — Storage backends (Memory, LocalFile, Elasticsearch)
 - `static/` — PE, ELF, Mach-O, certificate, string extraction plugins
 - `dynamic/` — angr, Triton, Qiling, Blackfyre, BinExport, Strelka plugins
@@ -100,7 +110,7 @@ Index of primary packages and key modules.
 
 ## API (`dragonslayer/api/`)
 
-- `server.py` — FastAPI REST server (`/analyze`, `/health`, `/status`, WebSocket `/ws`)
+- `server.py` — FastAPI REST server: `/analyze`, `/pipeline`, `/feedback`, `/uncertain`, `/plugins`, `/plugins/health`, `/health`, `/status`, WebSocket `/ws`
 - `client.py` — Python HTTP clients (API server + Metroplex gateway)
 
 - **utils** — Supporting utilities for memory management, performance monitoring, and platform abstraction

@@ -37,7 +37,7 @@ Implementation: `dragonslayer/api/server.py`. Internals registry: `dragonslayer/
 
 ### Core Endpoints
 
-- **GET `/`** — Basic service info (service, version, status, docs URL)
+- **GET `/`** — Basic service info (service, version, status, docs URL, routes list)
 - **GET `/health`** — Liveness and uptime checks
 - **GET `/status`** — Detailed status counts and uptime (response: `StatusResponse`)
 - **GET `/analysis-types`** — Supported `analysis_types` and `workflow_strategies`
@@ -83,6 +83,79 @@ Implementation: `dragonslayer/api/server.py`. Internals registry: `dragonslayer/
 	- Form fields: `file` (application/octet-stream), `analysis_type` (default `hybrid`)
 	- Optional parameters: `enable_ml`, `enable_symbolic`, `enable_realtime`
 	- On success, returns the same response model as `/analyze`
+
+### Pipeline Endpoint
+
+- **POST `/pipeline`** — Run a selected subset of pipeline stages
+	- Request JSON:
+		```json
+		{
+			"sample_data": "UEsDBAoAAAAAAA==",
+			"stages": ["pattern_scan", "ml_classify", "symbolic_verify"],
+			"options": {}
+		}
+		```
+	- Valid stages: `decode`, `pattern_scan`, `ml_classify`, `taint_track`, `symbolic_verify`, `cfg_reconstruct`, `handler_semantic`, `simd_semantic`, `anti_evasion`, `trace_export`, `report`, `plugin`, `llm`, `ensemble`, `cross_validate`
+	- Response JSON: same shape as `/analyze`, filtered to only the requested stages
+
+### Active Learning Endpoints
+
+- **POST `/feedback`** — Record an analyst correction for active learning
+	- Request JSON:
+		```json
+		{
+			"sample_id": "handler_0x401000",
+			"predicted_label": "VM_ADD",
+			"correct_label": "VM_XOR",
+			"confidence": 0.62,
+			"analyst_id": "analyst_1"
+		}
+		```
+	- Response: `{"status": "recorded", "sample_id": "handler_0x401000"}`
+
+- **POST `/uncertain`** — Select the most uncertain samples for analyst review
+	- Request JSON:
+		```json
+		{
+			"predictions": [
+				{"sample_id": "h1", "label": "VM_ADD", "confidence": 0.55, "probabilities": [0.55, 0.30, 0.15]},
+				{"sample_id": "h2", "label": "VM_SUB", "confidence": 0.91, "probabilities": [0.91, 0.05, 0.04]}
+			],
+			"strategy": "entropy",
+			"k": 5,
+			"confidence_threshold": 0.8
+		}
+		```
+	- Response: list of `UncertainSample` objects sorted by descending uncertainty
+
+### Plugin Introspection Endpoints
+
+- **GET `/plugins`** — List all registered plugins with metadata
+	- Response JSON:
+		```json
+		[
+			{
+				"name": "pe_static",
+				"stage": "static_analysis",
+				"description": "PE file analysis",
+				"version": "0.0.0",
+				"available": true,
+				"depends_on": [],
+				"provides": ["pe_headers"]
+			}
+		]
+		```
+
+- **GET `/plugins/health`** — Validate plugin dependency chains
+	- Response JSON:
+		```json
+		{
+			"healthy": true,
+			"plugin_count": 12,
+			"issues": []
+		}
+		```
+	- Issues (if any) list missing dependencies or circular references
 
 ### Real-time Communication
 

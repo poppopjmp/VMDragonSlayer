@@ -4,6 +4,42 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Deep Review Implementation Cycle (Phases 1–4)
+
+Systematic 4-phase improvement cycle driven by a comprehensive expert
+codebase review.  All phases committed incrementally with full test
+suite validation at each step.
+
+Test count: **3825 → 3886** (61 new tests; 46 skipped, 1 xfailed).
+
+#### Phase 1 — Pipeline Architecture (`90a4fbd` → `cf99ca4`)
+
+- **Typed PipelineState** (`pipeline_state.py`): 47 typed fields replacing untyped `shared_data: Dict[str, Any]`, dict-compatible interface for backward compat
+- **Stage DAG** (`STAGE_DEPENDENCIES`): Dependency graph for 10 stages, `validate_stage_order()` validator
+- **DRY stage dispatch** (`pipeline.py`): `PipelineConfig` with 14 stages, `_run_stage()` helper eliminating 180+ lines of boilerplate
+- **Devirt decomposition** (`devirt_stages.py`): 490-line `_do_devirt()` monolith split into 12 sub-step functions with `DevirtWorkspace` dataclass
+- **DRY orchestrator** (`orchestrator.py`): `_run_engine_safe()` helper, fixed `_dispatch_pipeline` timeout race, `analyze_binary_data_async()`
+
+#### Phase 2 — Analysis Depth (6 commits: `ecd452b` → `719ff85`)
+
+- **2A — CFG+taint ML features** (`ml/pipeline.py`): `extract_cfg_features()` (7 features: depth, width, branch ratio, loop count, back edges, diameter, density) and `extract_taint_features()` (7 features: reach, entropy, stack/memory split, live proportion); feature vector expanded 132 → 146 dimensions
+- **2B — SIMD/SSE/AVX semantic operations** (`handler_semantics.py`): 13 SIMD VMOperation constants (SIMD_ADD through SIMD_UNKNOWN), ~160 SSE/AVX mnemonic mappings, XMM (16B) and YMM (32B) width detection, SIMD_LOAD/SIMD_STORE de-weighting as infrastructure ops
+- **2C — Pipeline API endpoint** (`server.py`, `orchestrator.py`): `PipelineRequest` Pydantic model with base64/stage validators, `POST /pipeline` endpoint, `run_pipeline()` and `run_pipeline_async()` methods on `VMDragonSlayerAPI`
+- **2D — Themida/CV handler classification bridge** (`themida_devirt.py`, `cv_devirt.py`): `classify_handler_entries()` and `classify_cv_handler_entries()` capstone-based bridge functions wired into Step 4 of both devirt pipelines, guarded by optional `binary_data` parameter
+
+#### Phase 3 — Infrastructure Hardening (`40ef448`)
+
+- **Async API**: All analysis endpoints properly async with `asyncio.to_thread()` for CPU-bound work
+- **Thread-safe plugin discovery**: Double-checked locking pattern for `_ensure_discovered()`
+- **LLM taxonomy normalisation**: `canonicalize()` maps vendor-specific handler names to canonical CANONICAL_CATEGORIES
+
+#### Phase 4 — Advanced Features (`8cd3cd9`)
+
+- **4A — Plugin dependency tracking**: `depends_on: set[str]` and `provides: set[str]` on `Plugin` ABC; `validate_plugin_dependencies()` for graph-wide dep checks; `sort_plugins_by_deps()` with Kahn's topological sort; `PluginDependencyError` exception; wired into `_run_plugin_stage()`
+- **4B — Active learning infrastructure** (`ml/active_learning.py`): `UncertainSample`, `FeedbackStore`, `FeedbackEntry` dataclasses; `select_uncertain_samples()` with entropy/margin/least-confidence strategies; `compute_entropy()`, `compute_margin()`; JSON-file persistence for analyst corrections; `export_training_set()` for merging corrections into training data; `POST /feedback` and `POST /uncertain` API endpoints
+- **4C — Speculative path exploration** (`executor.py`): `speculative: bool` and `max_speculative_forks: int` parameters; speculative forking on fall-through infeasible branches; boundary-value concretisation for unresolved indirect branches; `speculative_paths_explored` counter in `ExecutionResult`; wired into `from_config()` for analysis profile control
+- **4D — Plugin introspection**: `GET /plugins` listing with metadata (name, stage, version, deps, provides); `GET /plugins/health` dependency validation; `version: str` attribute on `Plugin` ABC
+
 ### Quality & Hardening Batches 1-9
 
 Systematic codebase improvement driven by a comprehensive review.

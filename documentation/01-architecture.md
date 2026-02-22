@@ -56,18 +56,28 @@ Supporting analysis modules:
 
 | Module | Purpose |
 |--------|---------|
-| `pipeline.py` | Feature extraction from analysis artefacts; mnemonic sets are `frozenset` for immutability |
+| `pipeline.py` | Feature extraction from analysis artefacts (146 dimensions); CFG and taint features; mnemonic sets are `frozenset` for immutability |
 | `model.py` | VM handler classifier (weighted-rule + optional scikit-learn); pickle fallbacks removed — requires joblib |
 | `handler_classifier.py` | Bridge between ML pipeline and devirtualisation |
-| `trainer.py` | Training infrastructure |
-| `ensemble.py` | Multi-model combination (stub) |
+| `trainer.py` | Training infrastructure; multi-protector synthetic data (2160 samples) |
+| `ensemble.py` | Multi-model combination (majority vote, weighted, stacked) |
+| `evaluate.py` | P/R/F1/confusion matrix evaluation against ground truth |
+| `active_learning.py` | Uncertainty sampling (`entropy`/`margin`/`least_confidence`); `FeedbackStore` for analyst corrections; `export_training_set()` for incremental retraining |
+| `taxonomy.py` | Canonical handler category normalisation |
 
 ## 4  Plugin Framework (`dragonslayer/plugins/`)
 
 Plugins implement the `Plugin` ABC and run inside the pipeline's
 `PluginContext`.  `_execute_with_timeout` uses `ThreadPoolExecutor`
 for clean timeout handling.  `PluginContext.storage` is typed
-`StorageBackend | None` via `TYPE_CHECKING`.  Four built-in stages:
+`StorageBackend | None` via `TYPE_CHECKING`.
+
+**Dependency tracking** — plugins declare `depends_on: set[str]` (intra-stage
+ordering) and `provides: set[str]` (shared_data keys).
+`validate_plugin_dependencies()` checks the full graph;
+`sort_plugins_by_deps()` runs Kahn's topological sort before parallel dispatch.
+
+Four built-in stages:
 
 | Stage | Directory | Examples |
 |-------|-----------|----------|
@@ -83,14 +93,21 @@ External tool bridges live under `plugins/` at the repo root:
 
 | Module | Purpose |
 |--------|---------|
-| `server.py` | FastAPI REST server (`/analyze`, `/health`, `/status`, WebSocket `/ws`) |
+| `server.py` | FastAPI REST server — `/analyze`, `/pipeline`, `/feedback`, `/uncertain`, `/plugins`, `/plugins/health`, `/health`, `/status`, WebSocket `/ws` |
 | `client.py` | Python clients for the API and Metroplex gateway |
 
-## 6  GPU (`dragonslayer/gpu/`)
+## 6  Symbolic Execution (`dragonslayer/analysis/symbolic_execution/`)
 
-Interface stubs for future GPU-accelerated pattern matching —
-`engine.py`, `memory.py`, `optimizer.py`, `profiler.py`.
-Not yet functional.
+| Feature | Status |
+|---------|--------|
+| Coverage-guided priority worklist | Functional (heapq) |
+| Veritesting (inline diamond merge) | Functional |
+| Path merging at join points | Functional |
+| Incremental z3 push/pop feasibility | Functional |
+| Indirect branch resolution | Functional (z3-based) |
+| Loop bounding with widening | Functional |
+| Per-path timeout | Functional |
+| Speculative path exploration | Functional — boundary concretisation on infeasible branches |
 
 ## Data Flow
 
@@ -104,13 +121,15 @@ Binary ──► ParsedBinary ──► Unicorn Trace ──► ExecutionTrace
                              │
                              ▼
                       Handler Semantics ──► OpcodeTable
+                      (13 scalar + 13 SIMD ops)
                              │
                       ┌──────┴──────┐
                       ▼             ▼
                Symbolic Exec   Bytecode Extract
-                      │             │
-                      ▼             ▼
-               MBA Simplify   BytecodeStream
+               (speculative)       │
+                      │             ▼
+                      ▼        BytecodeStream
+               MBA Simplify
                       │
                       ▼
                Data-Flow Analysis

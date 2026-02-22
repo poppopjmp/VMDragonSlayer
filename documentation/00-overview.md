@@ -14,8 +14,8 @@ to recover the original operations hidden inside VM interpreters.
 | VM presence detection | `analysis/vm_discovery/detector.py` | Functional |
 | Handler boundary identification | `analysis/vm_discovery/handler_boundaries.py` | Functional |
 | Dispatcher reconstruction | `analysis/vm_discovery/dispatcher.py` | Functional |
-| Handler semantics extraction | `analysis/handler_semantics.py` | Functional — 13 VM operations |
-| Symbolic execution (z3) | `analysis/symbolic_execution/` | Functional — sub-register aliasing, symbolic memory aliasing |
+| Handler semantics extraction | `analysis/handler_semantics.py` | Functional — 13 VM operations + 13 SIMD operations (SSE/AVX) |
+| Symbolic execution (z3) | `analysis/symbolic_execution/` | Functional — sub-register aliasing, symbolic memory aliasing, speculative path exploration |
 | MBA simplification | `analysis/mba_simplifier.py` | Functional — 31 rules + linear MBA decomposition + iterative deep simplify |
 | Bytecode extraction | `analysis/bytecode_extract.py` | Functional |
 | CFG reconstruction (networkx) | `analysis/cfg.py` | Functional |
@@ -24,9 +24,9 @@ to recover the original operations hidden inside VM interpreters.
 | Pattern matching (YARA / regex) | `analysis/pattern_analysis/` | Functional |
 | Taint tracking | `analysis/taint_tracking/` | Functional |
 | Anti-evasion | `analysis/anti_evasion/` | Functional |
-| ML handler classification | `ml/` | Functional (rule-based + optional scikit-learn) |
-| Plugin framework | `plugins/` | Functional — static, dynamic, enrichment, reporting |
-| REST API (FastAPI) | `api/server.py` | Functional |
+| ML handler classification | `ml/` | Functional (rule-based + optional scikit-learn + active learning) |
+| Plugin framework | `plugins/` | Functional — static, dynamic, enrichment, reporting; dependency tracking |
+| REST API (FastAPI) | `api/server.py` | Functional — /analyze, /pipeline, /feedback, /uncertain, /plugins |
 | GPU acceleration | `gpu/` | **Stubs only** |
 
 ## Architecture (High Level)
