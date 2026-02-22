@@ -32,9 +32,13 @@ class TestPipelineStageErrors:
 
     def test_stage_errors_contents(self):
         from dragonslayer.core.pipeline import _STAGE_ERRORS
-        for exc_cls in (ValueError, TypeError, KeyError, IndexError,
-                        RuntimeError, OSError, ImportError, AttributeError):
+        from dragonslayer.core.exceptions import VMDragonSlayerError
+        # After narrowing, only framework + OS + ImportError are caught
+        for exc_cls in (VMDragonSlayerError, OSError, ImportError):
             assert exc_cls in _STAGE_ERRORS, f"{exc_cls.__name__} not in _STAGE_ERRORS"
+        # Generic programming-error types should NOT be present
+        for exc_cls in (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            assert exc_cls not in _STAGE_ERRORS, f"{exc_cls.__name__} should not be in _STAGE_ERRORS"
 
     def test_no_base_exception_in_stage_errors(self):
         from dragonslayer.core.pipeline import _STAGE_ERRORS

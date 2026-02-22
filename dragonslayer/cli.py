@@ -27,6 +27,8 @@ from typing import Optional
 
 import click
 
+from dragonslayer.core.exceptions import VMDragonSlayerError
+
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
@@ -156,7 +158,7 @@ def analyze(
             binary_data,
             analysis_type=analysis_type,
         )
-    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, ImportError) as exc:
+    except (VMDragonSlayerError, OSError) as exc:
         click.secho(f"Analysis failed: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
     elapsed = time.perf_counter() - t0
@@ -309,7 +311,7 @@ def export_cmd(
     orch = Orchestrator()
     try:
         result = orch.analyze_binary(binary_data, analysis_type=analysis_type)
-    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError, ImportError) as exc:
+    except (VMDragonSlayerError, OSError) as exc:
         click.secho(f"Analysis failed: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
     elapsed = time.perf_counter() - t0

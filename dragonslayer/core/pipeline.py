@@ -39,12 +39,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, TypedDict
 
 import shutil as _shutil
 
+from .exceptions import VMDragonSlayerError
+
 logger = logging.getLogger(__name__)
 
 # B88: Named exception tuple for stage-level fault tolerance.
-_STAGE_ERRORS = (
-    ValueError, TypeError, KeyError, IndexError, RuntimeError,
-    OSError, ImportError, AttributeError, ArithmeticError,
+# Only catch framework errors + OS-level I/O; let programming bugs propagate.
+_STAGE_ERRORS: tuple[type[BaseException], ...] = (
+    VMDragonSlayerError, OSError, ImportError,
 )
 
 
@@ -761,7 +763,7 @@ class AnalysisPipeline:
                     "hook_names": [h.name for h in hook_set.hooks],
                 }
                 ctx.shared_data["runtime_hook_set"] = hook_set
-            except _STAGE_ERRORS as exc:
+            except (*_STAGE_ERRORS, RuntimeError, ValueError) as exc:
                 logger.debug("Runtime hook-set generation skipped: %s", exc)
 
             return StageResult(
@@ -1341,7 +1343,10 @@ class AnalysisPipeline:
                 from ..analysis.vm_discovery.handler_extraction import (
                     extract_handler_bodies,
                 )
-                extraction = extract_handler_bodies(trace, boundaries)
+                extraction = extract_handler_bodies(
+                    trace, boundaries, vip_candidate.name,
+                    dispatcher_addresses=tuple(dispatcher_addrs),
+                )
                 extraction_data = extraction.to_dict()
                 ctx.shared_data["handler_extraction"] = extraction_data
             except _STAGE_ERRORS as exc:
@@ -1353,7 +1358,10 @@ class AnalysisPipeline:
                 from ..analysis.vm_discovery.context_registers import (
                     identify_vm_context,
                 )
-                context_layout = identify_vm_context(trace, boundaries)
+                context_layout = identify_vm_context(
+                    trace, dispatcher_addrs, boundaries,
+                    vip_register=vip_candidate.name,
+                )
                 context_layout_data = context_layout.to_dict()
                 ctx.shared_data["vm_context_layout"] = context_layout_data
             except _STAGE_ERRORS as exc:

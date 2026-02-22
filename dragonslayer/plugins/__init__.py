@@ -223,8 +223,7 @@ class Plugin(ABC):
             if result.duration == 0.0:
                 result.duration = time.monotonic() - t0
             return result
-        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError,
-                OSError, IndexError, ArithmeticError, ImportError) as exc:
+        except Exception as exc:
             logger.exception("Plugin %s failed", self.name)
             return self._make_result(
                 success=False,
@@ -249,8 +248,7 @@ class Plugin(ABC):
                 result_holder.append(
                     self.execute(file_path, file_data, context)
                 )
-            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError,
-                    OSError, IndexError, ArithmeticError, ImportError) as exc:
+            except Exception as exc:
                 error_holder.append(exc)
 
         thread = threading.Thread(target=_worker, daemon=True)

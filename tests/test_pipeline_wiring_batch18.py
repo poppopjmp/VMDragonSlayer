@@ -33,6 +33,12 @@ class _FakeInsn:
 class _FakeTrace:
     instructions: List[_FakeInsn] = field(default_factory=list)
 
+    def __len__(self) -> int:
+        return len(self.instructions)
+
+    def __getitem__(self, idx):
+        return self.instructions[idx]
+
 
 @dataclass
 class _FakeVipCandidate:
@@ -159,6 +165,28 @@ class TestDevirtWiringFull:
             "dragonslayer.analysis.vm_discovery.handler_boundaries.segment_trace": MagicMock(return_value=seg),
             "dragonslayer.analysis.handler_semantics.analyse_handler_semantics": MagicMock(return_value=opcode_table),
             "dragonslayer.analysis.pseudocode.emit_pseudocode": MagicMock(return_value=pseudo),
+            # Dispatcher detection needs mocking — real functions call len()
+            # on the trace and the fake doesn't fully implement the protocol.
+            "dragonslayer.analysis.vm_discovery.dispatcher.find_dispatcher": MagicMock(return_value=None),
+            "dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher": MagicMock(return_value=None),
+            # Handler extraction / context registers also receive the fake trace
+            "dragonslayer.analysis.vm_discovery.handler_extraction.extract_handler_bodies": MagicMock(
+                return_value=MagicMock(to_dict=MagicMock(return_value={"bodies": []})),
+            ),
+            "dragonslayer.analysis.vm_discovery.context_registers.identify_vm_context": MagicMock(
+                return_value=MagicMock(to_dict=MagicMock(return_value={"layout": {}})),
+            ),
+            # Symbolic depth bridge and handler clustering
+            "dragonslayer.analysis.symbolic_depth.collect_symbolic_summaries": MagicMock(return_value=None),
+            "dragonslayer.analysis.handler_clustering.cluster_handlers_by_semantics": MagicMock(
+                return_value=MagicMock(to_dict=MagicMock(return_value={"clusters": []})),
+            ),
+            "dragonslayer.analysis.handler_clustering.refine_opcode_table": MagicMock(return_value=opcode_table),
+            # Bytecode CFG
+            "dragonslayer.analysis.bytecode_cfg.build_handler_cfg": MagicMock(
+                return_value=MagicMock(blocks=[], graph=None, to_dict=MagicMock(return_value={})),
+            ),
+            "dragonslayer.analysis.bytecode_cfg.build_static_cfg": MagicMock(return_value=None),
         }
         return patches, trace, boundaries, opcode_table
 
@@ -171,17 +199,15 @@ class TestDevirtWiringFull:
         shared = extra_shared or {}
         ctx = _make_ctx(**shared)
 
-        with patch.dict("sys.modules", {}):
-            active = {}
-            for target, mock_obj in patches.items():
-                p = patch(target, mock_obj)
-                active[target] = p.start()
+        active = {}
+        for target, mock_obj in patches.items():
+            p = patch(target, mock_obj)
+            active[target] = p.start()
 
-            try:
-                result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
-            finally:
-                for p_target in patches:
-                    patch.stopall()
+        try:
+            result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)
+        finally:
+            patch.stopall()
 
         return result, ctx, active
 
@@ -489,7 +515,17 @@ class TestVMProtectAddressSupplement:
              patch("dragonslayer.analysis.handler_semantics.analyse_handler_semantics", return_value=opcode_table), \
              patch("dragonslayer.analysis.pseudocode.emit_pseudocode", return_value=pseudo), \
              patch("dragonslayer.analysis.vm_discovery.dispatcher.find_dispatcher", return_value=fake_generic), \
-             patch("dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher", return_value=None):
+             patch("dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher", return_value=None), \
+             patch("dragonslayer.analysis.vm_discovery.handler_extraction.extract_handler_bodies",
+                   return_value=MagicMock(to_dict=MagicMock(return_value={"bodies": []}))), \
+             patch("dragonslayer.analysis.vm_discovery.context_registers.identify_vm_context",
+                   return_value=MagicMock(to_dict=MagicMock(return_value={"layout": {}}))), \
+             patch("dragonslayer.analysis.symbolic_depth.collect_symbolic_summaries", return_value=None), \
+             patch("dragonslayer.analysis.handler_clustering.cluster_handlers_by_semantics",
+                   return_value=MagicMock(to_dict=MagicMock(return_value={"clusters": []}))), \
+             patch("dragonslayer.analysis.handler_clustering.refine_opcode_table", return_value=opcode_table), \
+             patch("dragonslayer.analysis.bytecode_cfg.build_handler_cfg",
+                   return_value=MagicMock(blocks=[], graph=None, to_dict=MagicMock(return_value={}))):
 
             ctx = _make_ctx()
             result = self.pipe._run_devirtualize(b"\x00" * 64, ctx)

@@ -30,8 +30,11 @@ class TestRunStage:
         assert result.duration > 0
 
     def test_exception_returns_failure(self):
+        """Framework exceptions are caught; programming errors propagate."""
+        from dragonslayer.core.exceptions import AnalysisError
+
         def _boom():
-            raise ValueError("kaboom")
+            raise AnalysisError("kaboom")
 
         result = self.pipe._run_stage("test_stage", _boom)
         assert result.success is False

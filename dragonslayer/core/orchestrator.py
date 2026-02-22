@@ -43,15 +43,17 @@ from .exceptions import (
     AnalysisTimeoutError,
     ConfigurationError,
     InvalidDataError,
+    VMDragonSlayerError,
 )
 from ..utils.metrics import AnalysisMetrics
 
 logger = logging.getLogger(__name__)
 
 # B87: Named exception tuple for engine fault-tolerance handlers.
-_ENGINE_ERRORS = (
-    AnalysisError, AnalysisTimeoutError, ConfigurationError, InvalidDataError,
-    ValueError, TypeError, KeyError, IndexError, RuntimeError, OSError,
+# Only catch framework + I/O errors; programming bugs (TypeError, KeyError,
+# IndexError) must propagate so they are visible during development.
+_ENGINE_ERRORS: tuple[type[BaseException], ...] = (
+    VMDragonSlayerError, OSError,
 )
 
 # ---------------------------------------------------------------------------

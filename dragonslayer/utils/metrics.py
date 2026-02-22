@@ -112,7 +112,7 @@ class AnalysisMetrics:
         pm = PhaseMetric(name=name, start_ts=time.perf_counter())
         try:
             yield pm
-        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
+        except Exception:
             pm.error_count += 1
             raise
         finally:

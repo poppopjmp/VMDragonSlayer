@@ -134,16 +134,13 @@ class TestOrchestratorEngineErrors:
 
     def test_engine_errors_includes_core_exceptions(self):
         from dragonslayer.core import orchestrator
-        from dragonslayer.core.exceptions import (
-            AnalysisError,
-            AnalysisTimeoutError,
-            ConfigurationError,
-            InvalidDataError,
-        )
-        for exc_cls in (AnalysisError, AnalysisTimeoutError, ConfigurationError,
-                        InvalidDataError, ValueError, TypeError, KeyError,
-                        IndexError, RuntimeError, OSError):
+        from dragonslayer.core.exceptions import VMDragonSlayerError
+        # After narrowing (code quality review), only framework + I/O exceptions
+        for exc_cls in (VMDragonSlayerError, OSError):
             assert exc_cls in orchestrator._ENGINE_ERRORS
+        # Generic programming-error types should NOT be present
+        for exc_cls in (ValueError, TypeError, KeyError, IndexError):
+            assert exc_cls not in orchestrator._ENGINE_ERRORS
 
     def test_engine_errors_excludes_base_exception(self):
         from dragonslayer.core import orchestrator
