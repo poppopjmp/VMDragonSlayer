@@ -56,9 +56,10 @@ class BaseModel:
             import joblib  # type: ignore[import-untyped]
             obj = joblib.load(path)
         except ImportError:
-            import pickle
-            with open(path, "rb") as f:
-                obj = pickle.load(f)
+            raise ImportError(
+                "joblib is required to load models — "
+                "install it with: pip install vmdragonslayer[ml]"
+            )
         # Store the loaded artifact on the instance so subclasses can use it.
         self._artifact = obj
 
@@ -80,9 +81,10 @@ class BaseModel:
             import joblib  # type: ignore[import-untyped]
             joblib.dump(artifact, path)
         except ImportError:
-            import pickle
-            with open(path, "wb") as f:
-                pickle.dump(artifact, f)
+            raise ImportError(
+                "joblib is required to save models — "
+                "install it with: pip install vmdragonslayer[ml]"
+            )
 
     def predict(self, features: Dict[str, Any]) -> PredictionResult:
         """Run inference on a single feature dict.
@@ -404,9 +406,10 @@ class VMHandlerModel(BaseModel):
             import joblib  # type: ignore[import-untyped]
             obj = joblib.load(path)
         except ImportError:
-            import pickle
-            with open(path, "rb") as f:
-                obj = pickle.load(f)
+            raise ImportError(
+                "joblib is required to load models — "
+                "install it with: pip install vmdragonslayer[ml]"
+            )
 
         if isinstance(obj, dict) and "schema_version" in obj:
             version = obj["schema_version"]
@@ -452,10 +455,10 @@ class VMHandlerModel(BaseModel):
             joblib.dump(envelope, path)
             logger.info("Saved sklearn model v%d to %s (joblib)", self._MODEL_SCHEMA_VERSION, path)
         except ImportError:
-            import pickle
-            with open(path, "wb") as f:
-                pickle.dump(envelope, f)
-            logger.info("Saved sklearn model v%d to %s (pickle)", self._MODEL_SCHEMA_VERSION, path)
+            raise ImportError(
+                "joblib is required to save models — "
+                "install it with: pip install vmdragonslayer[ml]"
+            )
 
     @property
     def is_trained(self) -> bool:

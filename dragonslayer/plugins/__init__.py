@@ -27,13 +27,17 @@ Stages mirror the Metroplex pipeline:
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Type, TypedDict
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypedDict
+
+if TYPE_CHECKING:
+    from dragonslayer.api.storage import StorageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +121,7 @@ class PluginContext:
     work_dir : str
         Writable directory for temporary artefacts.
     """
-    storage: Any = None          # StorageBackend — typed as Any to avoid circular import
+    storage: StorageBackend | None = None
     config: Dict[str, Any] = field(default_factory=dict)
     shared_data: Dict[str, Any] = field(default_factory=dict)
     sample_hash: str = ""
@@ -239,52 +243,31 @@ class Plugin(ABC):
         timeout: float,
         t0: float,
     ) -> PluginResult:
-        """Run :meth:`execute` in a daemon thread with a hard timeout."""
-        result_holder: list[PluginResult] = []
-        error_holder: list[Exception] = []
-
-        def _worker() -> None:
+        """Run :meth:`execute` in a managed thread pool with a hard timeout."""
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"plugin-{self.name}") as pool:
+            future = pool.submit(self.execute, file_path, file_data, context)
             try:
-                result_holder.append(
-                    self.execute(file_path, file_data, context)
+                result = future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                elapsed = time.monotonic() - t0
+                logger.warning(
+                    "Plugin %s timed out after %.1f s", self.name, timeout,
+                )
+                return self._make_result(
+                    success=False,
+                    error=f"Plugin timed out after {timeout}s",
+                    duration=elapsed,
                 )
             except Exception as exc:
-                error_holder.append(exc)
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-        thread.join(timeout=timeout)
-
-        elapsed = time.monotonic() - t0
-        if thread.is_alive():
-            logger.warning(
-                "Plugin %s timed out after %.1f s", self.name, timeout,
-            )
-            return self._make_result(
-                success=False,
-                error=f"Plugin timed out after {timeout}s",
-                duration=elapsed,
-            )
-
-        if error_holder:
-            logger.exception("Plugin %s failed", self.name, exc_info=error_holder[0])
-            return self._make_result(
-                success=False,
-                error=str(error_holder[0]),
-                duration=elapsed,
-            )
-
-        if result_holder:
-            result = result_holder[0]
-            if result.duration == 0.0:
-                result.duration = elapsed
-            return result
-
-        return self._make_result(
-            success=False,
-            error="Plugin returned no result",
-            duration=elapsed,
-        )
+                elapsed = time.monotonic() - t0
+                logger.exception("Plugin %s failed", self.name, exc_info=exc)
+                return self._make_result(
+                    success=False,
+                    error=str(exc),
+                    duration=elapsed,
+                )
+            else:
+                return result
 
 
 # ---------------------------------------------------------------------------

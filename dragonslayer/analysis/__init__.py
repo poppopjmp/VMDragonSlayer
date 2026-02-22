@@ -170,131 +170,65 @@ from .devirtualisation_result import (  # noqa: F401
     DevirtualisationResult,
 )
 
-try:
-    from .expr_simplify import (  # noqa: F401
-        simplify_pseudocode,
-        fold_constants,
-        fold_identities,
-        fold_self_cancel,
-        fold_redundant_casts,
-        propagate_types,
-    )
-except (ImportError, AttributeError):
-    simplify_pseudocode = None  # type: ignore[assignment,misc]
-    fold_constants = None  # type: ignore[assignment,misc]
-    fold_identities = None  # type: ignore[assignment,misc]
-    fold_self_cancel = None  # type: ignore[assignment,misc]
-    fold_redundant_casts = None  # type: ignore[assignment,misc]
-    propagate_types = None  # type: ignore[assignment,misc]
 
-try:
-    from .key_recovery import (  # noqa: F401
-        RecoveredKey,
-        recover_key_from_entry,
-        recover_key_from_bytes,
-    )
-except (ImportError, AttributeError):
-    RecoveredKey = None  # type: ignore[assignment,misc]
-    recover_key_from_entry = None  # type: ignore[assignment,misc]
-    recover_key_from_bytes = None  # type: ignore[assignment,misc]
+# ---------------------------------------------------------------------------
+# Optional sub-module imports — use a helper to eliminate boilerplate.
+# Each entry is (module_relative_name, [names_to_import]).  If the module
+# cannot be imported (missing C-extension dep, etc.) every name is bound
+# to ``None`` at package level so dependents can test availability with a
+# simple ``if name is None`` guard.
+# ---------------------------------------------------------------------------
 
-try:
-    from .dataflow import (  # noqa: F401
-        backward_slice,
-        compute_live_ranges,
-        BackwardSliceResult,
-    )
-except (ImportError, AttributeError):
-    backward_slice = None  # type: ignore[assignment,misc]
-    compute_live_ranges = None  # type: ignore[assignment,misc]
-    BackwardSliceResult = None  # type: ignore[assignment,misc]
+import importlib as _importlib
 
-try:
-    from .themida_devirt import (  # noqa: F401
-        ThemidaVariant,
-        ThemidaVMProfile,
-        ThemidaBytecodeDecoder,
-        ThemidaOpcodeTable,
-        ThemidaDevirtResult,
-        identify_themida_variant,
-        reconstruct_opcode_table,
-        devirtualize_themida,
-    )
-except (ImportError, AttributeError):
-    ThemidaVariant = None  # type: ignore[assignment,misc]
-    ThemidaVMProfile = None  # type: ignore[assignment,misc]
-    ThemidaBytecodeDecoder = None  # type: ignore[assignment,misc]
-    ThemidaOpcodeTable = None  # type: ignore[assignment,misc]
-    ThemidaDevirtResult = None  # type: ignore[assignment,misc]
-    identify_themida_variant = None  # type: ignore[assignment,misc]
-    reconstruct_opcode_table = None  # type: ignore[assignment,misc]
-    devirtualize_themida = None  # type: ignore[assignment,misc]
 
-try:
-    from .cv_devirt import (  # noqa: F401
-        CVVersion,
-        CVVMProfile,
-        CVBytecodeDecoder,
-        CVOpcodeTable,
-        CVDevirtResult,
-        identify_cv_version,
-        reconstruct_cv_handler_table,
-        devirtualize_cv,
-    )
-except (ImportError, AttributeError):
-    CVVersion = None  # type: ignore[assignment,misc]
-    CVVMProfile = None  # type: ignore[assignment,misc]
-    CVBytecodeDecoder = None  # type: ignore[assignment,misc]
-    CVOpcodeTable = None  # type: ignore[assignment,misc]
-    CVDevirtResult = None  # type: ignore[assignment,misc]
-    identify_cv_version = None  # type: ignore[assignment,misc]
-    reconstruct_cv_handler_table = None  # type: ignore[assignment,misc]
-    devirtualize_cv = None  # type: ignore[assignment,misc]
+def _try_import(module: str, names: list[str]) -> None:
+    """Import *names* from a sibling module, or set them to ``None``."""
+    try:
+        mod = _importlib.import_module(f".{module}", __package__)
+        for name in names:
+            globals()[name] = getattr(mod, name)
+    except (ImportError, AttributeError):
+        for name in names:
+            globals()[name] = None  # type: ignore[assignment]
 
-try:
-    from .trace_collector import (  # noqa: F401
-        TraceBackend,
-        TraceConfig,
-        CollectionResult,
-        collect_trace,
-        collect_trace_from_plugin,
-        collect_trace_from_file,
-        filter_trace,
-        merge_traces,
-        trace_statistics,
-    )
-except (ImportError, AttributeError):
-    TraceBackend = None  # type: ignore[assignment,misc]
-    TraceConfig = None  # type: ignore[assignment,misc]
-    CollectionResult = None  # type: ignore[assignment,misc]
-    collect_trace = None  # type: ignore[assignment,misc]
-    collect_trace_from_plugin = None  # type: ignore[assignment,misc]
-    collect_trace_from_file = None  # type: ignore[assignment,misc]
-    filter_trace = None  # type: ignore[assignment,misc]
-    merge_traces = None  # type: ignore[assignment,misc]
-    trace_statistics = None  # type: ignore[assignment,misc]
 
-try:
-    from .trace_export import (  # noqa: F401
-        OutputFormat,
-        export_trace,
-        render_trace,
-        render_trace_json,
-        render_trace_text,
-        render_trace_csv,
-        render_ida_annotations,
-        render_ghidra_script,
-        list_formats,
-        validate_roundtrip,
-    )
-except (ImportError, AttributeError):
-    OutputFormat = None  # type: ignore[assignment,misc]
-    export_trace = None  # type: ignore[assignment,misc]
-    render_trace = None  # type: ignore[assignment,misc]
-    render_trace_json = None  # type: ignore[assignment,misc]
-    render_trace_text = None  # type: ignore[assignment,misc]
-    render_trace_csv = None  # type: ignore[assignment,misc]
-    render_ida_annotations = None  # type: ignore[assignment,misc]
-    render_ghidra_script = None  # type: ignore[assignment,misc]
-    list_formats = None  # type: ignore[assignment,misc]
-    validate_roundtrip = None  # type: ignore[assignment,misc]
+_try_import("expr_simplify", [
+    "simplify_pseudocode", "fold_constants", "fold_identities",
+    "fold_self_cancel", "fold_redundant_casts", "propagate_types",
+])
+
+_try_import("key_recovery", [
+    "RecoveredKey", "recover_key_from_entry", "recover_key_from_bytes",
+])
+
+_try_import("dataflow", [
+    "backward_slice", "compute_live_ranges", "BackwardSliceResult",
+])
+
+_try_import("themida_devirt", [
+    "ThemidaVariant", "ThemidaVMProfile", "ThemidaBytecodeDecoder",
+    "ThemidaOpcodeTable", "ThemidaDevirtResult",
+    "identify_themida_variant", "reconstruct_opcode_table",
+    "devirtualize_themida",
+])
+
+_try_import("cv_devirt", [
+    "CVVersion", "CVVMProfile", "CVBytecodeDecoder",
+    "CVOpcodeTable", "CVDevirtResult",
+    "identify_cv_version", "reconstruct_cv_handler_table",
+    "devirtualize_cv",
+])
+
+_try_import("trace_collector", [
+    "TraceBackend", "TraceConfig", "CollectionResult",
+    "collect_trace", "collect_trace_from_plugin", "collect_trace_from_file",
+    "filter_trace", "merge_traces", "trace_statistics",
+])
+
+_try_import("trace_export", [
+    "OutputFormat", "export_trace", "render_trace",
+    "render_trace_json", "render_trace_text", "render_trace_csv",
+    "render_ida_annotations", "render_ghidra_script",
+    "list_formats", "validate_roundtrip",
+])

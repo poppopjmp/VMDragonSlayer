@@ -16,12 +16,24 @@ from .orchestrator import (
 )
 from .config import get_config, Config
 from .exceptions import (
+    VMDragonSlayerError,
     AnalysisError,
     InvalidDataError,
     ConfigurationError,
     NetworkError,
     APIError,
-    DevirtualizationError
+    DevirtualizationError,
+    PluginError,
+    GatewayError,
+    ResourceLimitError,
+    AnalysisTimeoutError,
+    ValidationError,
+)
+from .pipeline import (
+    AnalysisPipeline,
+    PipelineConfig,
+    PipelineResult,
+    StageResult,
 )
 from .disassembler import (
     Disassembler,
@@ -51,6 +63,12 @@ __all__ = [
     'get_config',
     'Config',
     
+    # Pipeline
+    'AnalysisPipeline',
+    'PipelineConfig',
+    'PipelineResult',
+    'StageResult',
+    
     # Disassembler
     'Disassembler',
     'DisassembledInstruction',
@@ -62,11 +80,17 @@ __all__ = [
     'to_lifted_instructions',
     'CAPSTONE_AVAILABLE',
 
-    # Exceptions
+    # Exceptions (full hierarchy)
+    'VMDragonSlayerError',
     'AnalysisError',
     'InvalidDataError',
     'ConfigurationError',
     'NetworkError',
     'APIError',
     'DevirtualizationError',
+    'PluginError',
+    'GatewayError',
+    'ResourceLimitError',
+    'AnalysisTimeoutError',
+    'ValidationError',
 ]

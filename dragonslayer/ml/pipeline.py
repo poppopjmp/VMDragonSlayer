@@ -84,16 +84,16 @@ class FeatureExtractor:
 # Concrete handler feature extractor
 # ---------------------------------------------------------------------------
 
-# Mnemonic groups for feature counting.
-_ARITH_MNEMS = {"add", "sub", "adc", "sbb", "inc", "dec", "neg", "imul", "mul", "idiv", "div"}
-_LOGIC_MNEMS = {"and", "or", "xor", "not", "shl", "shr", "sar", "rol", "ror", "bt", "bsf", "bsr"}
-_STACK_MNEMS = {"push", "pop", "pushf", "popf", "pusha", "popa"}
-_MEM_MNEMS = {"mov", "movzx", "movsx", "movsxd", "lea", "xchg", "bswap", "cmova", "cmovb",
-              "cmove", "cmovg", "cmovl", "cmovne", "cmovge", "cmovle", "cmovae", "cmovbe"}
-_BRANCH_MNEMS = {"jmp", "je", "jne", "jz", "jnz", "jg", "jge", "jl", "jle", "ja", "jae",
-                 "jb", "jbe", "call", "ret", "loop", "loope", "loopne", "jcxz", "jecxz"}
-_NOP_MNEMS = {"nop", "fnop", "pause", "ud2"}
-_CMP_MNEMS = {"cmp", "test"}
+# Mnemonic groups for feature counting (frozenset — immutable, hashable constants).
+_ARITH_MNEMS = frozenset({"add", "sub", "adc", "sbb", "inc", "dec", "neg", "imul", "mul", "idiv", "div"})
+_LOGIC_MNEMS = frozenset({"and", "or", "xor", "not", "shl", "shr", "sar", "rol", "ror", "bt", "bsf", "bsr"})
+_STACK_MNEMS = frozenset({"push", "pop", "pushf", "popf", "pusha", "popa"})
+_MEM_MNEMS = frozenset({"mov", "movzx", "movsx", "movsxd", "lea", "xchg", "bswap", "cmova", "cmovb",
+                        "cmove", "cmovg", "cmovl", "cmovne", "cmovge", "cmovle", "cmovae", "cmovbe"})
+_BRANCH_MNEMS = frozenset({"jmp", "je", "jne", "jz", "jnz", "jg", "jge", "jl", "jle", "ja", "jae",
+                           "jb", "jbe", "call", "ret", "loop", "loope", "loopne", "jcxz", "jecxz"})
+_NOP_MNEMS = frozenset({"nop", "fnop", "pause", "ud2"})
+_CMP_MNEMS = frozenset({"cmp", "test"})
 
 HANDLER_FEATURE_NAMES: List[str] = [
     "instruction_count",
