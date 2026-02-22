@@ -60,10 +60,12 @@ class EnsembleClassifier:
             )
 
         results: List[PredictionResult] = []
+        responded_indices: List[int] = []
         failures: List[str] = []
-        for mdl in self._models:
+        for idx, mdl in enumerate(self._models):
             try:
                 results.append(mdl.predict(features))
+                responded_indices.append(idx)
             except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 failures.append(f"{getattr(mdl, 'name', type(mdl).__name__)}: {exc}")
                 logger.debug("Ensemble model failed: %s", failures[-1])
@@ -74,7 +76,11 @@ class EnsembleClassifier:
                 metadata={"failures": failures},
             )
 
-        return self._aggregate(results, failures=failures)
+        return self._aggregate(
+            results,
+            failures=failures,
+            responded_indices=responded_indices,
+        )
 
     # ── Standard prediction ────────────────────────────────────────────────
 
@@ -105,12 +111,14 @@ class EnsembleClassifier:
         results: List[PredictionResult],
         *,
         failures: List[str] | None = None,
+        responded_indices: List[int] | None = None,
     ) -> PredictionResult:
         """Aggregate results via majority vote (B59 refactor).
 
         Args:
             results: Predictions from component models.
             failures: Optional list of model names that failed.
+            responded_indices: Original model indices for weight alignment.
 
         Returns:
             A single :class:`PredictionResult` with agreement metadata.
@@ -153,13 +161,21 @@ class WeightedEnsemble(EnsembleClassifier):
         results: List[PredictionResult],
         *,
         failures: List[str] | None = None,
+        responded_indices: List[int] | None = None,
     ) -> PredictionResult:
-        weights = self._weights or [1.0] * len(results)
-        # Trim/pad weights to match responding models when some models failed.
-        if len(weights) > len(results):
-            weights = weights[:len(results)]
-        elif len(weights) < len(results):
-            weights = weights + [1.0] * (len(results) - len(weights))
+        all_weights = self._weights or [1.0] * len(self._models)
+        # Select weights for the models that actually responded, preserving
+        # the original weight-to-model mapping.
+        if responded_indices is not None:
+            weights = [
+                all_weights[i] if i < len(all_weights) else 1.0
+                for i in responded_indices
+            ]
+        else:
+            # Called from predict() where all models respond.
+            weights = all_weights[:len(results)]
+            if len(weights) < len(results):
+                weights = weights + [1.0] * (len(results) - len(weights))
         label_scores: Dict[str, float] = defaultdict(float)
         for r, w in zip(results, weights):
             label_scores[r.label] += r.confidence * w
@@ -243,6 +259,7 @@ class StackedEnsemble(EnsembleClassifier):
         results: List[PredictionResult],
         *,
         failures: List[str] | None = None,
+        responded_indices: List[int] | None = None,
     ) -> PredictionResult:
         if self._meta_model is not None:
             try:
@@ -257,4 +274,4 @@ class StackedEnsemble(EnsembleClassifier):
             except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 logger.debug("Meta-model failed, falling back to vote: %s", exc)
         # Fallback to majority vote
-        return super()._aggregate(results, failures=failures)
+        return super()._aggregate(results, failures=failures, responded_indices=responded_indices)

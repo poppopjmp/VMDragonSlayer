@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, ClassVar, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -287,43 +287,57 @@ class PipelineState:
     """Backward-compatible dict for plugin data, dynamic keys, and
     any data not yet migrated to typed fields."""
 
+    _FIELD_NAMES: ClassVar[frozenset] = frozenset()  # populated by __init_subclass__
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Cache the set of valid field names for fast lookup.
+        if hasattr(cls, "__dataclass_fields__"):
+            cls._FIELD_NAMES = frozenset(
+                f for f in cls.__dataclass_fields__ if not f.startswith("_")
+            )
+
+    def __post_init__(self) -> None:
+        # For the base class itself (when __init_subclass__ fires before
+        # @dataclass populates __dataclass_fields__).
+        if not self._FIELD_NAMES and hasattr(self, "__dataclass_fields__"):
+            type(self)._FIELD_NAMES = frozenset(
+                f for f in self.__dataclass_fields__ if not f.startswith("_")
+            )
+
     # ------------------------------------------------------------------
     # Dict-compatible interface for backward compatibility
     # ------------------------------------------------------------------
 
     def __getitem__(self, key: str) -> Any:
         """Allow ``state["key"]`` access for backward compatibility."""
-        if hasattr(self, key) and not key.startswith("__"):
+        if key in self._FIELD_NAMES:
             return getattr(self, key)
         return self._overflow[key]
 
     def __setitem__(self, key: str, value: Any) -> None:
         """Allow ``state["key"] = val`` for backward compatibility."""
-        if hasattr(self, key) and not key.startswith("__") and key != "_overflow":
+        if key in self._FIELD_NAMES:
             setattr(self, key, value)
         else:
             self._overflow[key] = value
 
     def __contains__(self, key: str) -> bool:
-        if hasattr(self, key) and not key.startswith("__"):
-            return True
-        return key in self._overflow
+        return key in self._FIELD_NAMES or key in self._overflow
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Dict-like ``.get()`` for backward compatibility."""
-        if hasattr(self, key) and not key.startswith("__"):
-            val = getattr(self, key)
-            # Return default for empty-ish values to match dict.get semantics
-            if val is None:
-                return default
-            return val
+        """Dict-like ``.get()`` — returns *default* only when the key is
+        absent, matching ``dict.get`` semantics exactly."""
+        if key in self._FIELD_NAMES:
+            return getattr(self, key)
         return self._overflow.get(key, default)
 
     def setdefault(self, key: str, default: Any) -> Any:
-        """Dict-like ``.setdefault()`` for backward compatibility."""
-        if hasattr(self, key) and not key.startswith("__"):
+        """Dict-like ``.setdefault()`` — only assigns *default* when the
+        field value is ``None`` (the unset sentinel)."""
+        if key in self._FIELD_NAMES:
             val = getattr(self, key)
-            if val is None or (isinstance(val, (dict, list)) and not val):
+            if val is None:
                 setattr(self, key, default)
                 return default
             return val

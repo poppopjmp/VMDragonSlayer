@@ -77,7 +77,11 @@ def scan(ctx: click.Context, file: str, json_output: bool) -> None:
     """Quick scan for VM protection presence."""
     from dragonslayer.core.pipeline import create_quick_scan_pipeline
 
-    binary_data = Path(file).read_bytes()
+    try:
+        binary_data = Path(file).read_bytes()
+    except (PermissionError, IsADirectoryError, OSError) as exc:
+        click.secho(f"Cannot read file: {exc}", fg="red", err=True)
+        raise SystemExit(EX_ERROR) from exc
     click.echo(f"[*] Scanning {file} ({len(binary_data):,} bytes)...\n")
 
     t0 = time.perf_counter()
@@ -165,7 +169,22 @@ def analyze(
     """Run a full analysis pipeline on a binary."""
     from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
 
-    binary_data = Path(file).read_bytes()
+    # Validate analysis type early.
+    try:
+        AnalysisType(analysis_type)
+    except ValueError:
+        valid = [t.value for t in AnalysisType]
+        raise click.BadParameter(
+            f"{analysis_type!r} is not a valid analysis type.\n"
+            f"Valid types: {', '.join(valid)}",
+            param_hint="'--type'",
+        )
+
+    try:
+        binary_data = Path(file).read_bytes()
+    except (PermissionError, IsADirectoryError, OSError) as exc:
+        click.secho(f"Cannot read file: {exc}", fg="red", err=True)
+        raise SystemExit(EX_ERROR) from exc
     click.echo(f"[*] Analyzing {file} ({len(binary_data):,} bytes) "
                f"type={analysis_type}...\n")
 

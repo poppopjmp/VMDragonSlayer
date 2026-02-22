@@ -60,6 +60,10 @@ class BaseModel:
                 "joblib is required to load models — "
                 "install it with: pip install vmdragonslayer[ml]"
             )
+        except (EOFError, OSError, ValueError, ModuleNotFoundError) as exc:
+            raise RuntimeError(
+                f"Failed to deserialize model from {path}: {exc}"
+            ) from exc
         # Store the loaded artifact on the instance so subclasses can use it.
         self._artifact = obj
 
@@ -116,21 +120,17 @@ class BaseModel:
 
 
 # ---------------------------------------------------------------------------
-# Heuristic handler categories
+# Heuristic handler categories — authoritative list lives in taxonomy.py.
 # ---------------------------------------------------------------------------
 
-HANDLER_CATEGORIES: List[str] = [
-    "arithmetic",    # ADD, SUB, MUL, DIV, NEG, INC, DEC
-    "bitwise",       # AND, OR, XOR, NOT, SHL, SHR, ROL, ROR
-    "stack",         # PUSH, POP
-    "memory",        # MOV [mem] / MOV reg,[mem]
-    "control_flow",  # JMP, JCC, CALL, RET
-    "vm_control",    # VM_ENTER, VM_EXIT (context save/restore)
-    "comparison",    # CMP, TEST
-    "crypto",        # DECRYPT_OPCODE, KEY_UPDATE, flag-mixing MUL
-    "nop",           # NOP / junk
-    "unknown",
-]
+try:
+    from .taxonomy import CANONICAL_CATEGORIES as HANDLER_CATEGORIES
+except ImportError:  # taxonomy not yet available in minimal installs
+    HANDLER_CATEGORIES: List[str] = [  # type: ignore[no-redef]
+        "arithmetic", "bitwise", "stack", "memory", "control_flow",
+        "vm_control", "comparison", "crypto", "conversion", "system",
+        "nop", "unknown",
+    ]
 
 # ---------------------------------------------------------------------------
 # Weighted-rule scorer
@@ -410,6 +410,10 @@ class VMHandlerModel(BaseModel):
                 "joblib is required to load models — "
                 "install it with: pip install vmdragonslayer[ml]"
             )
+        except (EOFError, OSError, ValueError, ModuleNotFoundError) as exc:
+            raise RuntimeError(
+                f"Failed to deserialize sklearn model from {path}: {exc}"
+            ) from exc
 
         if isinstance(obj, dict) and "schema_version" in obj:
             version = obj["schema_version"]

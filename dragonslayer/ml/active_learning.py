@@ -185,7 +185,14 @@ def select_uncertain_samples(
         Up to *k* samples, ordered most-uncertain-first.
     """
     if isinstance(strategy, str):
-        strategy = UncertaintyStrategy(strategy)
+        try:
+            strategy = UncertaintyStrategy(strategy)
+        except ValueError:
+            valid = [s.value for s in UncertaintyStrategy]
+            raise ValueError(
+                f"Unknown uncertainty strategy: {strategy!r}. "
+                f"Valid strategies: {valid}"
+            ) from None
 
     candidates: List[UncertainSample] = []
     for pred in predictions:

@@ -323,6 +323,28 @@ class Config:
                     f"vmprotect.validation_threshold must be in [0,1], got {vt!r}"
                 )
 
+        # -- pin.timeout --
+        pin_timeout = self.get('pin.timeout')
+        if pin_timeout is not None:
+            if not isinstance(pin_timeout, int) or pin_timeout <= 0:
+                errors.append(
+                    f"pin.timeout must be a positive int, got {pin_timeout!r}"
+                )
+
+        # -- dispatcher settings --
+        dtrace = self.get('dispatcher.max_trace_length')
+        if dtrace is not None:
+            if not isinstance(dtrace, int) or dtrace < 1:
+                errors.append(
+                    f"dispatcher.max_trace_length must be >= 1, got {dtrace!r}"
+                )
+        dexit = self.get('dispatcher.early_exit_confidence')
+        if dexit is not None:
+            if not isinstance(dexit, (int, float)) or not (0.0 <= dexit <= 1.0):
+                errors.append(
+                    f"dispatcher.early_exit_confidence must be in [0,1], got {dexit!r}"
+                )
+
         # Raise with ALL errors summarised
         if errors:
             summary = "; ".join(errors)
