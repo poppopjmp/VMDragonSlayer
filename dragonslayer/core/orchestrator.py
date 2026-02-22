@@ -990,6 +990,26 @@ class VMDragonSlayerAPI:
         )
         return result.to_dict()
 
+    async def analyze_binary_data_async(
+        self,
+        binary_data: bytes,
+        analysis_type: str = "hybrid",
+        metadata: Dict[str, Any] | None = None,
+        **options: Any,
+    ) -> AnalysisResultDict:
+        """Async variant that offloads analysis to a thread.
+
+        Prevents blocking the ASGI event loop when called from ``async def``
+        FastAPI endpoints.
+        """
+        result = await self._orchestrator.analyze_binary_async(
+            binary_data,
+            analysis_type=analysis_type,
+            options=options,
+            metadata=metadata or {},
+        )
+        return result.to_dict()
+
     @staticmethod
     def get_supported_analysis_types() -> List[str]:
         return Orchestrator.get_supported_analysis_types()

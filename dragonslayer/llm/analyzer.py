@@ -69,6 +69,39 @@ def _ensure_litellm():
 
 
 # ---------------------------------------------------------------------------
+# LLM → canonical category normalisation
+# ---------------------------------------------------------------------------
+# The LLM system prompt uses 13 fine-grained categories for better prompting
+# accuracy, but the rest of the pipeline (ML model, tests, pipeline stages)
+# uses 10 canonical categories from ml.model.HANDLER_CATEGORIES.  This map
+# collapses the LLM's labels into the canonical set.
+
+_LLM_TO_CANONICAL: Dict[str, str] = {
+    # identity mappings
+    "arithmetic": "arithmetic",
+    "nop": "nop",
+    "unknown": "unknown",
+    # renames
+    "logic": "bitwise",
+    "context_switch": "vm_control",
+    # merges
+    "memory_read": "memory",
+    "memory_write": "memory",
+    "stack_push": "stack",
+    "stack_pop": "stack",
+    "branch_conditional": "control_flow",
+    "branch_unconditional": "control_flow",
+    "call": "control_flow",
+    "return": "control_flow",
+}
+
+
+def _normalize_llm_category(category: str) -> str:
+    """Map an LLM-returned category to the canonical handler taxonomy."""
+    return _LLM_TO_CANONICAL.get(category, category)
+
+
+# ---------------------------------------------------------------------------
 # Prompt templates
 # ---------------------------------------------------------------------------
 
@@ -379,12 +412,18 @@ class LLMAnalyzer:
         Classify a VM bytecode handler's semantics.
 
         Returns ``{category, confidence, explanation, simplified}``.
+        The ``category`` value is normalised to the canonical 10-label
+        taxonomy defined by :data:`ml.model.HANDLER_CATEGORIES`.
         """
         prompt = _HANDLER_CLASSIFICATION_PROMPT.format(
             handler_data=handler_data,
             context=context or "No additional context.",
         )
-        return self._complete(_SYSTEM_PROMPT, prompt)
+        result = self._complete(_SYSTEM_PROMPT, prompt)
+        # Normalise LLM's fine-grained categories → canonical taxonomy
+        if isinstance(result, dict) and "category" in result:
+            result["category"] = _normalize_llm_category(result["category"])
+        return result
 
     def suggest_deobfuscation(
         self,

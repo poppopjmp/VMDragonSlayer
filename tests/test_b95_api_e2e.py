@@ -94,7 +94,7 @@ def _make_mock_api() -> MagicMock:
     mock.get_supported_analysis_types.return_value = [
         "hybrid", "pattern_analysis", "vm_discovery",
     ]
-    mock.analyze_binary_data.return_value = {
+    _result = {
         "success": True,
         "analysis_id": "test-id-1234",
         "timestamp": "2025-01-01T00:00:00Z",
@@ -104,6 +104,9 @@ def _make_mock_api() -> MagicMock:
         "execution_time": 0.01,
         "errors": [],
     }
+    mock.analyze_binary_data.return_value = _result
+    # Server endpoints now use the async variant
+    mock.analyze_binary_data_async = AsyncMock(return_value=_result)
     mock.shutdown.return_value = None
     return mock
 
@@ -251,7 +254,7 @@ class TestAnalyzeEndpoint:
         body = resp.json()
         assert body["success"] is True
         assert body["analysis_id"] == "test-id-1234"
-        mock_api.analyze_binary_data.assert_called_once()
+        mock_api.analyze_binary_data_async.assert_called_once()
 
     @pytest.mark.anyio
     async def test_analyze_invalid_base64_rejected(self, mock_api):
@@ -295,8 +298,8 @@ class TestUploadAnalyzeEndpoint:
                 params={"analysis_type": "hybrid"},
             )
         assert resp.status_code == 200
-        mock_api.analyze_binary_data.assert_called_once()
-        call_kwargs = mock_api.analyze_binary_data.call_args
+        mock_api.analyze_binary_data_async.assert_called_once()
+        call_kwargs = mock_api.analyze_binary_data_async.call_args
         # Verify metadata propagated filename
         meta = call_kwargs.kwargs.get("metadata") or call_kwargs[1].get("metadata", {})
         if meta:
@@ -484,7 +487,7 @@ class TestExceptionHandlers:
     @pytest.mark.anyio
     async def test_invalid_data_error_returns_400(self, mock_api):
         from dragonslayer.core.exceptions import InvalidDataError
-        mock_api.analyze_binary_data.side_effect = InvalidDataError("bad input")
+        mock_api.analyze_binary_data_async.side_effect = InvalidDataError("bad input")
         payload = {
             "sample_data": base64.b64encode(b"\x00" * 4).decode(),
             "analysis_type": "hybrid",
@@ -497,7 +500,7 @@ class TestExceptionHandlers:
     @pytest.mark.anyio
     async def test_analysis_error_returns_500(self, mock_api):
         from dragonslayer.core.exceptions import AnalysisError
-        mock_api.analyze_binary_data.side_effect = AnalysisError("engine crash")
+        mock_api.analyze_binary_data_async.side_effect = AnalysisError("engine crash")
         payload = {
             "sample_data": base64.b64encode(b"\x00" * 4).decode(),
             "analysis_type": "hybrid",
@@ -510,7 +513,7 @@ class TestExceptionHandlers:
     @pytest.mark.anyio
     async def test_configuration_error_returns_500(self, mock_api):
         from dragonslayer.core.exceptions import ConfigurationError
-        mock_api.analyze_binary_data.side_effect = ConfigurationError("bad config")
+        mock_api.analyze_binary_data_async.side_effect = ConfigurationError("bad config")
         payload = {
             "sample_data": base64.b64encode(b"\x00" * 4).decode(),
             "analysis_type": "hybrid",
@@ -523,7 +526,7 @@ class TestExceptionHandlers:
     @pytest.mark.anyio
     async def test_resource_limit_returns_503(self, mock_api):
         from dragonslayer.core.exceptions import ResourceLimitError
-        mock_api.analyze_binary_data.side_effect = ResourceLimitError("oom")
+        mock_api.analyze_binary_data_async.side_effect = ResourceLimitError("oom")
         payload = {
             "sample_data": base64.b64encode(b"\x00" * 4).decode(),
             "analysis_type": "hybrid",
@@ -535,7 +538,7 @@ class TestExceptionHandlers:
     @pytest.mark.anyio
     async def test_analysis_timeout_returns_504(self, mock_api):
         from dragonslayer.core.exceptions import AnalysisTimeoutError
-        mock_api.analyze_binary_data.side_effect = AnalysisTimeoutError("too slow")
+        mock_api.analyze_binary_data_async.side_effect = AnalysisTimeoutError("too slow")
         payload = {
             "sample_data": base64.b64encode(b"\x00" * 4).decode(),
             "analysis_type": "hybrid",

@@ -372,11 +372,15 @@ def _auto_discover() -> None:
 
 
 _discovered = False
+_discovery_lock = threading.Lock()
 
 
 def _ensure_discovered() -> None:
-    """Run :func:`_auto_discover` once on first access."""
+    """Run :func:`_auto_discover` once on first access (thread-safe)."""
     global _discovered  # noqa: PLW0603
-    if not _discovered:
-        _auto_discover()
-        _discovered = True
+    if _discovered:          # fast path — no lock needed
+        return
+    with _discovery_lock:
+        if not _discovered:  # double-checked locking
+            _auto_discover()
+            _discovered = True

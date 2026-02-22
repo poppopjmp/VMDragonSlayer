@@ -813,8 +813,8 @@ async def analyze_binary(
                 detail=f"File too large. Maximum size: {max_size / (1024*1024)}MB"
             )
 
-        # Perform analysis
-        result = api.analyze_binary_data(
+        # Perform analysis (async to avoid blocking the ASGI event loop)
+        result = await api.analyze_binary_data_async(
             binary_data,
             analysis_type=analysis_request.analysis_type,
             metadata=analysis_request.metadata,
@@ -888,8 +888,8 @@ async def upload_and_analyze(
             'size': len(binary_data)
         }
 
-        # Perform analysis
-        result = api.analyze_binary_data(
+        # Perform analysis (async to avoid blocking the ASGI event loop)
+        result = await api.analyze_binary_data_async(
             binary_data,
             analysis_type=analysis_type,
             metadata=metadata

@@ -15,7 +15,7 @@ import importlib
 import os
 import time
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # ──────────────────────────────────────────────────────────────────────
 # 1. Config auto-validate on load
@@ -236,7 +236,7 @@ class TestAPIExceptionHandlers:
         # Inject a mock API so the lifespan doesn't need real infrastructure
         mock_api = MagicMock()
         mock_api.get_supported_analysis_types.return_value = ["hybrid", "full_analysis"]
-        mock_api.analyze_binary_data.return_value = {
+        _result = {
             "success": True,
             "analysis_id": "test-123",
             "timestamp": "2025-01-01T00:00:00",
@@ -246,6 +246,8 @@ class TestAPIExceptionHandlers:
             "execution_time": 0.1,
             "errors": [],
         }
+        mock_api.analyze_binary_data.return_value = _result
+        mock_api.analyze_binary_data_async = AsyncMock(return_value=_result)
         server_state.api = mock_api
         # Reset rate limiter
         server_state.rate_limiter.clear()
@@ -304,7 +306,7 @@ class TestAPIExceptionHandlers:
 
     def test_analyze_analysis_error(self):
         from dragonslayer.core.exceptions import AnalysisError
-        self.mock_api.analyze_binary_data.side_effect = AnalysisError("boom")
+        self.mock_api.analyze_binary_data_async.side_effect = AnalysisError("boom")
 
         import base64
         sample = base64.b64encode(b"\x00" * 16).decode()
@@ -317,7 +319,7 @@ class TestAPIExceptionHandlers:
 
     def test_analyze_invalid_data_error(self):
         from dragonslayer.core.exceptions import InvalidDataError
-        self.mock_api.analyze_binary_data.side_effect = InvalidDataError("bad data")
+        self.mock_api.analyze_binary_data_async.side_effect = InvalidDataError("bad data")
 
         import base64
         sample = base64.b64encode(b"\x00" * 16).decode()
@@ -330,7 +332,7 @@ class TestAPIExceptionHandlers:
 
     def test_analyze_configuration_error(self):
         from dragonslayer.core.exceptions import ConfigurationError
-        self.mock_api.analyze_binary_data.side_effect = ConfigurationError("bad config")
+        self.mock_api.analyze_binary_data_async.side_effect = ConfigurationError("bad config")
 
         import base64
         sample = base64.b64encode(b"\x00" * 16).decode()
@@ -384,11 +386,13 @@ class TestRateLimiterCleanup:
         from dragonslayer.api.server import app, server_state
         mock_api = MagicMock()
         mock_api.get_supported_analysis_types.return_value = []
-        mock_api.analyze_binary_data.return_value = {
+        _result = {
             "success": True, "analysis_id": "x", "timestamp": "t",
             "file_info": {}, "analysis_type": "hybrid",
             "results": {}, "execution_time": 0.0, "errors": [],
         }
+        mock_api.analyze_binary_data.return_value = _result
+        mock_api.analyze_binary_data_async = AsyncMock(return_value=_result)
         server_state.api = mock_api
         server_state.rate_limiter.clear()
         self.server_state = server_state
