@@ -20,6 +20,7 @@ import logging
 import tempfile
 import time
 import uuid
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -572,17 +573,20 @@ class Orchestrator:
             cfg.llm_enabled = llm_enabled
 
         # B53: Run the pipeline with timeout guard
+        # Uses self._executor instead of creating a throwaway single-thread pool.
         try:
-            import concurrent.futures
             with self.metrics.phase("pipeline"):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(
-                        pipe.run,
-                        binary_data=request.binary_data,
-                        pipeline_config=cfg,
-                        metadata=request.metadata,
-                    )
+                future = self._executor.submit(
+                    pipe.run,
+                    binary_data=request.binary_data,
+                    pipeline_config=cfg,
+                    metadata=request.metadata,
+                )
+                try:
                     pipe_result = future.result(timeout=pipeline_timeout)
+                except (TimeoutError, concurrent.futures.TimeoutError):
+                    future.cancel()
+                    raise
         except (TimeoutError, concurrent.futures.TimeoutError):
             elapsed = time.monotonic() - t0
             logger.error(
@@ -688,6 +692,40 @@ class Orchestrator:
         return handler
 
     # ------------------------------------------------------------------
+    # Engine runner helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_engine_safe(
+        engine_name: str,
+        fn: Callable[[], tuple[Dict[str, Any], float]],
+    ) -> EngineResult:
+        """Run *fn* with timing and fault-tolerance.
+
+        *fn* must return ``(data_dict, confidence)``.  The helper wraps the
+        call with timing, catches :data:`_ENGINE_ERRORS`, and returns a
+        uniform :class:`EngineResult`.
+        """
+        t0 = time.monotonic()
+        try:
+            data, confidence = fn()
+            return EngineResult(
+                engine=engine_name,
+                success=True,
+                data=data,
+                duration=time.monotonic() - t0,
+                confidence=confidence,
+            )
+        except _ENGINE_ERRORS as exc:
+            logger.exception("Engine %s failed", engine_name)
+            return EngineResult(
+                engine=engine_name,
+                success=False,
+                error=str(exc),
+                duration=time.monotonic() - t0,
+            )
+
+    # ------------------------------------------------------------------
     # Local engine runners
     # ------------------------------------------------------------------
 
@@ -697,20 +735,15 @@ class Orchestrator:
         ``PatternRecognizer.recognize()`` expects a hex-encoded string, not
         raw ``bytes``.  We convert here so the caller doesn't need to know.
         """
-        t0 = time.monotonic()
-        try:
+        def _do() -> tuple[Dict[str, Any], float]:
             recognizer = self._engines.pattern_recognizer
-
-            # Convert raw bytes → uppercase hex string (e.g. "4D5A90…")
             hex_str = request.binary_data.hex().upper()
-
             matches = recognizer.recognize(hex_str)
-            elapsed = time.monotonic() - t0
 
             matches_data = []
             total_confidence = 0.0
             for m in matches:
-                md = {
+                matches_data.append({
                     "pattern_id": m.pattern.pattern_id,
                     "name": m.pattern.name,
                     "operation": m.pattern.operation,
@@ -720,64 +753,28 @@ class Orchestrator:
                     "end_offset": m.end_offset,
                     "matched_bytes": m.matched_bytes,
                     "confidence": m.confidence,
-                }
-                matches_data.append(md)
+                })
                 total_confidence += m.confidence
 
             avg_confidence = (total_confidence / len(matches)) if matches else 0.0
+            return {
+                "matches": matches_data,
+                "total_matches": len(matches),
+                "patterns_checked": len(recognizer.database),
+                "database_stats": recognizer.database.get_statistics(),
+            }, avg_confidence
 
-            return EngineResult(
-                engine="pattern_analysis",
-                success=True,
-                data={
-                    "matches": matches_data,
-                    "total_matches": len(matches),
-                    "patterns_checked": len(recognizer.database),
-                    "database_stats": recognizer.database.get_statistics(),
-                },
-                duration=elapsed,
-                confidence=avg_confidence,
-            )
-        except _ENGINE_ERRORS as exc:
-            logger.exception("Pattern analysis failed")
-            return EngineResult(
-                engine="pattern_analysis",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+        return self._run_engine_safe("pattern_analysis", _do)
 
     def _run_vm_discovery(self, request: AnalysisRequest) -> EngineResult:
-        """
-        VM-presence detection delegated to the canonical VMDetector.
-
-        The detector provides full PE section parsing, entropy analysis,
-        watermark scanning, and dispatcher heuristics — all in one place.
-        Previously this method duplicated a simpler version inline.
-        """
-        t0 = time.monotonic()
-        try:
+        """VM-presence detection delegated to the canonical VMDetector."""
+        def _do() -> tuple[Dict[str, Any], float]:
             from ..analysis.vm_discovery.detector import VMDetector
-
             detector = VMDetector()
             result = detector.detect(request.binary_data)
+            return result, result.get("confidence", 0.0)
 
-            elapsed = time.monotonic() - t0
-            return EngineResult(
-                engine="vm_discovery",
-                success=True,
-                data=result,
-                duration=elapsed,
-                confidence=result.get("confidence", 0.0),
-            )
-        except _ENGINE_ERRORS as exc:
-            logger.exception("VM discovery failed")
-            return EngineResult(
-                engine="vm_discovery",
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+        return self._run_engine_safe("vm_discovery", _do)
 
     # ------------------------------------------------------------------
     # Local plugin runners
@@ -910,8 +907,7 @@ class Orchestrator:
         stage: Optional[int],
         label: str,
     ) -> EngineResult:
-        t0 = time.monotonic()
-        try:
+        def _do() -> tuple[Dict[str, Any], float]:
             client = self._engines.gateway_client
             gw_response = client.scan(
                 file_bytes=request.binary_data,
@@ -920,30 +916,15 @@ class Orchestrator:
                 stage=stage,
                 timeout=self.config.get("metroplex.timeout", 120),
             )
-            elapsed = time.monotonic() - t0
-
             # ``gw_response`` follows the GatewayResponse JSON contract from
             # gateway/main.go: {id, total_time, plugins_queried, successful,
             # failed, results: [{plugin, status, duration, data, error}]}
             successful = gw_response.get("successful", 0)
             total = gw_response.get("plugins_queried", 0)
             confidence = successful / total if total else 0.0
+            return gw_response, round(confidence, 4)
 
-            return EngineResult(
-                engine=label,
-                success=successful > 0,
-                data=gw_response,
-                duration=elapsed,
-                confidence=round(confidence, 4),
-            )
-        except _ENGINE_ERRORS as exc:
-            logger.warning("Gateway call (%s) failed: %s", label, exc)
-            return EngineResult(
-                engine=label,
-                success=False,
-                error=str(exc),
-                duration=time.monotonic() - t0,
-            )
+        return self._run_engine_safe(label, _do)
 
     # ------------------------------------------------------------------
     # Introspection helpers (used by server.py StatusResponse)
