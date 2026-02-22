@@ -26,8 +26,8 @@ to recover the original operations hidden inside VM interpreters.
 | Anti-evasion | `analysis/anti_evasion/` | Functional |
 | ML handler classification | `ml/` | Functional (rule-based + optional scikit-learn + active learning) |
 | Plugin framework | `plugins/` | Functional — static, dynamic, enrichment, reporting; dependency tracking |
-| REST API (FastAPI) | `api/server.py` | Functional — /analyze, /pipeline, /feedback, /uncertain, /plugins |
-| GPU acceleration | `gpu/` | **Stubs only** |
+| REST API (FastAPI) | `api/server.py` | Functional — /analyze, /pipeline, /feedback, /uncertain, /plugins; header-only auth; sanitised error responses |
+| GPU acceleration | `gpu/` | **Removed** — replaced by LiteLLM provider |
 
 ## Architecture (High Level)
 

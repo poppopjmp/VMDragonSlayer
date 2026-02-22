@@ -92,7 +92,6 @@ class MemoryBackend(StorageBackend):
     """Thread-safe in-memory storage for tests and lightweight use."""
 
     def __init__(self) -> None:
-        import threading
         self._data: Dict[str, Dict[str, Dict[str, Any]]] = {}  # index -> doc_id -> doc
         self._lock = threading.Lock()
 

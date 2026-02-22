@@ -4,6 +4,84 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Deep Review Quality Cycle — 135-Issue Audit (Phases A–F)
+
+Comprehensive 135-issue deep review across 3 parallel analysis streams,
+triaged into 6 implementation phases. Each phase committed with full test
+suite validation (3886 passed, 46 skipped, 1 xfailed throughout).
+
+Quality Gate: **97.65 → 99.74** (composite score across 10 dimensions).
+
+#### Phase A — Critical Bug Fixes (`32a33c3`)
+
+12 fixes addressing logic bugs and unsafe defaults:
+
+- **Plugin ABC mutable defaults**: Removed class-level mutable `set()` on `depends_on`/`provides`; added `__init_subclass__` for isolated copies
+- **RequestIDFilter contextvars**: Replaced thread-local `request_id` with `contextvars.ContextVar` for async safety
+- **API rate-limit null guard**: Check `api is not None` before operations to prevent `NoneType` errors during startup
+- **StageResult nesting fix**: `_run_classify`/`_run_taint` return `dict` not double-wrapped `StageResult`
+- **Executor duplicate `stop_phase`**: Removed second erroneous `stop_phase()` call
+- **Solver pop guard**: Guard against `pop()` on empty constraint stack
+- **Devirt exception narrowing**: Replaced broad `Exception` catches with specific types in themida/cv devirt
+- **Config singleton warning**: `get_config()` warns when called with conflicting environment
+
+#### Phase B — Type Safety & Validation (`1135a63`)
+
+14 fixes for type correctness and input validation:
+
+- **PipelineState dict interface**: `ClassVar _FIELD_NAMES`, proper `__getitem__`/`__contains__`/`get`/`setdefault`
+- **WeightedEnsemble alignment**: Track responded model indices to align weights correctly
+- **Unified HANDLER_CATEGORIES**: Import from taxonomy module instead of ad-hoc lists
+- **Active learning validation**: Strategy validation with descriptive error messages
+- **Model load exception broadening**: `model.load()` catches `(OSError, ValueError, RuntimeError, KeyError)`
+- **CLI validation**: File read error handling, `AnalysisType` enum validation
+- **Config.validate() expansion**: Added checks for `pin.timeout`, dispatcher settings
+
+#### Phase C — Config & Data Consolidation (`c9283ee`)
+
+13 fixes for configuration, pattern, and model consistency:
+
+- **Config.DEFAULTS expanded**: 9 sections — `logging.console`, `analysis.enable_caching`, `api.enable_cors`/`debug`, `vmprotect.confidence_threshold`/`max_handler_size`, `dispatcher`, `data`, `paths`
+- **Pin DLL naming**: Unified to `.ia32.dll`/`.intel64.dll` convention
+- **Config schema typed**: `config_schema.json` fully updated with `data`/`paths`/`dispatcher` sections
+- **YAML patterns_db fix**: Corrected path to `vmprotect_handlers.json`
+- **ARM patterns canonical**: `logic` → `bitwise`, `load_store` → `memory`, `branch` → `control_flow`
+- **Themida patterns canonical**: `misc` → `nop`, `vm_lifecycle`/`context` → `vm_control`, `key_transform` → `crypto`, `native` → `control_flow`, `fetch` → `vm_control`
+- **VMP INC/DEC signatures**: Disambiguated (was identical `48 FF ??`)
+- **Taxonomy legacy map**: Expanded with `misc`, `vm_lifecycle`, `key_transform`, `native`, `fetch`, `dispatcher` entries
+- **Model metadata provenance**: Added `version`, `trained_date`, `framework`, `taxonomy` to model metadata files
+
+#### Phase D — Performance & Cleanup (`08e1acd`)
+
+8 fixes for performance and code hygiene:
+
+- **`_CAT_TO_OP` hoisted**: Module-level constant in `trainer.py` (was rebuilt per call)
+- **Dead code removed**: Empty `_HEURISTIC_RULES` list in `handler_classifier.py`
+- **Dead import removed**: Unused `import sys` in `cli.py`
+- **19 regex patterns precompiled**: `_SYM_PATTERNS` in `handler_semantics.py` → `re.compile()`
+- **`_RE_LEA_NOP` precompiled**: Eliminated per-call compile
+- **`_TAINT_REG_PATTERNS` precompiled**: Dict of compiled patterns (was re-importing `re` in nested loop)
+- **New test fixtures**: `arm_patterns_path`/`arm_patterns_data`, `tmp_output_dir`, `fresh_config`
+
+#### Phase E — Thread Safety & Security (`581d706`)
+
+5 fixes for concurrency and API security:
+
+- **LLM analyzer double-checked locking**: `_ensure_litellm()` and `get_llm_analyzer()` with `threading.Lock`
+- **LocalFileBackend `store`/`store_bulk` lock**: Wrapped with `self._lock`
+- **Metrics `stop_phase`**: All mutations inside `self._lock`
+- **API key header-only**: Removed query-parameter API key fallback (security hardening)
+
+#### Phase F — Quality Gate Fixes (`4a600e9`)
+
+4 fixes from quality gate assessment to reach 99.74% composite score:
+
+- **LocalFileBackend full locking**: `get()`/`delete()`/`query()`/`ensure_index()` wrapped with `self._lock`
+- **ARM patterns dispatcher→vm_control**: Last two `dispatcher` entries corrected
+- **`fresh_config` fixture**: Uses `reset_config()` instead of non-existent `Config._instance`
+- **API error sanitisation**: All 500-class responses use generic messages; `str(exc)` logged server-side only
+- **Redundant import cleanup**: Removed duplicate `import threading` in `MemoryBackend.__init__`
+
 ### Deep Review Implementation Cycle (Phases 1–4)
 
 Systematic 4-phase improvement cycle driven by a comprehensive expert

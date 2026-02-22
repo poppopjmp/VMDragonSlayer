@@ -73,3 +73,25 @@ dispatcher:
 
 - Check `/health` and `/status` for quick diagnostics; inspect `/metrics` for counters and active connections.
 - Common import errors often stem from optional extras; consult `pyproject.toml` optional-dependencies.
+
+## Security Hardening
+
+- **API key authentication**: Header-only (`x-api-key`). Query-parameter keys are rejected (prevents credential leakage in access logs/referrer headers).
+- **Error sanitisation**: All 500-class API responses return generic messages. Exception details are logged server-side only — never leaked to clients.
+- **Rate limiting**: Per-IP sliding window; configurable via `api.rate_limit` in config.
+- **CORS**: Origins configurable via `api.enable_cors` and `api.cors_origins`.
+- **Request body limits**: `MAX_REQUEST_BODY_BYTES` enforced on upload endpoints.
+
+## Thread Safety
+
+The following components use explicit locking for thread safety:
+
+| Component | Lock type | Protected operations |
+|-----------|-----------|---------------------|
+| `Config` singleton | `threading.Lock` | `get()`, `set()`, `get_section()`, `get_config()` (DCL) |
+| `LocalFileBackend` | `threading.Lock` | `store()`, `store_bulk()`, `get()`, `delete()`, `query()`, `ensure_index()` |
+| `MemoryBackend` | `threading.Lock` | All CRUD operations |
+| `MetricsCollector` | `threading.Lock` | `start_phase()`, `stop_phase()`, `record_*()` |
+| `LLM analyzer` | `threading.Lock` | `_ensure_litellm()`, `get_llm_analyzer()` (DCL) |
+| Plugin discovery | `threading.Lock` | `_ensure_discovered()` (DCL) |
+| `PluginContext` shared data | `threading.Lock` | `set_shared()`, `get_shared()`, `update_shared()` |

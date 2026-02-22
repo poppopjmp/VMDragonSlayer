@@ -22,7 +22,7 @@ through the pipeline; each layer only depends on layers below it.
 |--------|---------|
 | `orchestrator.py` | Top-level façade — dispatches analysis jobs, aggregates results |
 | `pipeline.py` | Sequential multi-stage pipeline with shared `PluginContext`; narrowed exception handling (Batch 1) |
-| `config.py` | YAML-based configuration (`vmdragonslayer.yml`); schema in `data/schemas/config_schema.json`; reports all validation errors at once |
+| `config.py` | YAML-based configuration (`vmdragonslayer.yml`); 9 default sections (logging, analysis, pin, api, vmprotect, dispatcher, data, paths, symbolic_execution); schema in `data/schemas/config_schema.json`; thread-safe singleton with DCL; environment mismatch warnings; reports all validation errors at once |
 | `exceptions.py` | Centralised exception hierarchy with error codes |
 | `__init__.py` | Public API surface — re-exports 6 exception classes + 4 pipeline classes |
 
