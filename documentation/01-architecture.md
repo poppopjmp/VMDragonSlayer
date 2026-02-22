@@ -21,9 +21,10 @@ through the pipeline; each layer only depends on layers below it.
 | Module | Purpose |
 |--------|---------|
 | `orchestrator.py` | Top-level façade — dispatches analysis jobs, aggregates results |
-| `pipeline.py` | Sequential multi-stage pipeline with shared `PluginContext` |
-| `config.py` | YAML-based configuration (`vmdragonslayer.yml`) |
+| `pipeline.py` | Sequential multi-stage pipeline with shared `PluginContext`; narrowed exception handling (Batch 1) |
+| `config.py` | YAML-based configuration (`vmdragonslayer.yml`); schema in `data/schemas/config_schema.json`; reports all validation errors at once |
 | `exceptions.py` | Centralised exception hierarchy with error codes |
+| `__init__.py` | Public API surface — re-exports 6 exception classes + 4 pipeline classes |
 
 ## 2  Analysis Engine (`dragonslayer/analysis/`)
 
@@ -55,8 +56,8 @@ Supporting analysis modules:
 
 | Module | Purpose |
 |--------|---------|
-| `pipeline.py` | Feature extraction from analysis artefacts |
-| `model.py` | VM handler classifier (weighted-rule + optional scikit-learn) |
+| `pipeline.py` | Feature extraction from analysis artefacts; mnemonic sets are `frozenset` for immutability |
+| `model.py` | VM handler classifier (weighted-rule + optional scikit-learn); pickle fallbacks removed — requires joblib |
 | `handler_classifier.py` | Bridge between ML pipeline and devirtualisation |
 | `trainer.py` | Training infrastructure |
 | `ensemble.py` | Multi-model combination (stub) |
@@ -64,7 +65,9 @@ Supporting analysis modules:
 ## 4  Plugin Framework (`dragonslayer/plugins/`)
 
 Plugins implement the `Plugin` ABC and run inside the pipeline's
-`PluginContext`.  Four built-in stages:
+`PluginContext`.  `_execute_with_timeout` uses `ThreadPoolExecutor`
+for clean timeout handling.  `PluginContext.storage` is typed
+`StorageBackend | None` via `TYPE_CHECKING`.  Four built-in stages:
 
 | Stage | Directory | Examples |
 |-------|-----------|----------|

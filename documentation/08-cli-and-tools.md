@@ -115,3 +115,35 @@ Utilities in `tools/` support quality gates, evidence collection, validation, an
 
 - All examples assume PowerShell on Windows. Adjust quoting for other shells as needed.
 - Many tools read from or write to `evidence/` and `reports/`; ensure those directories exist or let the tools create them.
+
+## VMDragonSlayer CLI (`vmdragonslayer` / `vmdslayer`)
+
+The main CLI is defined in `dragonslayer/cli.py` and registered via
+`pyproject.toml [project.scripts]`.
+
+### Exit Codes
+
+| Code | Constant      | Meaning |
+|------|---------------|---------|
+| 0    | `EX_OK`       | Success — no VM protection found (scan) or analysis completed (analyze) |
+| 1    | `EX_ERROR`    | Runtime or analysis error |
+| 2    | `EX_DETECTED` | VM protection detected (scan / analyze) |
+
+Exit code 2 is useful in CI pipelines:
+
+```bash
+vmdragonslayer scan sample.exe
+if [ $? -eq 2 ]; then
+    echo "VM protection detected — triggering devirtualisation pipeline"
+fi
+```
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `scan <file>` | Quick VM-presence triage (fast, pattern-based) |
+| `analyze <file> --type <type>` | Full analysis pipeline (hybrid, full_analysis, vm_discovery, …) |
+| `export <file> -f <format>` | Analyze and export as JSON / text / CSV / IDA / Ghidra |
+| `info` | Show version, supported analysis types, optional dependency status |
+| `patterns list` | List pattern database entries with optional `--arch` / `--type` filter |

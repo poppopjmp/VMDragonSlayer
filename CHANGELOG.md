@@ -4,6 +4,42 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Quality & Hardening Batches 1-9
+
+Systematic codebase improvement driven by a comprehensive review.
+Test count held at **3 812 passing** throughout.
+
+#### Batch 1 — Exception Handling Narrowing (`186f272`)
+- **Narrowed** `_ENGINE_ERRORS` and `_STAGE_ERRORS` in `pipeline.py` — removed blanket `Exception` catch
+- Fixed 2 pre-existing bugs triggered by the tighter catches
+- Updated 4 test files to align with narrowed exceptions
+
+#### Batch 2 — Dependency Reconciliation (`1bb0682`)
+- Cleaned `pyproject.toml` core deps (removed pandas/requests/scikit-learn/joblib from core)
+- Added `[emulation]` optional extra; updated `[web]` with python-multipart
+- Rewrote `requirements.txt` to match pyproject.toml
+- Fixed stale `patch.dict("sys.modules", {})` in 5 wiring tests
+
+#### Batch 3-6 — Internal Cleanup (`3c48ccf`)
+- **Batch 3**: `analysis/__init__.py` — replaced ~130 lines of try/except blocks with `_try_import()` helper
+- **Batch 4**: `core/__init__.py` — added 12 re-exports (6 exceptions, 4 pipeline classes)
+- **Batch 5**: `ml/model.py` — removed all 4 insecure pickle fallbacks; `ml/pipeline.py` — converted 7 mnemonic sets to `frozenset`
+- **Batch 6**: `plugins/__init__.py` — replaced daemon thread with `ThreadPoolExecutor`; added `TYPE_CHECKING` guard for `StorageBackend` type
+
+#### Batch 7 — CLI Exit Codes (`57e592e`)
+- Named exit codes: `EX_OK(0)`, `EX_ERROR(1)`, `EX_DETECTED(2)`
+- Added error handling to `scan` command (was missing)
+- Both `scan` and `analyze` now exit 2 on VM detection (CI-friendly)
+
+#### Batch 8 — Test Factories (`4e8e525`)
+- Created `tests/factories.py` with 10 canonical builder functions
+- Deduplicates helpers found in 22+ test files (make_insn, make_pe, etc.)
+
+#### Batch 9 — Config Schema & Validation (`39a04ff`)
+- Added `data/schemas/config_schema.json` (JSON Schema draft-07)
+- `Config.validate()` now reports ALL errors in a single message
+- Added `Config.to_dict()` serialisation helper
+
 ### B104–B107 — Deep Implementation Cycle (4 commits)
 
 Addresses remaining gaps identified by a comprehensive audit to bring

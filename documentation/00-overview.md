@@ -59,7 +59,7 @@ See [01-architecture.md](01-architecture.md) for full module-by-module detail.
 
 ## Test Suite
 
-3 148+ tests, 44 skipped.  Run with:
+3 812+ tests, 44 skipped.  Run with:
 
 ```bash
 python -m pytest --tb=short -q
