@@ -1,0 +1,52 @@
+[package]
+name = "dragonslayer-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["VMDragonSlayer Team"]
+description = "Automated multi-engine framework for unpacking, analyzing, and devirtualizing binaries - Rust port"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/poppopjmp/VMDragonSlayer"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.25", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+log = "0.4"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Networking (for API) - commented out for initial build
+# hyper = { version = "0.14", features = ["full"] }
+# axum = { version = "0.6", features = ["http1", "http2", "json", "macros"] }
+# tower = "0.4"
+# tower-http = { version = "0.4", features = ["cors"] }
+
+# Testing (simplified for now)
+# criterion = "0.5"  # Removed due to rustc version requirements
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+# Binaries to be implemented later
+# [[bin]]
+# name = "dragonslayer-cli"
+# path = "src/bin/cli.rs"
+
+# [[bin]]
+# name = "dragonslayer-api"
+# path = "src/bin/api.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+

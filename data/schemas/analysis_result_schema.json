@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vmdragonslayer.com/schemas/analysis_result.json",
+  "title": "VMDragonSlayer Analysis Result Schema",
+  "description": "Schema for VMDragonSlayer analysis results",
+  "type": "object",
+  "required": [
+    "analysis_id",
+    "timestamp", 
+    "file_info",
+    "analysis_type",
+    "status",
+    "results"
+  ],
+  "properties": {
+    "analysis_id": {
+      "type": "string",
+      "description": "Unique identifier for this analysis",
+      "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the analysis was performed"
+    },
+    "file_info": {
+      "type": "object",
+      "required": ["filename", "size", "md5", "sha256"],
+      "properties": {
+        "filename": {"type": "string"},
+        "size": {"type": "integer", "minimum": 0},
+        "md5": {"type": "string", "pattern": "^[a-fA-F0-9]{32}$"},
+        "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+        "sha1": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"},
+        "file_type": {"type": "string"},
+        "entropy": {"type": "number", "minimum": 0, "maximum": 8}
+      }
+    },
+    "analysis_type": {
+      "type": "string",
+      "enum": ["vm_discovery", "pattern_analysis", "taint_tracking", "symbolic_execution", "hybrid", "batch"]
+    },
+    "status": {
+      "type": "string", 
+      "enum": ["completed", "failed", "timeout", "partial"]
+    },
+    "execution_time": {
+      "type": "number",
+      "description": "Analysis execution time in seconds",
+      "minimum": 0
+    },
+    "results": {
+      "type": "object",
+      "properties": {
+        "vm_detection": {
+          "type": "object",
+          "properties": {
+            "is_vm_protected": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "vm_type": {"type": "string", "enum": ["vmprotect", "themida", "custom", "unknown"]},
+            "vm_version": {"type": "string"},
+            "handlers_detected": {"type": "integer", "minimum": 0},
+            "bytecode_regions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "start_address": {"type": "string"},
+                  "end_address": {"type": "string"},
+                  "size": {"type": "integer"},
+                  "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                }
+              }
+            }
+          }
+        },
+        "pattern_analysis": {
+          "type": "object",
+          "properties": {
+            "patterns_found": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pattern_id": {"type": "string"},
+                  "pattern_name": {"type": "string"},
+                  "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                  "locations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "address": {"type": "string"},
+                        "size": {"type": "integer"}
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "classification": {
+              "type": "object",
+              "properties": {
+                "primary_family": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "features_used": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        },
+        "taint_tracking": {
+          "type": "object",
+          "properties": {
+            "handlers_analyzed": {"type": "integer", "minimum": 0},
+            "taint_flows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source": {"type": "string"},
+                  "sink": {"type": "string"},
+                  "taint_type": {"type": "string"},
+                  "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                }
+              }
+            },
+            "vm_structure": {
+              "type": "object",
+              "properties": {
+                "dispatcher_address": {"type": "string"},
+                "handler_table": {"type": "string"},
+                "bytecode_start": {"type": "string"},
+                "stack_pointer": {"type": "string"}
+              }
+            }
+          }
+        },
+        "symbolic_execution": {
+          "type": "object",
+          "properties": {
+            "paths_explored": {"type": "integer", "minimum": 0},
+            "constraints_solved": {"type": "integer", "minimum": 0},
+            "handlers_lifted": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "handler_id": {"type": "string"},
+                  "address": {"type": "string"},
+                  "operation": {"type": "string"},
+                  "lifted_code": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "error_type": {"type": "string"},
+          "message": {"type": "string"},
+          "timestamp": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "vmdragonslayer_version": {"type": "string"},
+        "analysis_config": {"type": "object"},
+        "system_info": {
+          "type": "object",
+          "properties": {
+            "os": {"type": "string"},
+            "cpu": {"type": "string"},
+            "memory_gb": {"type": "number"}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vmdragonslayer.com/schemas/pattern_database.json", 
+  "title": "Pattern Database Schema",
+  "description": "Schema for VMDragonSlayer pattern database",
+  "type": "object",
+  "required": ["version", "categories"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_updated": {
+      "type": "string", 
+      "format": "date-time"
+    },
+    "description": {
+      "type": "string"
+    },
+    "categories": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "object",
+          "required": ["description", "patterns"],
+          "properties": {
+            "description": {"type": "string"},
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "name", "type", "confidence"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                  },
+                  "name": {"type": "string"},
+                  "type": {"type": "string"},
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "bytecode_signature": {"type": "string"},
+                  "handler_patterns": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "assembly_patterns": {
+                    "type": "array", 
+                    "items": {"type": "string"}
+                  },
+                  "description": {"type": "string"},
+                  "variants": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "frequency": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "vm_family": {"type": "string"},
+                  "version": {"type": "string"},
+                  "evasion_type": {"type": "string"},
+                  "indicators": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "properties": {
+        "total_patterns": {"type": "integer", "minimum": 0},
+        "categories": {"type": "integer", "minimum": 0},
+        "confidence_distribution": {
+          "type": "object",
+          "properties": {
+            "high": {"type": "integer", "minimum": 0},
+            "medium": {"type": "integer", "minimum": 0},
+            "low": {"type": "integer", "minimum": 0}
+          }
+        },
+        "last_training_data_size": {"type": "integer", "minimum": 0},
+        "pattern_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "source": {"type": "string"},
+        "validation_method": {"type": "string"},
+        "training_samples": {"type": "integer", "minimum": 0},
+        "test_samples": {"type": "integer", "minimum": 0},
+        "cross_validation_score": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

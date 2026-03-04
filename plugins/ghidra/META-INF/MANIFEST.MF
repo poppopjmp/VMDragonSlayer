@@ -1,0 +1,32 @@
+Manifest-Version: 1.0
+Main-Class: vmdragonslayer.VMDragonSlayerPlugin
+Class-Path: lib/jackson-core.jar lib/jackson-databind.jar lib/jackson-annotations.jar
+Implementation-Title: VMDragonSlayer AI Analysis Plugin
+Implementation-Version: 1.0.0
+Implementation-Vendor: van1sh
+Built-Date: 2025-08-07
+
+Name: vmdragonslayer/
+Specification-Title: VMDragonSlayer Plugin
+Specification-Version: 1.0
+Specification-Vendor: van1sh
+Implementation-Title: VMDragonSlayer Plugin
+Implementation-Version: 1.0.0
+Implementation-Vendor: van1sh
+
+Name: vmdragonslayer/api/
+Specification-Title: API Client
+Specification-Version: 1.0
+Implementation-Title: API Communication
+Implementation-Version: 1.0.0
+
+Name: vmdragonslayer/ui/
+Specification-Title: UI Components
+Specification-Version: 1.0
+Implementation-Title: Analysis Interface
+Implementation-Version: 1.0.0
+
+Required-Bundles: ghidra.base,ghidra.program,ghidra.plugin
+Export-Package: vmdragonslayer,vmdragonslayer.api,vmdragonslayer.ui
+Import-Package: ghidra.app.plugin,ghidra.framework.plugintool,ghidra.program.model.listing,\
+ ghidra.util,javax.swing,java.awt,java.net.http,java.util.concurrent

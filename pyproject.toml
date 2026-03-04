@@ -9,10 +9,10 @@ description = "Advanced VM detection and analysis library for binary reverse eng
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
 authors = [
-    {name = "van1sh", email = "contact@vmdragonslayer.com"}
+    {name = "van1sh", email = "contact@vmdragonslayer.dev"}
 ]
 maintainers = [
-    {name = "van1sh", email = "contact@vmdragonslayer.com"}
+    {name = "van1sh", email = "contact@vmdragonslayer.dev"}
 ]
 keywords = [
     "reverse-engineering",
@@ -163,8 +163,7 @@ exclude = ["tests*", "docs*", "plugins*"]
 "*" = [
     "data/models/pretrained/*.pkl",
     "data/models/pretrained/*.pt",
-    "data/models/pretrained/*.pth",
-    "**/*.security_backup"
+    "data/models/pretrained/*.pth"
 ]
 
 # Black configuration

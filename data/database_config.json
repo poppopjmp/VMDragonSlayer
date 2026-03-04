@@ -1,0 +1,205 @@
+{
+  "database_connections": {
+    "primary": {
+      "type": "postgresql",
+      "host": "${DB_HOST}",
+      "port": 5432,
+      "database": "vmdragonslayer",
+      "username": "${DB_USER}", 
+      "password": "${DB_PASSWORD}",
+      "pool_size": 20,
+      "max_overflow": 30,
+      "pool_timeout": 30,
+      "pool_recycle": 3600,
+      "ssl_mode": "require"
+    },
+    "analytics": {
+      "type": "elasticsearch", 
+      "hosts": ["${ES_HOST}:9200"],
+      "username": "${ES_USER}",
+      "password": "${ES_PASSWORD}",
+      "timeout": 30,
+      "max_retries": 3,
+      "ssl_verify": true
+    },
+    "cache": {
+      "type": "redis",
+      "host": "${REDIS_HOST}",
+      "port": 6379,
+      "password": "${REDIS_PASSWORD}",
+      "database": 0,
+      "max_connections": 100,
+      "socket_timeout": 30,
+      "socket_connect_timeout": 10
+    },
+    "message_queue": {
+      "type": "rabbitmq",
+      "host": "${RABBITMQ_HOST}",
+      "port": 5672,
+      "username": "${RABBITMQ_USER}",
+      "password": "${RABBITMQ_PASSWORD}",
+      "vhost": "/vmdragonslayer",
+      "heartbeat": 600,
+      "blocked_connection_timeout": 300
+    }
+  },
+  "table_schemas": {
+    "analysis_jobs": {
+      "table_name": "analysis_jobs",
+      "columns": {
+        "job_id": "UUID PRIMARY KEY",
+        "file_hash": "VARCHAR(64) NOT NULL",
+        "analysis_type": "VARCHAR(50) NOT NULL",
+        "status": "VARCHAR(20) DEFAULT 'pending'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "started_at": "TIMESTAMP",
+        "completed_at": "TIMESTAMP",
+        "user_id": "UUID",
+        "priority": "INTEGER DEFAULT 5",
+        "configuration": "JSONB",
+        "results": "JSONB",
+        "error_message": "TEXT"
+      },
+      "indexes": [
+        "CREATE INDEX idx_analysis_jobs_status ON analysis_jobs(status)",
+        "CREATE INDEX idx_analysis_jobs_created_at ON analysis_jobs(created_at)",
+        "CREATE INDEX idx_analysis_jobs_file_hash ON analysis_jobs(file_hash)"
+      ]
+    },
+    "file_metadata": {
+      "table_name": "file_metadata",
+      "columns": {
+        "file_id": "UUID PRIMARY KEY", 
+        "filename": "VARCHAR(255) NOT NULL",
+        "file_hash": "VARCHAR(64) UNIQUE NOT NULL",
+        "file_size": "BIGINT NOT NULL",
+        "file_type": "VARCHAR(50)",
+        "mime_type": "VARCHAR(100)",
+        "entropy": "FLOAT",
+        "uploaded_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "uploaded_by": "UUID",
+        "storage_path": "TEXT",
+        "metadata": "JSONB"
+      },
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_file_metadata_hash ON file_metadata(file_hash)",
+        "CREATE INDEX idx_file_metadata_uploaded_at ON file_metadata(uploaded_at)"
+      ]
+    },
+    "analysis_results": {
+      "table_name": "analysis_results",
+      "columns": {
+        "result_id": "UUID PRIMARY KEY",
+        "job_id": "UUID REFERENCES analysis_jobs(job_id)",
+        "file_hash": "VARCHAR(64) NOT NULL",
+        "analysis_type": "VARCHAR(50) NOT NULL",
+        "vm_detected": "BOOLEAN",
+        "vm_type": "VARCHAR(50)",
+        "confidence": "FLOAT",
+        "handlers_found": "INTEGER DEFAULT 0",
+        "patterns_matched": "INTEGER DEFAULT 0",
+        "execution_time": "FLOAT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "detailed_results": "JSONB",
+        "summary": "TEXT"
+      },
+      "indexes": [
+        "CREATE INDEX idx_analysis_results_file_hash ON analysis_results(file_hash)",
+        "CREATE INDEX idx_analysis_results_vm_detected ON analysis_results(vm_detected)",
+        "CREATE INDEX idx_analysis_results_created_at ON analysis_results(created_at)"
+      ]
+    },
+    "users": {
+      "table_name": "users",
+      "columns": {
+        "user_id": "UUID PRIMARY KEY",
+        "username": "VARCHAR(100) UNIQUE NOT NULL",
+        "email": "VARCHAR(255) UNIQUE NOT NULL",
+        "password_hash": "VARCHAR(255) NOT NULL",
+        "role": "VARCHAR(50) DEFAULT 'analyst'",
+        "is_active": "BOOLEAN DEFAULT true",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "last_login": "TIMESTAMP",
+        "api_key": "VARCHAR(255) UNIQUE",
+        "preferences": "JSONB"
+      },
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_users_username ON users(username)",
+        "CREATE UNIQUE INDEX idx_users_email ON users(email)",
+        "CREATE INDEX idx_users_role ON users(role)"
+      ]
+    },
+    "audit_log": {
+      "table_name": "audit_log",
+      "columns": {
+        "log_id": "UUID PRIMARY KEY",
+        "user_id": "UUID",
+        "action": "VARCHAR(100) NOT NULL",
+        "resource_type": "VARCHAR(50)",
+        "resource_id": "VARCHAR(255)",
+        "timestamp": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "ip_address": "INET",
+        "user_agent": "TEXT",
+        "details": "JSONB"
+      },
+      "indexes": [
+        "CREATE INDEX idx_audit_log_timestamp ON audit_log(timestamp)",
+        "CREATE INDEX idx_audit_log_user_id ON audit_log(user_id)",
+        "CREATE INDEX idx_audit_log_action ON audit_log(action)"
+      ]
+    }
+  },
+  "elasticsearch_mappings": {
+    "analysis_logs": {
+      "index_name": "vmdragonslayer-analysis-logs",
+      "mapping": {
+        "properties": {
+          "timestamp": {"type": "date"},
+          "level": {"type": "keyword"},
+          "logger": {"type": "keyword"},
+          "message": {"type": "text"},
+          "job_id": {"type": "keyword"},
+          "file_hash": {"type": "keyword"},
+          "analysis_type": {"type": "keyword"},
+          "execution_time": {"type": "float"},
+          "memory_usage": {"type": "long"},
+          "cpu_usage": {"type": "float"},
+          "error_details": {"type": "object"}
+        }
+      }
+    },
+    "performance_metrics": {
+      "index_name": "vmdragonslayer-performance",
+      "mapping": {
+        "properties": {
+          "timestamp": {"type": "date"},
+          "metric_name": {"type": "keyword"},
+          "metric_value": {"type": "float"},
+          "node_id": {"type": "keyword"},
+          "service": {"type": "keyword"},
+          "tags": {"type": "object"}
+        }
+      }
+    }
+  },
+  "migration_scripts": {
+    "001_initial_schema": {
+      "description": "Initial database schema creation",
+      "up": [
+        "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";",
+        "CREATE TABLE analysis_jobs (...);",
+        "CREATE TABLE file_metadata (...);",
+        "CREATE TABLE analysis_results (...);",
+        "CREATE TABLE users (...);",
+        "CREATE TABLE audit_log (...);"
+      ],
+      "down": [
+        "DROP TABLE IF EXISTS audit_log;",
+        "DROP TABLE IF EXISTS users;", 
+        "DROP TABLE IF EXISTS analysis_results;",
+        "DROP TABLE IF EXISTS file_metadata;",
+        "DROP TABLE IF EXISTS analysis_jobs;"
+      ]
+    }
+  }
+}
