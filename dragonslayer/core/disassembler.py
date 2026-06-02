@@ -23,9 +23,10 @@ Features
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class DisasmArchitecture(Enum):
 # Instruction category mapping (reused from lifter.py for consistency)
 # ---------------------------------------------------------------------------
 
-_MNEMONIC_CATEGORIES: Dict[str, str] = {
+_MNEMONIC_CATEGORIES: dict[str, str] = {
     # Arithmetic
     "add": "arithmetic", "sub": "arithmetic", "mul": "arithmetic",
     "imul": "arithmetic", "div": "arithmetic", "idiv": "arithmetic",
@@ -107,12 +108,12 @@ class DisassembledInstruction:
     operands: str
     category: str
     raw_bytes: bytes
-    reads: List[str] = field(default_factory=list)
-    writes: List[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
     is_branch: bool = False
-    branch_target: Optional[int] = None
+    branch_target: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "address": self.address,
             "size": self.size,
@@ -167,7 +168,7 @@ class Disassembler:
         base_address: int = 0,
         *,
         max_instructions: int = 0,
-    ) -> List[DisassembledInstruction]:
+    ) -> list[DisassembledInstruction]:
         """Disassemble *code* bytes starting at *base_address*.
 
         Parameters
@@ -186,7 +187,7 @@ class Disassembler:
         self,
         code: bytes,
         address: int = 0,
-    ) -> Optional[DisassembledInstruction]:
+    ) -> DisassembledInstruction | None:
         """Disassemble a single instruction. Returns *None* on failure."""
         result = self.disassemble(code, address, max_instructions=1)
         return result[0] if result else None
@@ -203,7 +204,7 @@ class Disassembler:
         self,
         code: bytes,
         address: int = 0,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Disassemble one instruction and return ``(text, size)``.
 
         Convenience wrapper for trace engines that only need the
@@ -217,7 +218,7 @@ class Disassembler:
         text = f"{insn.mnemonic} {insn.operands}".strip()
         return text, insn.size
 
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> dict[str, Any]:
         """Return diagnostic info about this disassembler instance."""
         return {
             "architecture": self._arch_str,
@@ -227,7 +228,7 @@ class Disassembler:
 
     # -- Internal -----------------------------------------------------------
 
-    def _resolve_capstone_params(self) -> Tuple[int, int]:
+    def _resolve_capstone_params(self) -> tuple[int, int]:
         """Map architecture string → capstone (arch, mode) pair."""
         arch_map = {
             "x86": (capstone.CS_ARCH_X86, capstone.CS_MODE_32),
@@ -249,14 +250,13 @@ class Disassembler:
         code: bytes,
         base: int,
         max_insns: int,
-    ) -> List[DisassembledInstruction]:
+    ) -> list[DisassembledInstruction]:
         """Disassemble using Capstone backend."""
-        instructions: List[DisassembledInstruction] = []
-        count = 0
+        instructions: list[DisassembledInstruction] = []
         for insn in self._cs.disasm(code, base):
-            reads: List[str] = []
-            writes: List[str] = []
-            branch_target: Optional[int] = None
+            reads: list[str] = []
+            writes: list[str] = []
+            branch_target: int | None = None
 
             # Extract register reads/writes
             if insn.regs_read:
@@ -291,8 +291,7 @@ class Disassembler:
                 branch_target=branch_target,
             ))
 
-            count += 1
-            if max_insns > 0 and count >= max_insns:
+            if max_insns > 0 and len(instructions) >= max_insns:
                 break
 
         return instructions
@@ -302,10 +301,9 @@ class Disassembler:
         code: bytes,
         base: int,
         max_insns: int,
-    ) -> List[DisassembledInstruction]:
+    ) -> list[DisassembledInstruction]:
         """Minimal 1-byte 'db' pseudo-instructions when Capstone is missing."""
-        instructions: List[DisassembledInstruction] = []
-        count = 0
+        instructions: list[DisassembledInstruction] = []
         for i, byte_val in enumerate(code):
             instructions.append(DisassembledInstruction(
                 address=base + i,
@@ -315,8 +313,7 @@ class Disassembler:
                 category="unknown",
                 raw_bytes=bytes([byte_val]),
             ))
-            count += 1
-            if max_insns > 0 and count >= max_insns:
+            if max_insns > 0 and len(instructions) >= max_insns:
                 break
         return instructions
 
@@ -356,7 +353,7 @@ def disassemble_section(
     section_data: bytes,
     base_address: int,
     architecture: str = "x64",
-) -> List[DisassembledInstruction]:
+) -> list[DisassembledInstruction]:
     """Convenience: disassemble an entire code section."""
     dis = create_disassembler(architecture)
     return dis.disassemble(section_data, base_address)

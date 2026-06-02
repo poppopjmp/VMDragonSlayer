@@ -18,9 +18,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -28,17 +27,19 @@ logger = logging.getLogger(__name__)
 
 _HAS_BLACKFYRE = False
 try:
-    from blackfyre.datatypes.contexts.binarycontext import BinaryContext  # type: ignore[import-untyped]
+    from blackfyre.datatypes.contexts.binarycontext import (
+        BinaryContext,  # type: ignore[import-untyped]
+    )
 
     _HAS_BLACKFYRE = True
 except (ImportError, OSError):
     pass
 
 
-def _function_hash(name: str, mnemonics: List[str]) -> str:
+def _function_hash(name: str, mnemonics: list[str]) -> str:
     """Stable hash for a function based on its mnemonic sequence."""
     payload = f"{name}:{','.join(mnemonics)}"
-    return hashlib.md5(payload.encode()).hexdigest()
+    return hashlib.md5(payload.encode(), usedforsecurity=False).hexdigest()
 
 
 @register_plugin
@@ -89,7 +90,7 @@ class BlackfyreAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
             )
 
-    def _resolve_bcc_path(self, file_path: str, ctx: PluginContext) -> Optional[str]:
+    def _resolve_bcc_path(self, file_path: str, ctx: PluginContext) -> str | None:
         """Check for a .bcc file adjacent to the sample, or if file_path itself is one."""
         if file_path and file_path.endswith(".bcc") and os.path.isfile(file_path):
             return file_path
@@ -110,17 +111,17 @@ class BlackfyreAnalyzer(Plugin):
                 return c
         return None
 
-    def _analyze(self, bcc_path: str, ctx: PluginContext) -> Dict[str, Any]:
+    def _analyze(self, bcc_path: str, ctx: PluginContext) -> dict[str, Any]:
         bcc = BinaryContext.load_from_file(bcc_path)
 
-        functions: List[Dict[str, Any]] = []
+        functions: list[dict[str, Any]] = []
         total_instructions = 0
 
         func_contexts = list(bcc.function_contexts) if hasattr(bcc, "function_contexts") else []
 
         for func in func_contexts:
-            mnemonics: List[str] = []
-            instructions: List[Dict[str, Any]] = []
+            mnemonics: list[str] = []
+            instructions: list[dict[str, Any]] = []
             block_count = 0
 
             if hasattr(func, "basic_block_context_dict") and isinstance(
@@ -134,7 +135,7 @@ class BlackfyreAnalyzer(Plugin):
                             if hasattr(inst, "mnemonic"):
                                 mnem = inst.mnemonic.lower()
                                 mnemonics.append(mnem)
-                            inst_entry: Dict[str, Any] = {"mnemonic": mnem}
+                            inst_entry: dict[str, Any] = {"mnemonic": mnem}
                             if hasattr(inst, "address"):
                                 inst_entry["address"] = inst.address
                             if hasattr(inst, "operands"):
@@ -147,14 +148,14 @@ class BlackfyreAnalyzer(Plugin):
             fhash = _function_hash(func.name, mnemonics)
 
             # Cross-references: callees and callers.
-            callees: List[int] = []
-            callers: List[int] = []
+            callees: list[int] = []
+            callers: list[int] = []
             if hasattr(func, "callees"):
                 callees = [int(c) for c in func.callees]
             if hasattr(func, "callers"):
                 callers = [int(c) for c in func.callers]
 
-            func_entry: Dict[str, Any] = {
+            func_entry: dict[str, Any] = {
                 "name": func.name,
                 "address": func.address,
                 "block_count": block_count,

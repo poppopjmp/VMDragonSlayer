@@ -30,18 +30,16 @@ Usage::
 from __future__ import annotations
 
 import logging
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
-    TraceInstruction,
     TraceMemoryAccess,
 )
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
     HandlerBoundary,
-    SegmentationResult,
 )
 
 # Lazy import for ParsedBinary to avoid circular deps
@@ -76,7 +74,7 @@ class VMOpcode:
     operand_bytes: bytes = b"" # raw operand bytes following the opcode
     vip_value: int = 0         # the vIP value when this opcode was fetched
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the VM opcode to a JSON-compatible dict."""
         return {
             "offset": self.offset,
@@ -93,7 +91,7 @@ class VMOpcode:
 class OpcodeMap:
     """Maps VM opcode values → native handler addresses and categories."""
 
-    entries: Dict[int, Tuple[int, str]] = field(default_factory=dict)
+    entries: dict[int, tuple[int, str]] = field(default_factory=dict)
     # entries[opcode_value] = (handler_address, category)
 
     def add(self, opcode: int, handler_address: int, category: str = "") -> None:
@@ -109,11 +107,11 @@ class OpcodeMap:
                 opcode, existing[0], handler_address,
             )
 
-    def handler_for(self, opcode: int) -> Optional[Tuple[int, str]]:
+    def handler_for(self, opcode: int) -> tuple[int, str] | None:
         """Return ``(handler_address, category)`` for *opcode*, or ``None``."""
         return self.entries.get(opcode)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the opcode map to a JSON-compatible dict keyed by hex opcode."""
         return {
             hex(k): {"handler": hex(v[0]), "category": v[1]}
@@ -127,9 +125,9 @@ class BytecodeStream:
 
     base_address: int = 0              # virtual address of the stream start
     raw_bytes: bytes = b""             # contiguous raw bytecode
-    opcodes: List[VMOpcode] = field(default_factory=list)
+    opcodes: list[VMOpcode] = field(default_factory=list)
     opcode_map: OpcodeMap = field(default_factory=OpcodeMap)
-    gaps: List[Tuple[int, int]] = field(default_factory=list)  # (offset, size)
+    gaps: list[tuple[int, int]] = field(default_factory=list)  # (offset, size)
     vip_direction: int = 1             # +1 = ascending, -1 = descending
 
     @property
@@ -142,14 +140,14 @@ class BytecodeStream:
         """Number of decoded opcodes in the stream."""
         return len(self.opcodes)
 
-    def opcode_at(self, offset: int) -> Optional[VMOpcode]:
+    def opcode_at(self, offset: int) -> VMOpcode | None:
         """Return the :class:`VMOpcode` at byte *offset*, or ``None``."""
         for op in self.opcodes:
             if op.offset == offset:
                 return op
         return None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the bytecode stream to a JSON-compatible dict."""
         return {
             "base_address": hex(self.base_address),
@@ -169,11 +167,11 @@ class BytecodeStream:
 
 def extract_bytecode(
     trace: ExecutionTrace,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     *,
     bytecode_width: int = 0,
-    parsed_binary: Optional[Any] = None,
-    binary_data: Optional[bytes] = None,
+    parsed_binary: Any | None = None,
+    binary_data: bytes | None = None,
 ) -> BytecodeStream:
     """Extract the VM bytecode stream from a trace + handler boundaries.
 
@@ -218,7 +216,7 @@ def extract_bytecode(
 
     # ---- 3. Collect bytes from memory reads -----------------------------
     mem_map = _build_memory_map(trace.memory_accesses)
-    collected: Dict[int, int] = {}  # vaddr → byte value
+    collected: dict[int, int] = {}  # vaddr → byte value
 
     for boundary in boundaries:
         vip = boundary.vip_value
@@ -265,8 +263,8 @@ def extract_bytecode(
     stream_len = stream_end - stream_base + 1
 
     raw = bytearray(b"\xCC" * stream_len)
-    gaps: List[Tuple[int, int]] = []
-    gap_start: Optional[int] = None
+    gaps: list[tuple[int, int]] = []
+    gap_start: int | None = None
 
     for i in range(stream_len):
         addr = stream_base + i
@@ -283,7 +281,7 @@ def extract_bytecode(
 
     # ---- 5. Build opcodes and opcode map --------------------------------
     opcode_map = OpcodeMap()
-    opcodes: List[VMOpcode] = []
+    opcodes: list[VMOpcode] = []
 
     for boundary in boundaries:
         vip = boundary.vip_value
@@ -319,13 +317,13 @@ def extract_bytecode(
 
 
 def _build_from_boundaries_only(
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     direction: int,
     base: int,
     bytecode_width: int,
     *,
-    parsed_binary: Optional[Any] = None,
-    binary_data: Optional[bytes] = None,
+    parsed_binary: Any | None = None,
+    binary_data: bytes | None = None,
 ) -> BytecodeStream:
     """Build a BytecodeStream from boundaries when no memory reads are
     available (common when traces lack memory access detail).
@@ -339,7 +337,7 @@ def _build_from_boundaries_only(
     """
 
     opcode_map = OpcodeMap()
-    opcodes: List[VMOpcode] = []
+    opcodes: list[VMOpcode] = []
 
     # --- attempt real byte reads from the binary -----------------------
     can_read_binary = (
@@ -349,7 +347,7 @@ def _build_from_boundaries_only(
     )
 
     # Assign synthetic opcode values only when we cannot read real bytes.
-    handler_to_opcode: Dict[int, int] = {}
+    handler_to_opcode: dict[int, int] = {}
     next_opcode = 0
 
     for boundary in boundaries:
@@ -358,7 +356,7 @@ def _build_from_boundaries_only(
         if width == 0:
             width = 1
 
-        real_bytes: Optional[bytes] = None
+        real_bytes: bytes | None = None
         if can_read_binary:
             try:
                 real_bytes = parsed_binary.read_va(binary_data, vip, width)
@@ -417,7 +415,7 @@ def _build_from_boundaries_only(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _determine_direction(boundaries: List[HandlerBoundary]) -> int:
+def _determine_direction(boundaries: list[HandlerBoundary]) -> int:
     """Return +1 if vIP advances forward, -1 if backward."""
     ups = 0
     downs = 0
@@ -429,7 +427,7 @@ def _determine_direction(boundaries: List[HandlerBoundary]) -> int:
     return -1 if downs > ups else 1
 
 
-def _auto_detect_width(boundaries: List[HandlerBoundary]) -> int:
+def _auto_detect_width(boundaries: list[HandlerBoundary]) -> int:
     """Guess the fixed bytecode width from vip_delta values."""
     deltas = [abs(b.vip_delta) for b in boundaries if b.vip_delta != 0]
     if not deltas:
@@ -439,14 +437,14 @@ def _auto_detect_width(boundaries: List[HandlerBoundary]) -> int:
 
 
 def _build_memory_map(
-    accesses: List[TraceMemoryAccess],
-) -> Dict[int, int]:
+    accesses: list[TraceMemoryAccess],
+) -> dict[int, int]:
     """Build addr → byte value map from read accesses.
 
     Only reads are considered (the VM fetches bytecode via reads).
     Multi-byte values are split into individual bytes (little-endian).
     """
-    mem: Dict[int, int] = {}
+    mem: dict[int, int] = {}
     for ma in accesses:
         if ma.type != "R":
             continue

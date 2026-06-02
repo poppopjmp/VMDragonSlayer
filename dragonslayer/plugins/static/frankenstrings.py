@@ -22,12 +22,10 @@ from __future__ import annotations
 import binascii
 import hashlib
 import logging
-import os
 import re
-import tempfile
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -36,17 +34,21 @@ logger = logging.getLogger(__name__)
 # Optional heavyweight dependencies -------------------------------------------
 _HAS_MULTIDECODER = False
 try:
-    from multidecoder.multidecoder import Multidecoder   # type: ignore[import-untyped]
-    from multidecoder.decoders.codec import find_utf16    # type: ignore[import-untyped]
-    from multidecoder.decoders.pe_file import find_pe_files  # type: ignore[import-untyped]
-    from multidecoder.registry import build_registry       # type: ignore[import-untyped]
+    from multidecoder.decoders.codec import find_utf16  # type: ignore[import-untyped]
+    from multidecoder.decoders.pe_file import (
+        find_pe_files,  # type: ignore[import-untyped]
+    )
+    from multidecoder.multidecoder import Multidecoder  # type: ignore[import-untyped]
+    from multidecoder.registry import build_registry  # type: ignore[import-untyped]
     _HAS_MULTIDECODER = True
 except ImportError:
     pass
 
 _HAS_BBCRACK = False
 try:
-    from assemblyline_service_utilities.common.balbuzard.bbcrack import bbcrack  # type: ignore[import-untyped]
+    from assemblyline_service_utilities.common.balbuzard.bbcrack import (
+        bbcrack,  # type: ignore[import-untyped]
+    )
     _HAS_BBCRACK = True
 except ImportError:
     pass
@@ -58,7 +60,7 @@ BASE64_RE = rb"={0,2}(?:[A-Za-z0-9+/]{10,}(?:&#(?:x[AD]|1[03]);)?[\r]?[\n]?){2,}
 PAT_EXEHEADER = rb"(?s)MZ.{32,1024}PE\000\000.+"
 PAT_EXEDOS = rb"(?s)This program cannot be run in DOS mode"
 
-IOC_PATTERNS: Dict[str, bytes] = {
+IOC_PATTERNS: dict[str, bytes] = {
     "ip":         rb"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b",
     "url":        rb"https?://[^\s<>\"']+",
     "domain":     rb"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b",
@@ -80,13 +82,13 @@ class _FrankenStringsEngine:
     """Stateful helper — one instance per ``execute()`` call."""
 
     def __init__(self) -> None:
-        self.strings: Dict[str, List[Any]] = {
+        self.strings: dict[str, list[Any]] = {
             "ascii": [], "unicode": [], "base64": [],
         }
-        self.iocs: Dict[str, List[str]] = defaultdict(list)
-        self.embedded_pe: List[Dict[str, Any]] = []
-        self.xor_strings: List[Dict[str, Any]] = []
-        self.hex_decoded: List[Dict[str, Any]] = []
+        self.iocs: dict[str, list[str]] = defaultdict(list)
+        self.embedded_pe: list[dict[str, Any]] = []
+        self.xor_strings: list[dict[str, Any]] = []
+        self.hex_decoded: list[dict[str, Any]] = []
         self.md: Any = None  # Multidecoder instance (if available)
         if _HAS_MULTIDECODER:
             self.md = Multidecoder(
@@ -94,7 +96,7 @@ class _FrankenStringsEngine:
             )
 
     # ----- public entry point ----
-    def analyze(self, data: bytes) -> Dict[str, Any]:
+    def analyze(self, data: bytes) -> dict[str, Any]:
         meta = {
             "sha256": hashlib.sha256(data).hexdigest(),
             "size": len(data),
@@ -179,7 +181,7 @@ class _FrankenStringsEngine:
                 pass
 
     def _extract_base64(self, data: bytes) -> None:
-        findings: List[Dict[str, Any]] = []
+        findings: list[dict[str, Any]] = []
         for m in re.finditer(BASE64_RE, data):
             b64 = m.group().replace(b"\n", b"").replace(b"\r", b"").replace(b" ", b"")
             if len(b64) < 16 or len(b64) % 4 != 0:
@@ -226,7 +228,7 @@ class _FrankenStringsEngine:
             pass
 
     def _extract_unicode_encoded(self, data: bytes) -> None:
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for enc in HEXENC_STRINGS:
             if enc in (b"\\u", b"%u"):
                 pat = re.compile(rb"(?:" + re.escape(enc) + b"[A-Fa-f0-9]{4})+")
@@ -249,7 +251,7 @@ class _FrankenStringsEngine:
             self.strings["unicode_encoded"] = results  # type: ignore[assignment]
 
     @staticmethod
-    def _decode_enc(data: bytes, enc: bytes) -> Optional[str]:
+    def _decode_enc(data: bytes, enc: bytes) -> str | None:
         try:
             if enc in (b"\\u", b"%u"):
                 parts = data.split(enc)[1:]
@@ -262,7 +264,7 @@ class _FrankenStringsEngine:
             return None
 
     def _extract_ascii_hex(self, data: bytes) -> None:
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for m in re.finditer(rb"[A-Fa-f0-9]{100,}", data):
             chunk = m.group()
             if len(chunk) % 2:

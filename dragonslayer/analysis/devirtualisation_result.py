@@ -11,7 +11,7 @@ can rely on.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -34,46 +34,46 @@ class DevirtualisationResult:
     handler_count: int = 0
     unique_operations: int = 0
 
-    opcode_table: Dict[str, Any] = field(default_factory=dict)
+    opcode_table: dict[str, Any] = field(default_factory=dict)
     """``SemanticOpcodeTable.to_dict()`` — per-opcode handler entries."""
 
-    pseudocode: Dict[str, Any] = field(default_factory=dict)
+    pseudocode: dict[str, Any] = field(default_factory=dict)
     """``PseudocodeResult.to_dict()``."""
 
     pseudocode_text: str = ""
     """Human-readable C-like pseudocode string."""
 
     # ── Sub-product dicts (Batch 13-25) ──────────────────────────────
-    anti_evasion_hooks: Optional[Dict[str, Any]] = None
-    vmprotect_dispatcher: Optional[Dict[str, Any]] = None
-    handler_extraction: Optional[Dict[str, Any]] = None
-    vm_context_layout: Optional[Dict[str, Any]] = None
-    handler_clustering: Optional[Dict[str, Any]] = None
-    handler_cfg: Optional[Dict[str, Any]] = None
-    vm_entry_points: Optional[Dict[str, Any]] = None
-    decrypted_handler_table: Optional[Dict[str, Any]] = None
-    bytecode_decryptor: Optional[Dict[str, Any]] = None
-    static_handler_cfg: Optional[Dict[str, Any]] = None
+    anti_evasion_hooks: dict[str, Any] | None = None
+    vmprotect_dispatcher: dict[str, Any] | None = None
+    handler_extraction: dict[str, Any] | None = None
+    vm_context_layout: dict[str, Any] | None = None
+    handler_clustering: dict[str, Any] | None = None
+    handler_cfg: dict[str, Any] | None = None
+    vm_entry_points: dict[str, Any] | None = None
+    decrypted_handler_table: dict[str, Any] | None = None
+    bytecode_decryptor: dict[str, Any] | None = None
+    static_handler_cfg: dict[str, Any] | None = None
 
     # ── ML ensemble classification results ───────────────────────────
-    ml_classifications: Optional[Dict[str, str]] = None
+    ml_classifications: dict[str, str] | None = None
     """Maps handler address (hex-string) → ML-predicted label."""
 
     # ── Multi-protector + nested VM fields (B100) ────────────────────
-    dispatcher_match: Optional[Dict[str, Any]] = None
+    dispatcher_match: dict[str, Any] | None = None
     """Generic dispatcher match dict (works for any protector)."""
 
     detected_protector: str = "unknown"
     """Name of the detected protector (vmprotect, themida, cv, unknown)."""
 
-    nested_layers: Optional[List[Dict[str, Any]]] = None
+    nested_layers: list[dict[str, Any]] | None = None
     """Nested VM layers discovered by recursive deobfuscation."""
 
     # ── Convenience ──────────────────────────────────────────────────
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict (JSON-safe)."""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "success": self.success,
             "skipped": self.skipped,
             "vip_register": self.vip_register,
@@ -105,12 +105,12 @@ class DevirtualisationResult:
         return d
 
     @classmethod
-    def skipped_result(cls, reason: str) -> "DevirtualisationResult":
+    def skipped_result(cls, reason: str) -> DevirtualisationResult:
         """Factory for a skipped/failed result."""
         return cls(success=False, skipped=True, skip_reason=reason)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DevirtualisationResult":
+    def from_dict(cls, d: dict[str, Any]) -> DevirtualisationResult:
         """Reconstruct from a serialised dict."""
         known = {
             "success", "skipped", "skip_reason", "vip_register",

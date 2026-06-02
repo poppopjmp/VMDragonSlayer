@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from .model import BaseModel, PredictionResult
 
@@ -36,7 +37,7 @@ class EnsembleClassifier:
     """
 
     def __init__(self, models: Sequence[BaseModel] | None = None) -> None:
-        self._models: List[BaseModel] = list(models) if models else []
+        self._models: list[BaseModel] = list(models) if models else []
 
     @property
     def n_models(self) -> int:
@@ -47,7 +48,7 @@ class EnsembleClassifier:
 
     # ── Fault-tolerant prediction (B59) ────────────────────────────────────
 
-    def predict_safe(self, features: Dict[str, Any]) -> PredictionResult:
+    def predict_safe(self, features: dict[str, Any]) -> PredictionResult:
         """Like :meth:`predict` but tolerates individual model failures.
 
         Models that raise are logged and skipped.  If *all* models fail,
@@ -59,9 +60,9 @@ class EnsembleClassifier:
                 metadata={"error": "no models"},
             )
 
-        results: List[PredictionResult] = []
-        responded_indices: List[int] = []
-        failures: List[str] = []
+        results: list[PredictionResult] = []
+        responded_indices: list[int] = []
+        failures: list[str] = []
         for idx, mdl in enumerate(self._models):
             try:
                 results.append(mdl.predict(features))
@@ -84,7 +85,7 @@ class EnsembleClassifier:
 
     # ── Standard prediction ────────────────────────────────────────────────
 
-    def predict(self, features: Dict[str, Any]) -> PredictionResult:
+    def predict(self, features: dict[str, Any]) -> PredictionResult:
         """Majority-vote prediction from all component models.
 
         Args:
@@ -108,10 +109,10 @@ class EnsembleClassifier:
 
     def _aggregate(
         self,
-        results: List[PredictionResult],
+        results: list[PredictionResult],
         *,
-        failures: List[str] | None = None,
-        responded_indices: List[int] | None = None,
+        failures: list[str] | None = None,
+        responded_indices: list[int] | None = None,
     ) -> PredictionResult:
         """Aggregate results via majority vote (B59 refactor).
 
@@ -126,7 +127,7 @@ class EnsembleClassifier:
         votes = Counter(r.label for r in results)
         winner, count = votes.most_common(1)[0]
         agreement = count / len(results) if results else 0.0
-        meta: Dict[str, Any] = {
+        meta: dict[str, Any] = {
             "votes": dict(votes),
             "n_models": len(self._models),
             "n_responded": len(results),
@@ -158,10 +159,10 @@ class WeightedEnsemble(EnsembleClassifier):
 
     def _aggregate(
         self,
-        results: List[PredictionResult],
+        results: list[PredictionResult],
         *,
-        failures: List[str] | None = None,
-        responded_indices: List[int] | None = None,
+        failures: list[str] | None = None,
+        responded_indices: list[int] | None = None,
     ) -> PredictionResult:
         all_weights = self._weights or [1.0] * len(self._models)
         # Select weights for the models that actually responded, preserving
@@ -176,13 +177,13 @@ class WeightedEnsemble(EnsembleClassifier):
             weights = all_weights[:len(results)]
             if len(weights) < len(results):
                 weights = weights + [1.0] * (len(results) - len(weights))
-        label_scores: Dict[str, float] = defaultdict(float)
-        for r, w in zip(results, weights):
+        label_scores: dict[str, float] = defaultdict(float)
+        for r, w in zip(results, weights, strict=False):
             label_scores[r.label] += r.confidence * w
         winner = max(label_scores, key=label_scores.get)  # type: ignore[arg-type]
         total_w = sum(weights) or 1.0
         agreement = sum(1 for r in results if r.label == winner) / len(results) if results else 0.0
-        meta: Dict[str, Any] = {
+        meta: dict[str, Any] = {
             "label_scores": dict(label_scores),
             "n_models": len(self._models),
             "n_responded": len(results),
@@ -222,14 +223,14 @@ class StackedEnsemble(EnsembleClassifier):
         meta_model: BaseModel | None = None,
     ) -> None:
         super().__init__(models)
-        self._meta_model: Optional[BaseModel] = meta_model
+        self._meta_model: BaseModel | None = meta_model
 
     def set_meta_model(self, model: BaseModel) -> None:
         self._meta_model = model
 
     def _build_meta_features(
-        self, results: List[PredictionResult]
-    ) -> Dict[str, Any]:
+        self, results: list[PredictionResult]
+    ) -> dict[str, Any]:
         """Build a feature dict from base-model outputs for the meta-model.
 
         Extracts labels, confidences, per-class probabilities, and
@@ -241,7 +242,7 @@ class StackedEnsemble(EnsembleClassifier):
         Returns:
             Dict of meta-features suitable for the stacking meta-model.
         """
-        meta: Dict[str, Any] = {}
+        meta: dict[str, Any] = {}
         for i, r in enumerate(results):
             meta[f"base_{i}_label"] = r.label
             meta[f"base_{i}_conf"] = r.confidence
@@ -256,10 +257,10 @@ class StackedEnsemble(EnsembleClassifier):
 
     def _aggregate(
         self,
-        results: List[PredictionResult],
+        results: list[PredictionResult],
         *,
-        failures: List[str] | None = None,
-        responded_indices: List[int] | None = None,
+        failures: list[str] | None = None,
+        responded_indices: list[int] | None = None,
     ) -> PredictionResult:
         if self._meta_model is not None:
             try:

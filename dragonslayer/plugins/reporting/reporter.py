@@ -17,7 +17,7 @@ import hashlib
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -52,13 +52,13 @@ def _file_sha256(data: bytes) -> str:
 
 def generate_markdown(
     sample_id: str,
-    plugins_data: Dict[str, Any],
+    plugins_data: dict[str, Any],
     file_size: int = 0,
     file_type: str = "Unknown",
 ) -> str:
     """Build a structured Markdown report from aggregated plugin data."""
 
-    def _get(name: str) -> Dict[str, Any]:
+    def _get(name: str) -> dict[str, Any]:
         return plugins_data.get(name, {})
 
     # --- Hashes ---
@@ -78,7 +78,7 @@ def generate_markdown(
         "drweb", "eset", "fsecure", "kaspersky", "mcafee", "sophos",
         "windows-defender", "zoner", "fprot", "escan",
     ]
-    av_results: List[Dict[str, str]] = []
+    av_results: list[dict[str, str]] = []
     for av in av_names:
         res = _get(av)
         if isinstance(res, dict):
@@ -112,7 +112,7 @@ def generate_markdown(
 
     # --- YARA ---
     yara_data = _get("yara") or _get("strelka")
-    yara_matches: List[str] = []
+    yara_matches: list[str] = []
     if isinstance(yara_data, dict):
         for m in yara_data.get("matches", []):
             if isinstance(m, dict):
@@ -123,7 +123,7 @@ def generate_markdown(
                 yara_matches.append(m)
 
     # --- Strings (from frankenstrings or floss) ---
-    strings: List[str] = []
+    strings: list[str] = []
     franken = _get("frankenstrings")
     floss = _get("floss")
     if floss and "strings" in floss:
@@ -137,8 +137,8 @@ def generate_markdown(
 
     # --- PE info ---
     pe_data = _get("pe_analyzer") or _get("pe-analyzer") or _get("strelka")
-    sections: List[str] = []
-    imports_summary: List[str] = []
+    sections: list[str] = []
+    imports_summary: list[str] = []
     if isinstance(pe_data, dict):
         pe_inner = pe_data.get("pe", pe_data)  # strelka wraps in .pe
         for sec in pe_inner.get("sections", []):
@@ -165,7 +165,7 @@ def generate_markdown(
     if not domains and "domain" in iocs:
         domains = iocs["domain"]
     urls = iocs.get("url", [])
-    ips = [ip for ip in iocs.get("ip", []) if ip not in ("1.0.0.0", "6.0.0.0", "127.0.0.1", "0.0.0.0")]
+    ips = [ip for ip in iocs.get("ip", []) if ip not in ("1.0.0.0", "6.0.0.0", "127.0.0.1", "0.0.0.0")]  # noqa: S104  (filter list, not a bind address)
 
     # --- Dynamic analysis summary ---
     angr_data = _get("angr")
@@ -241,7 +241,7 @@ def generate_markdown(
         md += "```\n"
 
     # 7. Dynamic Analysis
-    dynamic_sections: List[str] = []
+    dynamic_sections: list[str] = []
     if isinstance(angr_data, dict) and angr_data.get("function_count"):
         dynamic_sections.append(
             f"- **angr:** {angr_data['function_count']} functions, "
@@ -401,7 +401,7 @@ def enrich_with_ollama(
     report: str,
     ollama_url: str = "http://localhost:11434",
     model: str = "deepseek-coder-v2",
-) -> Optional[str]:
+) -> str | None:
     """Send the raw report to Ollama for MITRE ATT&CK mapping + enrichment."""
     if not _HAS_REQUESTS:
         return None

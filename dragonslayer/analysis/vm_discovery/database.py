@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +24,13 @@ class VMSignature:
     signature_id: str
     protector: str
     version: str = ""
-    section_names: List[str] = field(default_factory=list)
-    watermarks: List[str] = field(default_factory=list)
-    entry_point_patterns: List[str] = field(default_factory=list)
+    section_names: list[str] = field(default_factory=list)
+    watermarks: list[str] = field(default_factory=list)
+    entry_point_patterns: list[str] = field(default_factory=list)
     description: str = ""
     confidence_weight: float = 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -41,9 +41,9 @@ class VMSignatureDatabase:
     Can be populated from JSON or via :meth:`add_signature`.
     """
 
-    def __init__(self, path: Optional[Path] = None) -> None:
-        self._signatures: Dict[str, VMSignature] = {}
-        self._by_protector: Dict[str, List[str]] = {}
+    def __init__(self, path: Path | None = None) -> None:
+        self._signatures: dict[str, VMSignature] = {}
+        self._by_protector: dict[str, list[str]] = {}
         if path and path.exists():
             self._load(path)
         else:
@@ -119,13 +119,13 @@ class VMSignatureDatabase:
         self._signatures[sig.signature_id] = sig
         self._by_protector.setdefault(sig.protector, []).append(sig.signature_id)
 
-    def match(self, detection_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def match(self, detection_result: dict[str, Any]) -> list[dict[str, Any]]:
         """
         Match detection results against known signatures.
 
         Returns a list of ``{signature, score}`` dicts sorted by score desc.
         """
-        matches: List[Dict[str, Any]] = []
+        matches: list[dict[str, Any]] = []
 
         detected_sections = set()
         for ind in detection_result.get("indicators", []):
@@ -176,7 +176,7 @@ class VMSignatureDatabase:
         matches.sort(key=lambda m: m["score"], reverse=True)
         return matches
 
-    def get_by_protector(self, protector: str) -> List[VMSignature]:
+    def get_by_protector(self, protector: str) -> list[VMSignature]:
         """Return all signatures for a given protector name."""
         ids = self._by_protector.get(protector, [])
         return [self._signatures[sid] for sid in ids if sid in self._signatures]

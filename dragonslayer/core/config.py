@@ -3,23 +3,24 @@ Configuration Management for VMDragonSlayer
 
 """
 
+import contextlib
 import copy
-import os
 import logging
+import os
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
 import yaml
 
-from .exceptions import ConfigurationError, ValidationError
-
+from .exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
 
 class Config:
     """Central configuration management class."""
-    
+
     # Default configuration values
     DEFAULTS = {
         'logging': {
@@ -85,10 +86,10 @@ class Config:
             'output_dir': 'output/',
         },
     }
-    
+
     def __init__(
         self,
-        config_dir: Optional[Path] = None,
+        config_dir: Path | None = None,
         environment: str = 'development',
         *,
         validate_on_load: bool = True,
@@ -96,10 +97,10 @@ class Config:
 
         self.environment = environment
         self.config_dir = config_dir or self._find_config_dir()
-        self._config: Dict[str, Any] = {}
+        self._config: dict[str, Any] = {}
         # B64: Thread-safe access to _config for concurrent API requests
         self._lock = threading.RLock()
-        
+
         # Load configuration in order of precedence
         self._load_defaults()
         self._load_yaml_config()
@@ -112,15 +113,15 @@ class Config:
             except ValidationError as exc:
                 logger.error("Configuration validation failed: %s", exc)
                 raise
-        
+
         logger.info("Configuration loaded for environment: %s", environment)
-    
+
     def _find_config_dir(self) -> Path:
         """Find the configuration directory."""
         # Check environment variable first
         if 'VMDS_CONFIG_DIR' in os.environ:
             return Path(os.environ['VMDS_CONFIG_DIR'])
-        
+
         # Look for config/ relative to project root
         current = Path(__file__).parent
         while current.parent != current:
@@ -128,14 +129,14 @@ class Config:
             if config_path.exists():
                 return config_path
             current = current.parent
-        
+
         # Default to config/ in current directory
         return Path('config')
-    
+
     def _load_defaults(self) -> None:
         """Load default configuration values (deep copy so mutations are isolated)."""
         self._config = copy.deepcopy(self.DEFAULTS)
-    
+
     def _load_yaml_config(self) -> None:
         """Load YAML configuration file based on environment.
 
@@ -150,7 +151,7 @@ class Config:
         for config_file in candidates:
             if config_file.exists():
                 try:
-                    with open(config_file, 'r') as f:
+                    with open(config_file) as f:
                         yaml_config = yaml.safe_load(f)
                         if yaml_config:
                             self._merge_config(yaml_config)
@@ -163,7 +164,7 @@ class Config:
             "No config file found (tried %s), using defaults",
             ", ".join(str(c) for c in candidates),
         )
-    
+
     def _load_env_variables(self) -> None:
         """Load configuration from environment variables.
 
@@ -176,20 +177,20 @@ class Config:
         # Legacy hardcoded overrides (kept for backwards compat)
         if 'VMDS_LOGGING_LEVEL' in os.environ:
             self._config['logging']['level'] = os.environ['VMDS_LOGGING_LEVEL']
-        
+
 
         if 'VMDS_ANALYSIS_TIMEOUT' in os.environ:
             try:
                 self._config['analysis']['timeout'] = int(os.environ['VMDS_ANALYSIS_TIMEOUT'])
             except ValueError:
                 logger.warning("Invalid VMDS_ANALYSIS_TIMEOUT value")
-        
+
         if 'VMDS_TRACING_BACKEND' in os.environ:
             self._config['tracing']['backend'] = os.environ['VMDS_TRACING_BACKEND']
-        
+
         if 'VMDS_API_HOST' in os.environ:
             self._config['api']['host'] = os.environ['VMDS_API_HOST']
-        
+
         if 'VMDS_API_PORT' in os.environ:
             try:
                 self._config['api']['port'] = int(os.environ['VMDS_API_PORT'])
@@ -212,18 +213,16 @@ class Config:
                 try:
                     parsed = int(env_val)
                 except ValueError:
-                    try:
+                    with contextlib.suppress(ValueError):
                         parsed = float(env_val)
-                    except ValueError:
-                        pass
             self.set(path, parsed)
-    
-    def _merge_config(self, new_config: Dict[str, Any]) -> None:
+
+    def _merge_config(self, new_config: dict[str, Any]) -> None:
         """Recursively merge new configuration into existing config."""
         self._deep_merge(self._config, new_config)
 
     @staticmethod
-    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
+    def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
         """Recursively merge *override* into *base* in-place."""
         for key, value in override.items():
             if (
@@ -234,7 +233,7 @@ class Config:
                 Config._deep_merge(base[key], value)
             else:
                 base[key] = value
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieve a configuration value by dotted key path."""
         keys = key.split('.')
@@ -248,7 +247,7 @@ class Config:
                     return default
 
             return value
-    
+
     def set(self, key: str, value: Any) -> None:
         """Set a configuration value by dotted key path."""
         keys = key.split('.')
@@ -261,12 +260,12 @@ class Config:
                 config = config[k]
 
             config[keys[-1]] = value
-    
-    def get_section(self, section: str) -> Dict[str, Any]:
+
+    def get_section(self, section: str) -> dict[str, Any]:
         # B66: return deep-copy so callers can't mutate internal state
         with self._lock:
             return copy.deepcopy(self._config.get(section, {}))
-    
+
     def validate(self) -> None:
         """Validate configuration values (B53 — comprehensive).
 
@@ -297,19 +296,19 @@ class Config:
 
         # -- tracing.timeout --
         trace_timeout = self.get('tracing.timeout')
-        if trace_timeout is not None:
-            if not isinstance(trace_timeout, int) or trace_timeout <= 0:
-                errors.append(
-                    f"tracing.timeout must be a positive int, got {trace_timeout!r}"
-                )
+        if trace_timeout is not None and (
+            not isinstance(trace_timeout, int) or trace_timeout <= 0
+        ):
+            errors.append(
+                f"tracing.timeout must be a positive int, got {trace_timeout!r}"
+            )
 
         # -- tracing.max_instructions --
         max_instr = self.get('tracing.max_instructions')
-        if max_instr is not None:
-            if not isinstance(max_instr, int) or max_instr < 1:
-                errors.append(
-                    f"tracing.max_instructions must be >= 1, got {max_instr!r}"
-                )
+        if max_instr is not None and (not isinstance(max_instr, int) or max_instr < 1):
+            errors.append(
+                f"tracing.max_instructions must be >= 1, got {max_instr!r}"
+            )
 
         # -- analysis.timeout --
         timeout = self.get('analysis.timeout')
@@ -318,9 +317,8 @@ class Config:
 
         # -- analysis.max_threads --
         max_threads = self.get('analysis.max_threads')
-        if max_threads is not None:
-            if not isinstance(max_threads, int) or max_threads < 1:
-                errors.append(f"analysis.max_threads must be >= 1, got {max_threads!r}")
+        if max_threads is not None and (not isinstance(max_threads, int) or max_threads < 1):
+            errors.append(f"analysis.max_threads must be >= 1, got {max_threads!r}")
 
         # -- api.port --
         port = self.get('api.port')
@@ -329,9 +327,8 @@ class Config:
 
         # -- api.workers --
         workers = self.get('api.workers')
-        if workers is not None:
-            if not isinstance(workers, int) or workers < 1:
-                errors.append(f"api.workers must be >= 1, got {workers!r}")
+        if workers is not None and (not isinstance(workers, int) or workers < 1):
+            errors.append(f"api.workers must be >= 1, got {workers!r}")
 
         # -- logging.level --
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -341,50 +338,45 @@ class Config:
 
         # -- symbolic_execution section (B53) --
         solver_timeout = self.get('symbolic_execution.solver_timeout_ms')
-        if solver_timeout is not None:
-            if not isinstance(solver_timeout, int) or solver_timeout < 100:
-                errors.append(
-                    f"symbolic_execution.solver_timeout_ms must be >= 100, got {solver_timeout!r}"
-                )
+        if solver_timeout is not None and (
+            not isinstance(solver_timeout, int) or solver_timeout < 100
+        ):
+            errors.append(
+                f"symbolic_execution.solver_timeout_ms must be >= 100, got {solver_timeout!r}"
+            )
 
         max_paths = self.get('symbolic_execution.max_paths')
-        if max_paths is not None:
-            if not isinstance(max_paths, int) or max_paths < 1:
-                errors.append(f"symbolic_execution.max_paths must be >= 1, got {max_paths!r}")
+        if max_paths is not None and (not isinstance(max_paths, int) or max_paths < 1):
+            errors.append(f"symbolic_execution.max_paths must be >= 1, got {max_paths!r}")
 
         max_depth = self.get('symbolic_execution.max_depth')
-        if max_depth is not None:
-            if not isinstance(max_depth, int) or max_depth < 1:
-                errors.append(f"symbolic_execution.max_depth must be >= 1, got {max_depth!r}")
+        if max_depth is not None and (not isinstance(max_depth, int) or max_depth < 1):
+            errors.append(f"symbolic_execution.max_depth must be >= 1, got {max_depth!r}")
 
         mem_limit = self.get('symbolic_execution.memory_limit_mb')
-        if mem_limit is not None:
-            if not isinstance(mem_limit, int) or mem_limit < 64:
-                errors.append(
-                    f"symbolic_execution.memory_limit_mb must be >= 64, got {mem_limit!r}"
-                )
+        if mem_limit is not None and (not isinstance(mem_limit, int) or mem_limit < 64):
+            errors.append(
+                f"symbolic_execution.memory_limit_mb must be >= 64, got {mem_limit!r}"
+            )
 
         # -- vmprotect.validation_threshold --
         vt = self.get('vmprotect.validation_threshold')
-        if vt is not None:
-            if not isinstance(vt, (int, float)) or not (0.0 <= vt <= 1.0):
-                errors.append(
-                    f"vmprotect.validation_threshold must be in [0,1], got {vt!r}"
-                )
+        if vt is not None and (not isinstance(vt, (int, float)) or not (0.0 <= vt <= 1.0)):
+            errors.append(
+                f"vmprotect.validation_threshold must be in [0,1], got {vt!r}"
+            )
 
         # -- dispatcher settings --
         dtrace = self.get('dispatcher.max_trace_length')
-        if dtrace is not None:
-            if not isinstance(dtrace, int) or dtrace < 1:
-                errors.append(
-                    f"dispatcher.max_trace_length must be >= 1, got {dtrace!r}"
-                )
+        if dtrace is not None and (not isinstance(dtrace, int) or dtrace < 1):
+            errors.append(
+                f"dispatcher.max_trace_length must be >= 1, got {dtrace!r}"
+            )
         dexit = self.get('dispatcher.early_exit_confidence')
-        if dexit is not None:
-            if not isinstance(dexit, (int, float)) or not (0.0 <= dexit <= 1.0):
-                errors.append(
-                    f"dispatcher.early_exit_confidence must be in [0,1], got {dexit!r}"
-                )
+        if dexit is not None and (not isinstance(dexit, (int, float)) or not (0.0 <= dexit <= 1.0)):
+            errors.append(
+                f"dispatcher.early_exit_confidence must be in [0,1], got {dexit!r}"
+            )
 
         # Raise with ALL errors summarised
         if errors:
@@ -400,21 +392,21 @@ class Config:
     # Serialisation helpers
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a deep-copy of the active configuration dict."""
         with self._lock:
             return copy.deepcopy(self._config)
-    
+
     def __repr__(self) -> str:
         return f"Config(environment='{self.environment}', config_dir='{self.config_dir}')"
 
 
 # Global configuration instance
-_config_instance: Optional[Config] = None
+_config_instance: Config | None = None
 _config_lock = threading.Lock()
 
 
-def get_config(environment: Optional[str] = None) -> Config:
+def get_config(environment: str | None = None) -> Config:
     """
     Get global configuration instance.
 

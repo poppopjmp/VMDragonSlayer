@@ -13,12 +13,13 @@ Dependency: ``macholib``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import struct
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -26,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 _HAS_MACHOLIB = False
 try:
+    from macholib import mach_o  # type: ignore[import-untyped]
     from macholib.MachO import MachO  # type: ignore[import-untyped]
-    from macholib import mach_o       # type: ignore[import-untyped]
     _HAS_MACHOLIB = True
 except ImportError:
     pass
@@ -36,7 +37,7 @@ except ImportError:
 # Constant tables (defined locally so we don't depend on macholib at import)
 # ---------------------------------------------------------------------------
 
-_CPU_TYPE_NAMES: Dict[int, str] = {
+_CPU_TYPE_NAMES: dict[int, str] = {
     7:          "x86",
     7 | 0x01000000: "x86_64",
     12:         "ARM",
@@ -45,9 +46,9 @@ _CPU_TYPE_NAMES: Dict[int, str] = {
     18 | 0x01000000: "PowerPC64",
 }
 
-_FILE_TYPE_NAMES: Dict[int, str] = {}
+_FILE_TYPE_NAMES: dict[int, str] = {}
 
-_LOAD_CMD_NAMES: Dict[int, str] = {}
+_LOAD_CMD_NAMES: dict[int, str] = {}
 
 
 def _init_constant_tables() -> None:
@@ -119,7 +120,7 @@ class MachOAnalyzer(Plugin):
 
         _init_constant_tables()
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".macho")
             os.write(fd, file_data)
@@ -145,19 +146,19 @@ class MachOAnalyzer(Plugin):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _analyze(file_path: str) -> Dict[str, Any]:
+    def _analyze(file_path: str) -> dict[str, Any]:
         macho = MachO(file_path)
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "valid": True,
             "file": os.path.basename(file_path),
             "universal": len(macho.headers) > 1,
             "arch_count": len(macho.headers),
         }
 
-        architectures: List[Dict[str, Any]] = []
-        all_libraries: Set[str] = set()
-        all_rpaths: Set[str] = set()
+        architectures: list[dict[str, Any]] = []
+        all_libraries: set[str] = set()
+        all_rpaths: set[str] = set()
 
         for header in macho.headers:
             arch = MachOAnalyzer._analyze_arch(header)
@@ -177,9 +178,9 @@ class MachOAnalyzer(Plugin):
         return result
 
     @staticmethod
-    def _analyze_arch(header: Any) -> Dict[str, Any]:  # noqa: C901 – ported as-is
+    def _analyze_arch(header: Any) -> dict[str, Any]:  # noqa: C901 – ported as-is
         cpu_type = header.header.cputype
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "cpu_type": _CPU_TYPE_NAMES.get(cpu_type, f"UNKNOWN_{cpu_type}"),
             "cpu_subtype": header.header.cpusubtype,
             "filetype": _FILE_TYPE_NAMES.get(header.header.filetype,
@@ -191,16 +192,16 @@ class MachOAnalyzer(Plugin):
             ),
         }
 
-        libraries: List[str] = []
-        rpaths: List[str] = []
-        segments: List[Dict[str, Any]] = []
-        load_cmds: List[str] = []
-        uuid_str: Optional[str] = None
-        min_os_version: Optional[str] = None
-        source_version_str: Optional[str] = None
+        libraries: list[str] = []
+        rpaths: list[str] = []
+        segments: list[dict[str, Any]] = []
+        load_cmds: list[str] = []
+        uuid_str: str | None = None
+        min_os_version: str | None = None
+        source_version_str: str | None = None
         has_code_signature = False
         has_encryption = False
-        entry_point: Optional[str] = None
+        entry_point: str | None = None
 
         LC_LOAD_DYLIB      = getattr(mach_o, "LC_LOAD_DYLIB", 0xC)
         LC_LOAD_WEAK_DYLIB = getattr(mach_o, "LC_LOAD_WEAK_DYLIB", 0x80000018)
@@ -230,19 +231,15 @@ class MachOAnalyzer(Plugin):
             load_cmds.append(_lc_name(cmd_type))
 
             if cmd_type in DYLIB_CMDS:
-                try:
+                with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     libraries.append(cmd[2].decode("utf-8").rstrip("\x00"))
-                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                    pass
 
             elif cmd_type == LC_RPATH:
-                try:
+                with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     rpaths.append(cmd[2].decode("utf-8").rstrip("\x00"))
-                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                    pass
 
             elif cmd_type in SEG_CMDS:
-                try:
+                with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     segments.append({
                         "name": cmd[1].segname.decode("utf-8").rstrip("\x00"),
                         "vmaddr": hex(cmd[1].vmaddr),
@@ -252,8 +249,6 @@ class MachOAnalyzer(Plugin):
                         "maxprot": hex(cmd[1].maxprot),
                         "initprot": hex(cmd[1].initprot),
                     })
-                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                    pass
 
             elif cmd_type == LC_UUID:
                 try:
@@ -286,16 +281,12 @@ class MachOAnalyzer(Plugin):
                 has_code_signature = True
 
             elif cmd_type in (LC_ENCRYPTION_INFO, LC_ENCRYPTION_INFO_64):
-                try:
+                with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     has_encryption = cmd[1].cryptid != 0
-                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                    pass
 
             elif cmd_type == LC_MAIN:
-                try:
+                with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     entry_point = hex(cmd[1].entryoff)
-                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                    pass
 
         result["load_commands"] = load_cmds
         result["load_command_count"] = len(load_cmds)

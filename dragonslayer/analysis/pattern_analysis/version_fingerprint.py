@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +90,8 @@ class VersionFingerprint:
     version: VMProtectVersion = VMProtectVersion.UNKNOWN
     version_string: str = "unknown"
     confidence: float = 0.0
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    alternative: Optional[VMProtectVersion] = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+    alternative: VMProtectVersion | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +139,8 @@ class VMProtectVersionFingerprinter:
     def fingerprint(
         self,
         dispatcher_match: Any = None,
-        matched_patterns: Optional[Sequence[Any]] = None,
-        binary_sections: Optional[Sequence[str]] = None,
+        matched_patterns: Sequence[Any] | None = None,
+        binary_sections: Sequence[str] | None = None,
     ) -> VersionFingerprint:
         """Classify the VMProtect version.
 
@@ -157,8 +158,8 @@ class VMProtectVersionFingerprinter:
         -------
         VersionFingerprint
         """
-        scores: Dict[VMProtectVersion, float] = {v: 0.0 for v in VMProtectVersion}
-        evidence: Dict[str, Any] = {}
+        scores: dict[VMProtectVersion, float] = dict.fromkeys(VMProtectVersion, 0.0)
+        evidence: dict[str, Any] = {}
 
         # --- Signal 1: dispatch_style --------------------------------
         if dispatcher_match is not None:
@@ -180,7 +181,7 @@ class VMProtectVersionFingerprinter:
             evidence["decode_transform_count"] = n
 
             # --- Signal 2b: specific transform ops -------------------
-            ops_found: List[str] = []
+            ops_found: list[str] = []
             for t_str in (transforms or []):
                 op = _extract_op(str(t_str))
                 if op and op in _TRANSFORM_OP_INDICATORS:
@@ -216,7 +217,7 @@ class VMProtectVersionFingerprinter:
 
         # --- Signal 5: pattern metadata votes ------------------------
         if matched_patterns:
-            version_votes: Dict[str, int] = {}
+            version_votes: dict[str, int] = {}
             for pat in matched_patterns:
                 meta = _g(pat, "metadata", {})
                 if not isinstance(meta, dict):

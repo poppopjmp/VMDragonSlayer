@@ -20,13 +20,11 @@ handled by Stage-4 plugins (angr, triton, qiling).
 from __future__ import annotations
 
 import logging
-import struct
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from dragonslayer.analysis.binary_format import (
-    ParsedBinary,
-    parse_binary,
     _calculate_entropy,
+    parse_binary,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Known VM-related section names
-VM_SECTION_NAMES: List[bytes] = [
+VM_SECTION_NAMES: list[bytes] = [
     b".vmp0", b".vmp1", b".vmp2", b".vmp3",   # VMProtect
     b".themida", b".winlice",                   # Themida / WinLicense
     b".enigma1", b".enigma2",                   # Enigma Protector
@@ -50,7 +48,7 @@ VM_SECTION_NAMES: List[bytes] = [
 ]
 
 # Watermark / signature strings
-WATERMARK_STRINGS: List[bytes] = [
+WATERMARK_STRINGS: list[bytes] = [
     b"VMProtect", b"vmp_", b"VMProtect begin", b"VMProtect end",
     b"Themida", b"WinLicense",
     b"Enigma protector",
@@ -61,7 +59,7 @@ WATERMARK_STRINGS: List[bytes] = [
 ]
 
 # Imports that often appear in VM-protected binaries
-VM_IMPORT_INDICATORS: List[bytes] = [
+VM_IMPORT_INDICATORS: list[bytes] = [
     b"VirtualAlloc", b"VirtualProtect", b"VirtualFree",
     b"NtQueryInformationProcess", b"IsDebuggerPresent",
     b"NtSetInformationThread", b"CheckRemoteDebuggerPresent",
@@ -71,7 +69,7 @@ VM_IMPORT_INDICATORS: List[bytes] = [
 ]
 
 # Dispatcher-related byte patterns (indirect jump through register)
-DISPATCHER_PATTERNS: List[tuple[bytes, str]] = [
+DISPATCHER_PATTERNS: list[tuple[bytes, str]] = [
     (b"\xff\xe0", "jmp eax"),
     (b"\xff\xe1", "jmp ecx"),
     (b"\xff\xe2", "jmp edx"),
@@ -88,7 +86,7 @@ DISPATCHER_PATTERNS: List[tuple[bytes, str]] = [
 # PE Section Header Parsing (minimal, no pefile dependency)
 # ---------------------------------------------------------------------------
 
-def _parse_pe_sections(data: bytes) -> List[Dict[str, Any]]:
+def _parse_pe_sections(data: bytes) -> list[dict[str, Any]]:
     """
     Extract PE section headers using the shared binary parser.
 
@@ -115,7 +113,7 @@ def _parse_pe_sections(data: bytes) -> List[Dict[str, Any]]:
 def _block_entropy_analysis(
     data: bytes,
     block_size: int = 4096,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Analyse entropy across the entire binary in blocks.
 
@@ -154,13 +152,13 @@ def _block_entropy_analysis(
 # Dispatcher detection
 # ---------------------------------------------------------------------------
 
-def _find_dispatchers(data: bytes, limit: int = 50) -> List[Dict[str, Any]]:
+def _find_dispatchers(data: bytes, limit: int = 50) -> list[dict[str, Any]]:
     """
     Scan for indirect-jump patterns that may indicate a VM dispatcher.
 
     Returns list of {offset, pattern_bytes, mnemonic}.
     """
-    found: List[Dict[str, Any]] = []
+    found: list[dict[str, Any]] = []
     for pattern, mnemonic in DISPATCHER_PATTERNS:
         start = 0
         while len(found) < limit:
@@ -192,7 +190,7 @@ class VMDetector:
             print(result["protector"], result["confidence"])
     """
 
-    def detect(self, data: bytes) -> Dict[str, Any]:
+    def detect(self, data: bytes) -> dict[str, Any]:
         """
         Run all heuristics on *data* and return a detection result dict.
 
@@ -206,7 +204,7 @@ class VMDetector:
             entropy (dict): Block entropy statistics.
             dispatchers (list): Suspected dispatcher locations.
         """
-        indicators: List[Dict[str, Any]] = []
+        indicators: list[dict[str, Any]] = []
 
         # --- File type identification ------------------------------------
         is_pe = data[:2] == b"MZ"
@@ -216,8 +214,8 @@ class VMDetector:
 
         # --- Section analysis (PE) ----------------------------------------
         sections = _parse_pe_sections(data) if is_pe else []
-        vm_sections_found: List[str] = []
-        high_entropy_sections: List[str] = []
+        vm_sections_found: list[str] = []
+        high_entropy_sections: list[str] = []
 
         for sec in sections:
             for vm_name in VM_SECTION_NAMES:
@@ -250,7 +248,7 @@ class VMDetector:
         })
 
         # --- Watermark / signature strings --------------------------------
-        found_watermarks: List[str] = []
+        found_watermarks: list[str] = []
         for wm in WATERMARK_STRINGS:
             if wm in data:
                 found_watermarks.append(wm.decode(errors="replace"))
@@ -261,7 +259,7 @@ class VMDetector:
             })
 
         # --- Import anomalies ---------------------------------------------
-        found_imports: List[str] = []
+        found_imports: list[str] = []
         for imp in VM_IMPORT_INDICATORS:
             if imp in data:
                 found_imports.append(imp.decode())

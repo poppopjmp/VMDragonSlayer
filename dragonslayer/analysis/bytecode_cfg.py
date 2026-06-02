@@ -47,13 +47,13 @@ Usage::
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from dragonslayer.analysis.handler_semantics import (
-    SemanticOpcodeTable,
     OpcodeTableEntry,
+    SemanticOpcodeTable,
     VMOperation,
 )
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
@@ -142,7 +142,7 @@ class VMInstruction:
         """vIP of the next sequential instruction."""
         return self.vip + self.vip_delta
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dict.
 
         Returns:
@@ -173,7 +173,7 @@ class HandlerBasicBlock:
     start_vip: int
     """vIP of the first instruction in this block."""
 
-    instructions: List[VMInstruction] = field(default_factory=list)
+    instructions: list[VMInstruction] = field(default_factory=list)
     """Instructions in this block, in execution order."""
 
     is_entry: bool = False
@@ -188,7 +188,7 @@ class HandlerBasicBlock:
             return self.instructions[-1].vip
         return self.start_vip
 
-    def terminator(self) -> Optional[VMInstruction]:
+    def terminator(self) -> VMInstruction | None:
         """The last instruction (may or may not be a terminator)."""
         return self.instructions[-1] if self.instructions else None
 
@@ -197,11 +197,11 @@ class HandlerBasicBlock:
         """Number of VM instructions in this block."""
         return len(self.instructions)
 
-    def operations_list(self) -> List[str]:
+    def operations_list(self) -> list[str]:
         """List of operation names in this block."""
         return [i.operation for i in self.instructions]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise this block to a JSON-safe dict.
 
         Returns:
@@ -228,7 +228,7 @@ class CFGEdge:
     edge_type: str = "fallthrough"
     """One of: 'fallthrough', 'jump', 'branch_taken', 'branch_not_taken', 'back_edge'."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise this edge to a JSON-safe dict.
 
         Returns:
@@ -249,12 +249,12 @@ class HandlerCFG:
     (optionally) a networkx DiGraph for structured analysis.
     """
 
-    blocks: List[HandlerBasicBlock] = field(default_factory=list)
-    edges: List[CFGEdge] = field(default_factory=list)
+    blocks: list[HandlerBasicBlock] = field(default_factory=list)
+    edges: list[CFGEdge] = field(default_factory=list)
     graph: Any = None  # networkx.DiGraph when available
     entry_block_id: int = 0
-    vm_instructions: List[VMInstruction] = field(default_factory=list)
-    loop_tree: Optional["LoopTree"] = None
+    vm_instructions: list[VMInstruction] = field(default_factory=list)
+    loop_tree: LoopTree | None = None
 
     @property
     def block_count(self) -> int:
@@ -266,33 +266,33 @@ class HandlerCFG:
         """Number of edges in the CFG."""
         return len(self.edges)
 
-    def find_block(self, block_id: int) -> Optional[HandlerBasicBlock]:
+    def find_block(self, block_id: int) -> HandlerBasicBlock | None:
         """Return the block with *block_id*, or ``None``."""
         for b in self.blocks:
             if b.block_id == block_id:
                 return b
         return None
 
-    def find_block_by_vip(self, vip: int) -> Optional[HandlerBasicBlock]:
+    def find_block_by_vip(self, vip: int) -> HandlerBasicBlock | None:
         """Return the block starting at *vip*, or ``None``."""
         for b in self.blocks:
             if b.start_vip == vip:
                 return b
         return None
 
-    def back_edges(self) -> List[CFGEdge]:
+    def back_edges(self) -> list[CFGEdge]:
         """Return all back-edges (loop indicators)."""
         return [e for e in self.edges if e.edge_type == "back_edge"]
 
-    def loop_headers(self) -> Set[int]:
+    def loop_headers(self) -> set[int]:
         """Block IDs that are targets of back-edges (loop headers)."""
         return {e.target_block for e in self.edges if e.edge_type == "back_edge"}
 
-    def exit_blocks(self) -> List[HandlerBasicBlock]:
+    def exit_blocks(self) -> list[HandlerBasicBlock]:
         """Return blocks marked as exits."""
         return [b for b in self.blocks if b.is_exit]
 
-    def topological_order(self) -> List[int]:
+    def topological_order(self) -> list[int]:
         """Block IDs in topological order (ignoring back-edges).
 
         Falls back to the natural block order if networkx is unavailable
@@ -324,7 +324,7 @@ class HandlerCFG:
             f"{n_loops} loops, {n_exits} exits{depth_str}"
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the complete CFG to a JSON-safe dict.
 
         Returns:
@@ -332,7 +332,7 @@ class HandlerCFG:
             ``loop_count``, ``exit_count``, ``blocks``, ``edges``, and
             optionally ``loop_tree``.
         """
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "block_count": self.block_count,
             "edge_count": self.edge_count,
             "entry_block_id": self.entry_block_id,
@@ -354,7 +354,7 @@ class HandlerCFG:
 def walk_trace_bytecode(
     opcode_table: SemanticOpcodeTable,
     boundaries: Sequence[HandlerBoundary],
-) -> List[VMInstruction]:
+) -> list[VMInstruction]:
     """Walk handler boundaries in execution order and produce VM instructions.
 
     Each boundary gives us (vip_value, handler_address, vip_delta).
@@ -369,11 +369,11 @@ def walk_trace_bytecode(
         Ordered list of :class:`VMInstruction`.
     """
     # Build reverse lookup: handler_address → OpcodeTableEntry.
-    handler_map: Dict[int, OpcodeTableEntry] = {}
+    handler_map: dict[int, OpcodeTableEntry] = {}
     for entry in opcode_table.entries:
         handler_map[entry.handler_address] = entry
 
-    instructions: List[VMInstruction] = []
+    instructions: list[VMInstruction] = []
     for idx, boundary in enumerate(boundaries):
         entry = handler_map.get(boundary.handler_address)
 
@@ -408,7 +408,7 @@ def walk_trace_bytecode(
 # ---------------------------------------------------------------------------
 
 
-def _identify_leaders(instructions: List[VMInstruction]) -> Set[int]:
+def _identify_leaders(instructions: list[VMInstruction]) -> set[int]:
     """Identify basic-block leader positions (indices into *instructions*).
 
     A leader is:
@@ -416,23 +416,22 @@ def _identify_leaders(instructions: List[VMInstruction]) -> Set[int]:
     2. Any target of a branch.
     3. Any instruction immediately after a branch/return.
     """
-    leaders: Set[int] = set()
+    leaders: set[int] = set()
     if not instructions:
         return leaders
 
     leaders.add(0)
 
     # Build vip → index map for branch targets.
-    vip_to_idx: Dict[int, int] = {}
+    vip_to_idx: dict[int, int] = {}
     for i, insn in enumerate(instructions):
         if insn.vip not in vip_to_idx:
             vip_to_idx[insn.vip] = i
 
     for i, insn in enumerate(instructions):
-        if insn.is_terminator() or insn.is_call():
-            # The instruction after a terminator starts a new block.
-            if i + 1 < len(instructions):
-                leaders.add(i + 1)
+        # The instruction after a terminator starts a new block.
+        if (insn.is_terminator() or insn.is_call()) and i + 1 < len(instructions):
+            leaders.add(i + 1)
 
         if insn.is_branch():
             # Try to resolve the branch target vIP.
@@ -459,15 +458,15 @@ def _identify_leaders(instructions: List[VMInstruction]) -> Set[int]:
 
 
 def _partition_into_blocks(
-    instructions: List[VMInstruction],
-    leaders: Set[int],
-) -> List[HandlerBasicBlock]:
+    instructions: list[VMInstruction],
+    leaders: set[int],
+) -> list[HandlerBasicBlock]:
     """Partition instructions into basic blocks based on leaders."""
     if not instructions:
         return []
 
     sorted_leaders = sorted(leaders)
-    blocks: List[HandlerBasicBlock] = []
+    blocks: list[HandlerBasicBlock] = []
 
     for block_idx, leader_pos in enumerate(sorted_leaders):
         # Block extends from this leader to just before the next leader.
@@ -510,9 +509,9 @@ def _partition_into_blocks(
 
 
 def _build_edges(
-    blocks: List[HandlerBasicBlock],
-    instructions: List[VMInstruction],
-) -> List[CFGEdge]:
+    blocks: list[HandlerBasicBlock],
+    instructions: list[VMInstruction],
+) -> list[CFGEdge]:
     """Build control-flow edges between basic blocks.
 
     For each block, the terminator determines edges:
@@ -527,25 +526,25 @@ def _build_edges(
     if not blocks:
         return []
 
-    edges: List[CFGEdge] = []
+    edges: list[CFGEdge] = []
 
     # Map vip → block_id for target resolution.
-    vip_to_block: Dict[int, int] = {}
+    vip_to_block: dict[int, int] = {}
     for block in blocks:
         vip_to_block[block.start_vip] = block.block_id
 
     # Map block_id → block for fast lookup.
-    block_by_id: Dict[int, HandlerBasicBlock] = {b.block_id: b for b in blocks}
+    {b.block_id: b for b in blocks}
 
     # Natural ordering: block_id → position in list.
-    block_order: Dict[int, int] = {b.block_id: i for i, b in enumerate(blocks)}
+    block_order: dict[int, int] = {b.block_id: i for i, b in enumerate(blocks)}
 
     for pos, block in enumerate(blocks):
         term = block.terminator()
         if term is None:
             continue
 
-        next_block_id: Optional[int] = None
+        next_block_id: int | None = None
         if pos + 1 < len(blocks):
             next_block_id = blocks[pos + 1].block_id
 
@@ -615,8 +614,8 @@ def _build_edges(
 
 
 def _build_nx_graph(
-    blocks: List[HandlerBasicBlock],
-    edges: List[CFGEdge],
+    blocks: list[HandlerBasicBlock],
+    edges: list[CFGEdge],
 ) -> Any:
     """Build a networkx DiGraph from blocks and edges.
 
@@ -652,10 +651,10 @@ def _build_nx_graph(
 
 
 def detect_natural_loops(
-    blocks: List[HandlerBasicBlock],
-    edges: List[CFGEdge],
+    blocks: list[HandlerBasicBlock],
+    edges: list[CFGEdge],
     graph: Any = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Detect natural loops from back-edges.
 
     For each back-edge ``source → target``, the loop body is the set of
@@ -671,13 +670,13 @@ def detect_natural_loops(
     if not back_edges_list:
         return []
 
-    loops: List[Dict[str, Any]] = []
+    loops: list[dict[str, Any]] = []
 
     if graph is not None and NX_AVAILABLE:
         # Use networkx dominance for accurate loop body.
         try:
             entry = min(b.block_id for b in blocks if b.is_entry)
-            dom = nx.immediate_dominators(graph, entry)
+            nx.immediate_dominators(graph, entry)
 
             for be in back_edges_list:
                 header = be.target_block
@@ -704,7 +703,7 @@ def detect_natural_loops(
 
     if not loops and back_edges_list:
         # Fallback: simple body approximation.
-        block_by_id = {b.block_id: b for b in blocks}
+        {b.block_id: b for b in blocks}
         for be in back_edges_list:
             header = be.target_block
             # All blocks between header and source (inclusive) in order.
@@ -737,16 +736,16 @@ class NaturalLoop:
     header: int
     """Block-id of the loop header (dominator / back-edge target)."""
 
-    back_edge_sources: List[int] = field(default_factory=list)
+    back_edge_sources: list[int] = field(default_factory=list)
     """Block-ids that branch back to ``header``."""
 
-    body: Set[int] = field(default_factory=set)
+    body: set[int] = field(default_factory=set)
     """All block-ids belonging to this loop (including ``header``)."""
 
-    parent: Optional["NaturalLoop"] = field(default=None, repr=False)
+    parent: NaturalLoop | None = field(default=None, repr=False)
     """Enclosing loop (``None`` for outermost / root loops)."""
 
-    children: List["NaturalLoop"] = field(default_factory=list)
+    children: list[NaturalLoop] = field(default_factory=list)
     """Immediately nested child loops."""
 
     @property
@@ -767,7 +766,7 @@ class NaturalLoop:
     def __contains__(self, block_id: int) -> bool:
         return block_id in self.body
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise this natural loop to a JSON-safe dict.
 
         Returns:
@@ -792,15 +791,15 @@ class LoopTree:
     parent's body.  Loops with identical headers are merged.
     """
 
-    def __init__(self, loops: Optional[List[Dict[str, Any]]] = None) -> None:
-        self._loops_by_header: Dict[int, NaturalLoop] = {}
-        self.roots: List[NaturalLoop] = []
+    def __init__(self, loops: list[dict[str, Any]] | None = None) -> None:
+        self._loops_by_header: dict[int, NaturalLoop] = {}
+        self.roots: list[NaturalLoop] = []
         if loops:
             self._build(loops)
 
     # -- construction -------------------------------------------------------
 
-    def _build(self, raw_loops: List[Dict[str, Any]]) -> None:
+    def _build(self, raw_loops: list[dict[str, Any]]) -> None:
         """Merge duplicate headers & compute nesting."""
         # 1. Merge raw dicts into NaturalLoop objects by header
         for raw in raw_loops:
@@ -828,15 +827,15 @@ class LoopTree:
 
         # 3. Build nesting: child's body ⊂ parent's body
         for i, inner in enumerate(all_loops):
-            best_parent: Optional[NaturalLoop] = None
+            best_parent: NaturalLoop | None = None
             best_size = float("inf")
             for j, outer in enumerate(all_loops):
                 if i == j:
                     continue
-                if inner.body < outer.body:  # strict subset
-                    if len(outer.body) < best_size:
-                        best_parent = outer
-                        best_size = len(outer.body)
+                # strict subset
+                if inner.body < outer.body and len(outer.body) < best_size:
+                    best_parent = outer
+                    best_size = len(outer.body)
             if best_parent is not None:
                 inner.parent = best_parent
                 best_parent.children.append(inner)
@@ -846,7 +845,7 @@ class LoopTree:
     # -- queries ------------------------------------------------------------
 
     @property
-    def all_loops(self) -> List[NaturalLoop]:
+    def all_loops(self) -> list[NaturalLoop]:
         """Return a flat list of every :class:`NaturalLoop`."""
         return list(self._loops_by_header.values())
 
@@ -862,17 +861,17 @@ class LoopTree:
             return 0
         return max(lp.nesting_depth for lp in self._loops_by_header.values())
 
-    def get_loop(self, header: int) -> Optional[NaturalLoop]:
+    def get_loop(self, header: int) -> NaturalLoop | None:
         """Return the loop with *header*, or ``None``."""
         return self._loops_by_header.get(header)
 
-    def innermost_loops(self) -> List[NaturalLoop]:
+    def innermost_loops(self) -> list[NaturalLoop]:
         """Return all leaf (innermost) loops."""
         return [lp for lp in self._loops_by_header.values() if lp.is_innermost]
 
-    def loop_for_block(self, block_id: int) -> Optional[NaturalLoop]:
+    def loop_for_block(self, block_id: int) -> NaturalLoop | None:
         """Return the *innermost* loop containing ``block_id``."""
-        best: Optional[NaturalLoop] = None
+        best: NaturalLoop | None = None
         best_size = float("inf")
         for lp in self._loops_by_header.values():
             if block_id in lp.body and len(lp.body) < best_size:
@@ -887,12 +886,9 @@ class LoopTree:
         :func:`detect_natural_loops` which produces natural loops by
         definition, but useful as a guard after manual edits.
         """
-        for lp in self._loops_by_header.values():
-            if lp.header not in lp.body:
-                return False
-        return True
+        return all(lp.header in lp.body for lp in self._loops_by_header.values())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the full loop tree to a JSON-safe dict.
 
         Returns:
@@ -913,8 +909,8 @@ class LoopTree:
 
 
 def build_loop_tree(
-    blocks: List[HandlerBasicBlock],
-    edges: List[CFGEdge],
+    blocks: list[HandlerBasicBlock],
+    edges: list[CFGEdge],
     graph: Any = None,
 ) -> LoopTree:
     """Build a :class:`LoopTree` from the CFG. Convenience wrapper."""
@@ -974,7 +970,7 @@ def build_handler_cfg(
 
     # Step 6: Annotate back-edges for loop detection
     loops = detect_natural_loops(blocks, edges, graph)
-    lt: Optional[LoopTree] = None
+    lt: LoopTree | None = None
     if loops:
         logger.debug(
             "Detected %d natural loops in handler CFG", len(loops),
@@ -1005,7 +1001,7 @@ def walk_static_bytecode(
     *,
     max_instructions: int = 10000,
     decryptor: Any = None,
-) -> List[VMInstruction]:
+) -> list[VMInstruction]:
     """Disassemble raw VM bytecode statically.
 
     This walks the bytecode from *start_vip* and decodes each opcode
@@ -1033,7 +1029,7 @@ def walk_static_bytecode(
         return []
 
     # Build opcode → entry lookup.
-    opcode_map: Dict[int, OpcodeTableEntry] = {}
+    opcode_map: dict[int, OpcodeTableEntry] = {}
     for entry in opcode_table.entries:
         opcode_map[entry.opcode] = entry
 
@@ -1055,9 +1051,9 @@ def walk_static_bytecode(
             )
             opcode_width = dec_width
 
-    instructions: List[VMInstruction] = []
+    instructions: list[VMInstruction] = []
     offset = 0
-    visited_offsets: Set[int] = set()
+    visited_offsets: set[int] = set()
 
     while offset < len(bytecode) and len(instructions) < max_instructions:
         if offset in visited_offsets:
@@ -1155,7 +1151,7 @@ def build_static_cfg(
     edges = _build_edges(blocks, vm_insns)
     graph = _build_nx_graph(blocks, edges)
     loops = detect_natural_loops(blocks, edges, graph)
-    lt: Optional[LoopTree] = None
+    lt: LoopTree | None = None
     if loops:
         lt = LoopTree(loops)
 

@@ -19,7 +19,7 @@ import os
 import tempfile
 import time
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -57,7 +57,7 @@ class AngrAnalyzer(Plugin):
         t0 = time.monotonic()
 
         # If we only have bytes, write to a temp file
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".bin")
             os.write(fd, file_data)
@@ -85,9 +85,9 @@ class AngrAnalyzer(Plugin):
 
     # ------------------------------------------------------------------ #
 
-    def _analyze(self, file_path: str, ctx: PluginContext) -> Dict[str, Any]:
+    def _analyze(self, file_path: str, ctx: PluginContext) -> dict[str, Any]:
         # Load Qiling guidance from shared context (populated by qiling plugin)
-        guidance: List[int] = []
+        guidance: list[int] = []
         qiling_data = ctx.shared_data.get("qiling", {})
         if isinstance(qiling_data, dict):
             for blk in qiling_data.get("executed_blocks", []):
@@ -115,7 +115,7 @@ class AngrAnalyzer(Plugin):
         else:
             cfg = proj.analyses.CFGFast(normalize=True)
 
-        functions_data: List[Dict[str, Any]] = []
+        functions_data: list[dict[str, Any]] = []
         total_blocks = 0
 
         for func_addr, func in cfg.kb.functions.items():
@@ -138,10 +138,11 @@ class AngrAnalyzer(Plugin):
                     continue
 
             func_hash = hashlib.md5(
-                f"{func.name}:{sorted(mnemonic_counter.items())}".encode()
+                f"{func.name}:{sorted(mnemonic_counter.items())}".encode(),
+                usedforsecurity=False,
             ).hexdigest()
 
-            func_entry: Dict[str, Any] = {
+            func_entry: dict[str, Any] = {
                 "name": func.name,
                 "address": func_addr,
                 "block_count": block_count,
@@ -164,8 +165,8 @@ class AngrAnalyzer(Plugin):
             functions_data.append(func_entry)
 
         # --- Handler boundary detection via SimulationManager ---------------
-        handler_exploration: Dict[str, Any] = {}
-        handler_traces: List[Dict[str, Any]] = []
+        handler_exploration: dict[str, Any] = {}
+        handler_traces: list[dict[str, Any]] = []
         if vm_detected and dispatcher_addrs:
             handler_exploration = self._explore_handlers(
                 proj, dispatcher_addrs, max_steps=2000,
@@ -198,14 +199,14 @@ class AngrAnalyzer(Plugin):
     def _extract_handler_traces(
         self,
         proj: Any,
-        handler_details: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        handler_details: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         """
         For each discovered handler, lift VEX IR and extract instruction-
         level detail (address, mnemonic, operands) with symbolic register
         state snapshots from a handler-local symbolic execution.
         """
-        traces: List[Dict[str, Any]] = []
+        traces: list[dict[str, Any]] = []
 
         for hinfo in handler_details[:20]:
             d_addr = hinfo.get("dispatcher", 0)
@@ -217,7 +218,7 @@ class AngrAnalyzer(Plugin):
                 state = proj.factory.blank_state(addr=d_addr)
                 simgr = proj.factory.simulation_manager(state)
 
-                instruction_records: List[Dict[str, Any]] = []
+                instruction_records: list[dict[str, Any]] = []
                 reg_names = self._get_reg_names(proj)
                 visited: set[int] = set()
 
@@ -236,7 +237,7 @@ class AngrAnalyzer(Plugin):
                         block = proj.factory.block(pc)
                         cap_insns = block.capstone.insns
                         for ci in cap_insns:
-                            reg_snapshot: Dict[str, int] = {}
+                            reg_snapshot: dict[str, int] = {}
                             for rname in reg_names:
                                 try:
                                     rv = getattr(s.regs, rname, None)
@@ -272,7 +273,7 @@ class AngrAnalyzer(Plugin):
         return traces
 
     @staticmethod
-    def _get_reg_names(proj: Any) -> List[str]:
+    def _get_reg_names(proj: Any) -> list[str]:
         """Return a list of general-purpose register names for the arch."""
         arch_name = proj.arch.name.lower()
         if "amd64" in arch_name or "x86_64" in arch_name:
@@ -291,9 +292,9 @@ class AngrAnalyzer(Plugin):
     def _explore_handlers(
         self,
         proj: Any,
-        dispatcher_addrs: List[int],
+        dispatcher_addrs: list[int],
         max_steps: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Use angr's SimulationManager to explore paths from dispatcher
         addresses, identifying handler boundaries (where control returns
@@ -301,7 +302,7 @@ class AngrAnalyzer(Plugin):
 
         Returns handler exploration summary.
         """
-        handlers_found: List[Dict[str, Any]] = []
+        handlers_found: list[dict[str, Any]] = []
         total_paths = 0
 
         for d_addr in dispatcher_addrs[:5]:  # Limit to first 5 dispatchers

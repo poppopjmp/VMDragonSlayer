@@ -10,18 +10,18 @@ to identify handler semantics and data dependencies.
 
 try:
     from .tracker import (
-        TaintTracker,
-        TaintTag,
-        TaintState,
-        TaintEvent,
-        TaintResult,
         ByteTaintMap,
         MemoryAliasTracker,
-        subreg_canonical,
-        subreg_aliases,
-        subreg_info,
-        is_eflags_producer,
+        TaintEvent,
+        TaintResult,
+        TaintState,
+        TaintTag,
+        TaintTracker,
         is_eflags_consumer,
+        is_eflags_producer,
+        subreg_aliases,
+        subreg_canonical,
+        subreg_info,
     )
 except (ImportError, AttributeError):
     TaintTracker = None  # type: ignore[assignment,misc]
@@ -43,7 +43,7 @@ except (ImportError, AttributeError):
     TaintAnalyzer = None  # type: ignore[assignment,misc]
 
 try:
-    from .vm_taint_tracker import VMTaintTracker, VM_REG_PRESETS
+    from .vm_taint_tracker import VM_REG_PRESETS, VMTaintTracker
 except (ImportError, AttributeError):
     VMTaintTracker = None  # type: ignore[assignment,misc]
     VM_REG_PRESETS = {}  # type: ignore[assignment]
@@ -55,10 +55,10 @@ except (ImportError, AttributeError):
 
 try:
     from .inter_handler import (
-        InterHandlerDataFlow,
-        InterHandlerFlowResult,
-        InterHandlerFlowEdge,
         HandlerTaintSummary,
+        InterHandlerDataFlow,
+        InterHandlerFlowEdge,
+        InterHandlerFlowResult,
         build_handler_summary,
         canonicalize_reg,
         compose_summaries,

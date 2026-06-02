@@ -11,7 +11,7 @@ shared context.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .detector import VMDetector
 
@@ -35,9 +35,9 @@ class VMAnalyzer:
         self,
         data: bytes,
         *,
-        pattern_matches: Optional[List[Dict[str, Any]]] = None,
-        shared_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pattern_matches: list[dict[str, Any]] | None = None,
+        shared_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Full VM analysis combining heuristics + pattern data.
 
@@ -59,7 +59,7 @@ class VMAnalyzer:
         detection = self._detector.detect(data)
 
         # Enrich with pattern matches
-        handler_map: List[Dict[str, Any]] = []
+        handler_map: list[dict[str, Any]] = []
         handler_types_seen: set = set()
 
         for match in (pattern_matches or []):
@@ -98,7 +98,7 @@ class VMAnalyzer:
 
     @staticmethod
     def _assess_complexity(
-        detection: Dict[str, Any],
+        detection: dict[str, Any],
         handler_types: set,
         pattern_count: int,
     ) -> str:
@@ -140,12 +140,12 @@ class VMAnalyzer:
 
     @staticmethod
     def _build_recommendations(
-        detection: Dict[str, Any],
+        detection: dict[str, Any],
         handler_types: set,
         complexity: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate actionable recommendations based on analysis."""
-        recs: List[str] = []
+        recs: list[str] = []
 
         protector = detection.get("protector", "unknown")
         if protector == "VMProtect":

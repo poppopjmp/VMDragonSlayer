@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any
 
-from .database import HandlerType, Pattern
+from .database import HandlerType
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,10 @@ class ClassificationResult:
     sub_category: str = ""
     confidence: float = 0.0
     reasoning: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     llm_refined: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "pattern_id": self.pattern_id,
             "name": self.name,
@@ -61,12 +62,12 @@ class ClassificationResult:
 class ClassificationReport:
     """Aggregate classification output."""
 
-    results: List[ClassificationResult] = field(default_factory=list)
-    category_counts: Dict[str, int] = field(default_factory=dict)
-    dominant_type: Optional[HandlerType] = None
+    results: list[ClassificationResult] = field(default_factory=list)
+    category_counts: dict[str, int] = field(default_factory=dict)
+    dominant_type: HandlerType | None = None
     complexity_score: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "results": [r.to_dict() for r in self.results],
             "category_counts": self.category_counts,
@@ -81,7 +82,7 @@ class ClassificationReport:
 
 # Mapping from mnemonic keywords found inside pattern names / operations to
 # their likely handler type.  Order matters — first match wins.
-_OPERATION_RULES: List[tuple[re.Pattern, HandlerType, str]] = [
+_OPERATION_RULES: list[tuple[re.Pattern, HandlerType, str]] = [
     # Arithmetic
     (re.compile(r"\b(add|sub|inc|dec|imul|idiv|mul|div|neg|adc|sbb)\b", re.I), HandlerType.ARITHMETIC, "arithmetic op"),
     # Bitwise / logic
@@ -101,7 +102,7 @@ _OPERATION_RULES: List[tuple[re.Pattern, HandlerType, str]] = [
 ]
 
 # Byte-level heuristics for when we only have raw matched bytes.
-_BYTE_RULES: List[tuple[bytes, HandlerType, str]] = [
+_BYTE_RULES: list[tuple[bytes, HandlerType, str]] = [
     # Common x86 opcode prefixes
     (bytes([0x01]), HandlerType.ARITHMETIC, "ADD r/m"),
     (bytes([0x29]), HandlerType.ARITHMETIC, "SUB r/m"),
@@ -123,7 +124,7 @@ _BYTE_RULES: List[tuple[bytes, HandlerType, str]] = [
 # B56: Instruction-sequence signatures for handler body matching.
 # Each entry: (mnemonic_sequence, handler_type, sub_category, base_confidence)
 # Wildcards: \"*\" matches any single mnemonic, \"...\" matches 0+ mnemonics.
-_INSTRUCTION_SEQ_SIGNATURES: List[tuple[List[str], HandlerType, str, float]] = [
+_INSTRUCTION_SEQ_SIGNATURES: list[tuple[list[str], HandlerType, str, float]] = [
     # VM enter: push context, set up VM frame
     (["push", "mov", "sub"], HandlerType.CONTROL_FLOW, "vm_enter", 0.8),
     (["push", "push", "push", "mov"], HandlerType.STACK, "context_save", 0.75),
@@ -163,12 +164,12 @@ _INSTRUCTION_SEQ_SIGNATURES: List[tuple[List[str], HandlerType, str, float]] = [
 # Known VMProtect junk mnemonics / patterns that should be stripped before
 # sequence matching.  These are NOPs, identity moves, and dead computations
 # that VMProtect inserts to obscure handler bodies.
-_JUNK_MNEMONICS: Set[str] = {"nop", "fnop", "pause", "int3", "ud2"}
+_JUNK_MNEMONICS: set[str] = {"nop", "fnop", "pause", "int3", "ud2"}
 
 # Additional junk detection: identity instructions like "mov eax, eax" or
 # "xchg eax, eax" or "lea eax, [eax+0]".  We detect these using a simple
 # operand-equality check.
-_IDENTITY_MNEMONICS: Set[str] = {"mov", "xchg", "lea"}
+_IDENTITY_MNEMONICS: set[str] = {"mov", "xchg", "lea"}
 
 
 def _is_junk_instruction(mnemonic: str, operands: str = "") -> bool:
@@ -197,7 +198,7 @@ def _is_junk_instruction(mnemonic: str, operands: str = "") -> bool:
     return False
 
 
-def strip_junk(mnemonics: List[str], operands_list: List[str] | None = None) -> List[str]:
+def strip_junk(mnemonics: list[str], operands_list: list[str] | None = None) -> list[str]:
     """Remove junk instructions from a mnemonic list.
 
     When *operands_list* is provided (parallel to *mnemonics*), identity
@@ -206,7 +207,7 @@ def strip_junk(mnemonics: List[str], operands_list: List[str] | None = None) -> 
     if operands_list is None:
         operands_list = [""] * len(mnemonics)
     return [
-        m for m, o in zip(mnemonics, operands_list)
+        m for m, o in zip(mnemonics, operands_list, strict=False)
         if not _is_junk_instruction(m, o)
     ]
 
@@ -238,8 +239,8 @@ def normalize_operands(operands: str) -> str:
 
 
 def _match_instruction_sequence_gap(
-    mnemonics: List[str],
-    pattern: List[str],
+    mnemonics: list[str],
+    pattern: list[str],
     max_gap: int = 2,
 ) -> bool:
     """Gap-tolerant sequence matching.
@@ -261,7 +262,7 @@ def _match_instruction_sequence_gap(
         return pat == "*" or mnem == pat
 
     # B63: Memoize (mi, pi) → bool to prevent exponential backtracking
-    _memo: Dict[tuple[int, int], bool] = {}
+    _memo: dict[tuple[int, int], bool] = {}
 
     def _search(mi: int, pi: int) -> bool:
         if pi == plen:
@@ -283,15 +284,14 @@ def _match_instruction_sequence_gap(
 
     # Try every starting position
     for start in range(n):
-        if _matches(mnemonics[start], pattern[0]):
-            if _search(start + 1, 1):
-                return True
+        if _matches(mnemonics[start], pattern[0]) and _search(start + 1, 1):
+            return True
     return False
 
 
 def _match_instruction_sequence(
-    mnemonics: List[str],
-    pattern: List[str],
+    mnemonics: list[str],
+    pattern: list[str],
 ) -> bool:
     """Check if *mnemonics* contains *pattern* as a subsequence.
 
@@ -358,7 +358,7 @@ class PatternClassifier:
         -------
         ClassificationReport
         """
-        results: List[ClassificationResult] = []
+        results: list[ClassificationResult] = []
 
         for m in matches:
             cr = self._classify_single(m)
@@ -370,7 +370,7 @@ class PatternClassifier:
             results = self._llm_refine(results)
 
         # Build report
-        category_counts: Dict[str, int] = {}
+        category_counts: dict[str, int] = {}
         for r in results:
             key = r.handler_type.value
             category_counts[key] = category_counts.get(key, 0) + 1
@@ -392,8 +392,8 @@ class PatternClassifier:
         raw_bytes: bytes,
         *,
         handler_name: str = "",
-        mnemonics: Optional[List[str]] = None,
-        operands: Optional[List[str]] = None,
+        mnemonics: list[str] | None = None,
+        operands: list[str] | None = None,
     ) -> ClassificationResult:
         """
         Classify a raw handler byte sequence directly (no Match object).
@@ -411,7 +411,7 @@ class PatternClassifier:
             Used for identity-mov detection in junk stripping and
             register-class normalization for LLM refinement.
         """
-        match_dict: Dict[str, Any] = {
+        match_dict: dict[str, Any] = {
             "pattern_id": f"raw_{handler_name or 'unknown'}",
             "name": handler_name or "raw_handler",
             "operation": "",
@@ -432,12 +432,12 @@ class PatternClassifier:
     # -- internal -----------------------------------------------------------
 
     @staticmethod
-    def _to_dict(match: Any) -> Dict[str, Any]:
+    def _to_dict(match: Any) -> dict[str, Any]:
         """Normalize a Match object or dict into a dict."""
         if isinstance(match, dict):
             return match
         # Match dataclass from recognizer
-        d: Dict[str, Any] = {}
+        d: dict[str, Any] = {}
         if hasattr(match, "pattern"):
             p = match.pattern
             d["pattern_id"] = getattr(p, "pattern_id", "")
@@ -472,7 +472,7 @@ class PatternClassifier:
         else:
             ht = declared if isinstance(declared, HandlerType) else HandlerType.UNKNOWN
 
-        reasoning_parts: List[str] = []
+        reasoning_parts: list[str] = []
 
         # 1) If declared type is already specific, trust it
         if ht != HandlerType.UNKNOWN:
@@ -492,7 +492,7 @@ class PatternClassifier:
             mnems = d.get("_mnemonics", [])
             if mnems:
                 # 3a) Strict sliding-window match (original B56)
-                for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
+                for sig_pattern, sig_type, sig_sub, _sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
                     if _match_instruction_sequence(mnems, sig_pattern):
                         ht = sig_type
                         seq_sub_cat = sig_sub
@@ -504,7 +504,7 @@ class PatternClassifier:
                     operands_list = d.get("_operands", None)
                     stripped = strip_junk(mnems, operands_list)
                     if len(stripped) < len(mnems):  # stripping had effect
-                        for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
+                        for sig_pattern, sig_type, sig_sub, _sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
                             if _match_instruction_sequence(stripped, sig_pattern):
                                 ht = sig_type
                                 seq_sub_cat = sig_sub
@@ -515,7 +515,7 @@ class PatternClassifier:
 
                 # 3c) B61: Gap-tolerant fuzzy match as final fallback
                 if ht == HandlerType.UNKNOWN:
-                    for sig_pattern, sig_type, sig_sub, sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
+                    for sig_pattern, sig_type, sig_sub, _sig_conf in _INSTRUCTION_SEQ_SIGNATURES:
                         if _match_instruction_sequence_gap(mnems, sig_pattern, max_gap=2):
                             ht = sig_type
                             seq_sub_cat = sig_sub
@@ -559,8 +559,8 @@ class PatternClassifier:
 
     def _llm_refine(
         self,
-        results: List[ClassificationResult],
-    ) -> List[ClassificationResult]:
+        results: list[ClassificationResult],
+    ) -> list[ClassificationResult]:
         """Send ambiguous classifications to the LLM for refinement."""
         try:
             from ...llm import get_llm_analyzer
@@ -570,7 +570,7 @@ class PatternClassifier:
         except (ImportError, AttributeError, RuntimeError):
             return results
 
-        refined: List[ClassificationResult] = []
+        refined: list[ClassificationResult] = []
         for cr in results:
             # Only refine uncertain ones
             if cr.handler_type == HandlerType.UNKNOWN or cr.confidence < 0.6:
@@ -604,8 +604,8 @@ class PatternClassifier:
 
     @staticmethod
     def _compute_complexity(
-        results: List[ClassificationResult],
-        counts: Dict[str, int],
+        results: list[ClassificationResult],
+        counts: dict[str, int],
     ) -> float:
         """
         Compute a 0.0–1.0 complexity score based on handler diversity.

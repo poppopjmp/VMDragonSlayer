@@ -23,10 +23,11 @@ import json
 import logging
 import math
 import time
-from dataclasses import dataclass, field, asdict
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +68,15 @@ class UncertainSample:
         Extra context (address, protector, source file, …).
     """
     sample_id: str = ""
-    features: Dict[str, Any] = field(default_factory=dict)
+    features: dict[str, Any] = field(default_factory=dict)
     predicted_label: str = ""
     confidence: float = 0.0
     entropy: float = 0.0
     margin: float = 0.0
-    class_probabilities: Dict[str, float] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    class_probabilities: dict[str, float] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -105,7 +106,7 @@ class FeedbackEntry:
     original_label: str = ""
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -156,12 +157,12 @@ def compute_margin(probabilities: Sequence[float]) -> float:
 
 
 def select_uncertain_samples(
-    predictions: List[Dict[str, Any]],
+    predictions: list[dict[str, Any]],
     *,
     strategy: UncertaintyStrategy | str = UncertaintyStrategy.ENTROPY,
     k: int = 10,
     confidence_threshold: float = 0.8,
-) -> List[UncertainSample]:
+) -> list[UncertainSample]:
     """Select the top-*k* most uncertain predictions.
 
     Parameters
@@ -194,7 +195,7 @@ def select_uncertain_samples(
                 f"Valid strategies: {valid}"
             ) from None
 
-    candidates: List[UncertainSample] = []
+    candidates: list[UncertainSample] = []
     for pred in predictions:
         conf = pred.get("confidence", 1.0)
         if conf >= confidence_threshold:
@@ -246,9 +247,9 @@ class FeedbackStore:
         File path for JSON persistence.  ``None`` → in-memory only.
     """
 
-    def __init__(self, path: Optional[str | Path] = None) -> None:
+    def __init__(self, path: str | Path | None = None) -> None:
         self._path = Path(path) if path else None
-        self._entries: List[FeedbackEntry] = []
+        self._entries: list[FeedbackEntry] = []
         if self._path and self._path.exists():
             self._load()
 
@@ -302,19 +303,19 @@ class FeedbackStore:
         return entry
 
     @property
-    def entries(self) -> List[FeedbackEntry]:
+    def entries(self) -> list[FeedbackEntry]:
         """All stored feedback entries."""
         return list(self._entries)
 
     def count(self) -> int:
         return len(self._entries)
 
-    def get_corrections(self) -> Dict[str, str]:
+    def get_corrections(self) -> dict[str, str]:
         """Return ``{sample_id: corrected_label}`` for the latest corrections.
 
         If a sample was corrected multiple times, the latest wins.
         """
-        corrections: Dict[str, str] = {}
+        corrections: dict[str, str] = {}
         for entry in self._entries:
             corrections[entry.sample_id] = entry.corrected_label
         return corrections
@@ -332,8 +333,8 @@ class FeedbackStore:
 
 def export_training_set(
     feedback: FeedbackStore,
-    existing_labels: Dict[str, str],
-) -> Dict[str, str]:
+    existing_labels: dict[str, str],
+) -> dict[str, str]:
     """Merge analyst corrections into an existing label set.
 
     Corrections from the feedback store **override** existing labels.

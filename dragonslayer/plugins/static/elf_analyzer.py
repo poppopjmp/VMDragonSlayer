@@ -19,7 +19,7 @@ import os
 import tempfile
 import time
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 _HAS_ELFTOOLS = False
 try:
+    from elftools.elf.dynamic import DynamicSection  # type: ignore[import-untyped]
     from elftools.elf.elffile import ELFFile  # type: ignore[import-untyped]
     from elftools.elf.sections import SymbolTableSection  # type: ignore[import-untyped]
-    from elftools.elf.dynamic import DynamicSection  # type: ignore[import-untyped]
     _HAS_ELFTOOLS = True
 except ImportError:
     pass
@@ -70,7 +70,7 @@ class ELFAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
             )
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".elf")
             os.write(fd, file_data)
@@ -97,11 +97,11 @@ class ELFAnalyzer(Plugin):
                 os.unlink(tmp_path)
 
     @staticmethod
-    def _analyze(file_path: str) -> Dict[str, Any]:
+    def _analyze(file_path: str) -> dict[str, Any]:
         with open(file_path, "rb") as f:
             elf = ELFFile(f)
 
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "valid": True,
                 "class": elf.elfclass,
                 "endian": "little" if elf.little_endian else "big",
@@ -111,10 +111,10 @@ class ELFAnalyzer(Plugin):
             }
 
             # Sections
-            sections: List[Dict[str, Any]] = []
-            section_info: Dict[str, Dict[str, Any]] = {}
+            sections: list[dict[str, Any]] = []
+            section_info: dict[str, dict[str, Any]] = {}
             for sec in elf.iter_sections():
-                sec_data: Dict[str, Any] = {
+                sec_data: dict[str, Any] = {
                     "name": sec.name,
                     "type": str(sec["sh_type"]),
                     "size": sec["sh_size"],
@@ -136,8 +136,8 @@ class ELFAnalyzer(Plugin):
             result["section_info"] = section_info
 
             # Symbols
-            imports: List[str] = []
-            exports: List[str] = []
+            imports: list[str] = []
+            exports: list[str] = []
             for sec in elf.iter_sections():
                 if isinstance(sec, SymbolTableSection):
                     for sym in sec.iter_symbols():
@@ -146,14 +146,17 @@ class ELFAnalyzer(Plugin):
                         if sym["st_shndx"] == "SHN_UNDEF" and sym["st_value"] == 0:
                             if sym.name not in imports:
                                 imports.append(sym.name)
-                        elif sym["st_info"]["bind"] == "STB_GLOBAL" and sym["st_shndx"] != "SHN_UNDEF":
-                            if sym.name not in exports:
-                                exports.append(sym.name)
+                        elif (
+                            sym["st_info"]["bind"] == "STB_GLOBAL"
+                            and sym["st_shndx"] != "SHN_UNDEF"
+                            and sym.name not in exports
+                        ):
+                            exports.append(sym.name)
             result["imports"] = sorted(imports)
             result["exports"] = sorted(exports)
 
             # Dynamic libraries
-            libraries: List[str] = []
+            libraries: list[str] = []
             for sec in elf.iter_sections():
                 if isinstance(sec, DynamicSection):
                     for tag in sec.iter_tags():
@@ -162,7 +165,7 @@ class ELFAnalyzer(Plugin):
             result["libraries"] = libraries
 
             # Segments
-            segments: List[Dict[str, Any]] = []
+            segments: list[dict[str, Any]] = []
             for seg in elf.iter_segments():
                 segments.append({
                     "type": str(seg["p_type"]),
@@ -174,7 +177,7 @@ class ELFAnalyzer(Plugin):
             result["segments"] = segments
 
             # Security features
-            security: Dict[str, bool] = {
+            security: dict[str, bool] = {
                 "pie": result["type"] == "ET_DYN",
                 "relro": False,
                 "nx": False,

@@ -14,11 +14,10 @@ from disk.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
 import logging
 import re
+from dataclasses import dataclass, field
+from typing import Any
 
 from .taxonomy import canonicalize as _canonicalize
 
@@ -31,8 +30,8 @@ class PredictionResult:
 
     label: str = ""
     confidence: float = 0.0
-    probabilities: Dict[str, float] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    probabilities: dict[str, float] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class BaseModel:
@@ -59,7 +58,7 @@ class BaseModel:
             raise ImportError(
                 "joblib is required to load models — "
                 "install it with: pip install vmdragonslayer[ml]"
-            )
+            ) from None
         except (EOFError, OSError, ValueError, ModuleNotFoundError) as exc:
             raise RuntimeError(
                 f"Failed to deserialize model from {path}: {exc}"
@@ -88,9 +87,9 @@ class BaseModel:
             raise ImportError(
                 "joblib is required to save models — "
                 "install it with: pip install vmdragonslayer[ml]"
-            )
+            ) from None
 
-    def predict(self, features: Dict[str, Any]) -> PredictionResult:
+    def predict(self, features: dict[str, Any]) -> PredictionResult:
         """Run inference on a single feature dict.
 
         Args:
@@ -107,7 +106,7 @@ class BaseModel:
             f"{type(self).__name__}.predict() is not implemented"
         )
 
-    def predict_batch(self, batch: List[Dict[str, Any]]) -> List[PredictionResult]:
+    def predict_batch(self, batch: list[dict[str, Any]]) -> list[PredictionResult]:
         """Run inference on a batch (default: sequential predict).
 
         Args:
@@ -126,7 +125,7 @@ class BaseModel:
 try:
     from .taxonomy import CANONICAL_CATEGORIES as HANDLER_CATEGORIES
 except ImportError:  # taxonomy not yet available in minimal installs
-    HANDLER_CATEGORIES: List[str] = [  # type: ignore[no-redef]
+    HANDLER_CATEGORIES: list[str] = [  # type: ignore[no-redef]
         "arithmetic", "bitwise", "stack", "memory", "control_flow",
         "vm_control", "comparison", "crypto", "conversion", "system",
         "nop", "unknown",
@@ -139,7 +138,7 @@ except ImportError:  # taxonomy not yet available in minimal installs
 # Each rule maps a feature name to (weight, threshold, direction).
 # "above" means feature >= threshold contributes positively.
 # "below" means feature < threshold contributes positively.
-_HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
+_HEURISTIC_RULES: dict[str, list[tuple[str, float, float, str]]] = {
     "arithmetic": [
         ("arith_ratio", 3.0, 0.25, "above"),
         ("logic_ratio", -1.0, 0.30, "above"),
@@ -190,9 +189,9 @@ _HEURISTIC_RULES: Dict[str, List[tuple[str, float, float, str]]] = {
 
 
 def _score_rules(
-    values: List[float],
-    names: List[str],
-) -> Dict[str, float]:
+    values: list[float],
+    names: list[str],
+) -> dict[str, float]:
     """Score each handler category using the heuristic rules.
 
     Applies the weight/threshold/direction rules in ``_HEURISTIC_RULES``
@@ -205,8 +204,8 @@ def _score_rules(
     Returns:
         Dict mapping category name to cumulative rule score.
     """
-    lookup: Dict[str, float] = dict(zip(names, values))
-    scores: Dict[str, float] = {}
+    lookup: dict[str, float] = dict(zip(names, values, strict=False))
+    scores: dict[str, float] = {}
 
     for category, rules in _HEURISTIC_RULES.items():
         s = 0.0
@@ -249,7 +248,7 @@ class SymbolicClassifierModel(BaseModel):
 
     # Symbolic expression → (vm_op_label, confidence)
     # B67: compiled at class-definition time to avoid per-predict overhead.
-    _EXPR_RULES: List[tuple] = [
+    _EXPR_RULES: list[tuple] = [
         # Arithmetic
         (re.compile(r"init_\w+\s*\+\s*init_\w+"), "arithmetic", 0.93),
         (re.compile(r"init_\w+\s*-\s*init_\w+"), "arithmetic", 0.93),
@@ -277,7 +276,7 @@ class SymbolicClassifierModel(BaseModel):
     # B67: hoisted to class level — was recreated on every predict() call
     _RSP_RE = re.compile(r"init_rsp|init_esp", re.IGNORECASE)
 
-    def predict(self, features: Dict[str, Any]) -> PredictionResult:
+    def predict(self, features: dict[str, Any]) -> PredictionResult:
         summary = features.get("symbolic_summary")
         if not summary:
             return PredictionResult(label="unknown", confidence=0.0,
@@ -296,7 +295,7 @@ class SymbolicClassifierModel(BaseModel):
 
         # --- Determine which registers actually changed value ----------
         modified_regs: set = set()
-        interesting: List[str] = []
+        interesting: list[str] = []
         for rname, expr_str in regs.items():
             init_sym = input_syms.get(rname, "")
             if expr_str != init_sym and expr_str not in ("0", str(0)):
@@ -362,7 +361,7 @@ class SymbolicClassifierModel(BaseModel):
                                     metadata={"method": "symbolic", "reason": "mem_write"})
 
         # --- Pattern match expressions ---------------------------------
-        label_scores: Dict[str, float] = {}
+        label_scores: dict[str, float] = {}
         for compiled_re, label, conf in self._EXPR_RULES:
             if compiled_re.search(combined):
                 label_scores[label] = max(label_scores.get(label, 0.0), conf)
@@ -409,7 +408,7 @@ class VMHandlerModel(BaseModel):
             raise ImportError(
                 "joblib is required to load models — "
                 "install it with: pip install vmdragonslayer[ml]"
-            )
+            ) from None
         except (EOFError, OSError, ValueError, ModuleNotFoundError) as exc:
             raise RuntimeError(
                 f"Failed to deserialize sklearn model from {path}: {exc}"
@@ -462,7 +461,7 @@ class VMHandlerModel(BaseModel):
             raise ImportError(
                 "joblib is required to save models — "
                 "install it with: pip install vmdragonslayer[ml]"
-            )
+            ) from None
 
     @property
     def is_trained(self) -> bool:
@@ -474,14 +473,14 @@ class VMHandlerModel(BaseModel):
         """
         return self._sklearn_model is not None
 
-    def predict(self, features: Dict[str, Any]) -> PredictionResult:
+    def predict(self, features: dict[str, Any]) -> PredictionResult:
         """Classify a handler from its feature vector.
 
         *features* should contain ``values`` (list of floats) and
         ``names`` (list of feature name strings).
         """
-        values: List[float] = features.get("values", [])
-        names: List[str] = features.get("names", [])
+        values: list[float] = features.get("values", [])
+        names: list[str] = features.get("names", [])
 
         # B67: Input validation
         if not values:
@@ -512,8 +511,8 @@ class VMHandlerModel(BaseModel):
 
     def _predict_heuristic(
         self,
-        values: List[float],
-        names: List[str],
+        values: list[float],
+        names: list[str],
     ) -> PredictionResult:
         scores = _score_rules(values, names)
         total = sum(max(0, s) for s in scores.values()) or 1.0
@@ -539,15 +538,15 @@ class VMHandlerModel(BaseModel):
             metadata={"method": "heuristic"},
         )
 
-    def _predict_sklearn(self, values: List[float]) -> PredictionResult:
+    def _predict_sklearn(self, values: list[float]) -> PredictionResult:
         import numpy as np  # type: ignore[import-untyped]
         X = np.array([values])
         label = self._sklearn_model.predict(X)[0]
-        probs: Dict[str, float] = {}
+        probs: dict[str, float] = {}
         if hasattr(self._sklearn_model, "predict_proba"):
             p = self._sklearn_model.predict_proba(X)[0]
             classes = list(self._sklearn_model.classes_)
-            probs = {str(c): float(v) for c, v in zip(classes, p)}
+            probs = {str(c): float(v) for c, v in zip(classes, p, strict=False)}
         confidence = probs.get(str(label), 0.9)
         return PredictionResult(
             label=_canonicalize(str(label)),

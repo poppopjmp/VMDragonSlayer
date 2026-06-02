@@ -14,14 +14,12 @@ Optional dependencies: ``pefile``, ``yara``, ``oletools``, ``magic``.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import math
 import os
-import struct
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -95,7 +93,7 @@ class StrelkaScanner(Plugin):
     ) -> PluginResult:
         t0 = time.monotonic()
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".bin")
             os.write(fd, file_data)
@@ -122,8 +120,8 @@ class StrelkaScanner(Plugin):
 
     def _scan(
         self, file_path: str, file_data: bytes, ctx: PluginContext
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "sha256": _sha256(file_data),
             "size": len(file_data),
             "entropy": round(_calculate_entropy(file_data), 4),
@@ -154,7 +152,7 @@ class StrelkaScanner(Plugin):
     # -- PE ----------------------------------------------------------------
 
     @staticmethod
-    def _scan_pe(file_path: str) -> Dict[str, Any]:
+    def _scan_pe(file_path: str) -> dict[str, Any]:
         try:
             pe = pefile.PE(file_path)
             sections = []
@@ -167,7 +165,7 @@ class StrelkaScanner(Plugin):
                     "characteristics": hex(sec.Characteristics),
                 })
 
-            imports: Dict[str, List[str]] = {}
+            imports: dict[str, list[str]] = {}
             if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
                 for entry in pe.DIRECTORY_ENTRY_IMPORT:
                     dll = entry.dll.decode("utf-8", errors="replace")
@@ -179,7 +177,7 @@ class StrelkaScanner(Plugin):
                             funcs.append(f"Ordinal_{imp.ordinal}")
                     imports[dll] = funcs
 
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "valid": True,
                 "machine": hex(pe.FILE_HEADER.Machine),
                 "entry_point": hex(pe.OPTIONAL_HEADER.AddressOfEntryPoint),
@@ -198,7 +196,7 @@ class StrelkaScanner(Plugin):
     # -- OLE / VBA ---------------------------------------------------------
 
     @staticmethod
-    def _scan_ole(file_path: str) -> Optional[Dict[str, Any]]:
+    def _scan_ole(file_path: str) -> dict[str, Any] | None:
         try:
             vba = VBA_Parser(file_path)
             if not vba.detect_vba_macros():
@@ -218,7 +216,7 @@ class StrelkaScanner(Plugin):
     # -- YARA --------------------------------------------------------------
 
     @staticmethod
-    def _scan_yara(file_data: bytes, rules_path: str) -> Dict[str, Any]:
+    def _scan_yara(file_data: bytes, rules_path: str) -> dict[str, Any]:
         try:
             rules = yara.compile(filepath=rules_path)
             matches = rules.match(data=file_data)

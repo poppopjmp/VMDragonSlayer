@@ -15,10 +15,10 @@ branch, nop, unknown).
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from .model import BaseModel, PredictionResult, VMHandlerModel
-from .pipeline import FeatureExtractor, FeatureVector, extract_handler_features
+from .pipeline import FeatureExtractor, extract_handler_features
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class VMClassifier:
         self.model = model or VMHandlerModel()
         self.extractor = extractor  # optional custom extractor
 
-    def classify(self, analysis_data: Dict[str, Any]) -> PredictionResult:
+    def classify(self, analysis_data: dict[str, Any]) -> PredictionResult:
         """Extract features and run model prediction.
 
         If a custom extractor was provided, uses it; otherwise
@@ -57,8 +57,8 @@ class VMClassifier:
 
     def classify_batch(
         self,
-        handlers: List[Dict[str, Any]],
-    ) -> List[PredictionResult]:
+        handlers: list[dict[str, Any]],
+    ) -> list[PredictionResult]:
         """Classify a list of handlers, tolerating individual failures.
 
         Returns one :class:`PredictionResult` per handler.  If an
@@ -66,7 +66,7 @@ class VMClassifier:
         result is returned so the batch still produces output for
         every element.
         """
-        results: List[PredictionResult] = []
+        results: list[PredictionResult] = []
         for i, h in enumerate(handlers):
             try:
                 results.append(self.classify(h))
@@ -112,8 +112,8 @@ class FeatureExplainer:
 
     def _predict_from_values(
         self,
-        values: List[float],
-        names: List[str],
+        values: list[float],
+        names: list[str],
     ) -> PredictionResult:
         """Run the model directly on a pre-built feature vector."""
         return self.classifier.model.predict({"values": values, "names": names})
@@ -122,11 +122,11 @@ class FeatureExplainer:
 
     def global_importance(
         self,
-        dataset: List[Dict[str, Any]],
-        labels: List[str] | None = None,
+        dataset: list[dict[str, Any]],
+        labels: list[str] | None = None,
         *,
         random_state: int | None = None,
-    ) -> List[tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """Compute permutation importance for each feature.
 
         For each feature column, shuffle its values across *dataset*
@@ -152,14 +152,14 @@ class FeatureExplainer:
         baseline = [self._predict_from_values(v.values, names) for v in vectors]
         if labels:
             base_score = sum(
-                1 for p, l in zip(baseline, labels) if p.label == l
+                1 for p, lbl in zip(baseline, labels, strict=False) if p.label == lbl
             ) / len(labels)
         else:
             base_score = sum(p.confidence for p in baseline) / n
 
         import random
         rng = random.Random(random_state)
-        importances: Dict[str, float] = {}
+        importances: dict[str, float] = {}
         for fi, fname in enumerate(names):
             drops: list[float] = []
             original_col = [v.values[fi] for v in vectors]
@@ -175,7 +175,7 @@ class FeatureExplainer:
                     )
                 if labels:
                     perm_score = sum(
-                        1 for p, l in zip(perm_preds, labels) if p.label == l
+                        1 for p, lbl in zip(perm_preds, labels, strict=False) if p.label == lbl
                     ) / len(labels)
                 else:
                     perm_score = sum(p.confidence for p in perm_preds) / n
@@ -189,11 +189,11 @@ class FeatureExplainer:
 
     def local_explain(
         self,
-        sample: Dict[str, Any],
+        sample: dict[str, Any],
         *,
         n_perturbations: int = 20,
         random_state: int | None = None,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Explain a single prediction by perturbing each feature.
 
         For each feature, perform *n_perturbations* random perturbations
@@ -212,7 +212,7 @@ class FeatureExplainer:
         base_conf = base_pred.confidence
         base_label = base_pred.label
 
-        contributions: Dict[str, float] = {}
+        contributions: dict[str, float] = {}
 
         for fi, fname in enumerate(features.feature_names):
             drops: list[float] = []

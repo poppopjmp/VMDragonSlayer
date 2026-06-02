@@ -32,11 +32,9 @@ Usage::
 from __future__ import annotations
 
 import logging
-import re
-import struct
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from dragonslayer.analysis.binary_format import parse_binary
 
@@ -67,9 +65,9 @@ class EvasionIndicator:
     confidence: float = 0.0
     severity: str = "medium"  # low, medium, high, critical
     patchable: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the evasion indicator to a JSON-compatible dict."""
         return {
             "category": self.category.value,
@@ -92,7 +90,7 @@ class Patch:
     description: str
     indicator_name: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the patch to a JSON-compatible dict with hex-encoded bytes."""
         return {
             "offset": self.offset,
@@ -106,12 +104,12 @@ class Patch:
 @dataclass
 class NormalizationReport:
     """Result of the anti-evasion analysis."""
-    indicators: List[EvasionIndicator] = field(default_factory=list)
-    patches: List[Patch] = field(default_factory=list)
-    category_counts: Dict[str, int] = field(default_factory=dict)
+    indicators: list[EvasionIndicator] = field(default_factory=list)
+    patches: list[Patch] = field(default_factory=list)
+    category_counts: dict[str, int] = field(default_factory=dict)
     risk_score: float = 0.0  # 0.0–1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the full normalisation report to a JSON-compatible dict."""
         return {
             "indicators": [i.to_dict() for i in self.indicators],
@@ -128,7 +126,7 @@ class NormalizationReport:
 # ---------------------------------------------------------------------------
 
 # Import names that indicate anti-debug behaviour
-_ANTI_DEBUG_IMPORTS: Dict[str, Tuple[str, str]] = {
+_ANTI_DEBUG_IMPORTS: dict[str, tuple[str, str]] = {
     b"IsDebuggerPresent": ("IsDebuggerPresent", "Direct debugger detection"),
     b"CheckRemoteDebuggerPresent": ("CheckRemoteDebugger", "Remote debugger detection"),
     b"NtQueryInformationProcess": ("NtQueryInformationProcess", "NT process info query (debug flags)"),
@@ -144,7 +142,7 @@ _ANTI_DEBUG_IMPORTS: Dict[str, Tuple[str, str]] = {
 }
 
 # VM / sandbox environment artefact strings
-_ENV_ARTEFACTS: Dict[bytes, Tuple[str, EvasionCategory]] = {
+_ENV_ARTEFACTS: dict[bytes, tuple[str, EvasionCategory]] = {
     b"VMware": ("VMware detection", EvasionCategory.ANTI_VM),
     b"VBox": ("VirtualBox detection", EvasionCategory.ANTI_VM),
     b"VBOX": ("VirtualBox detection", EvasionCategory.ANTI_VM),
@@ -163,7 +161,7 @@ _ENV_ARTEFACTS: Dict[bytes, Tuple[str, EvasionCategory]] = {
 }
 
 # Byte patterns for timing / anti-debug instructions
-_INSTRUCTION_PATTERNS: List[Tuple[bytes, str, EvasionCategory, str, bool]] = [
+_INSTRUCTION_PATTERNS: list[tuple[bytes, str, EvasionCategory, str, bool]] = [
     # (pattern, name, category, description, patchable)
     (b"\x0f\x31", "rdtsc", EvasionCategory.TIMING_CHECK,
      "RDTSC timing check (read Time Stamp Counter)", True),
@@ -186,7 +184,7 @@ _INSTRUCTION_PATTERNS: List[Tuple[bytes, str, EvasionCategory, str, bool]] = [
 ]
 
 # Anti-disassembly patterns (junk byte insertion, overlapping instructions)
-_ANTI_DISASM_PATTERNS: List[Tuple[bytes, str, str]] = [
+_ANTI_DISASM_PATTERNS: list[tuple[bytes, str, str]] = [
     (b"\xeb\xff", "jmp_overlap", "JMP $+1 — overlapping instruction trick"),
     (b"\xe8\x00\x00\x00\x00", "call_next", "CALL $+5 — position-independent code / anti-disasm"),
     (b"\x74\x01\xe8", "conditional_junk", "JZ $+3 over CALL — conditional junk insertion"),
@@ -194,7 +192,7 @@ _ANTI_DISASM_PATTERNS: List[Tuple[bytes, str, str]] = [
 
 # Confidence overrides for anti-disasm patterns that are also common in
 # legitimate code (e.g. PIC thunks).  Maps pattern name → confidence.
-_ANTI_DISASM_CONFIDENCE: Dict[str, float] = {
+_ANTI_DISASM_CONFIDENCE: dict[str, float] = {
     "call_next": 0.30,   # very common in PIC / __x86.get_pc_thunk
     "jmp_overlap": 0.70,
     "conditional_junk": 0.70,
@@ -227,8 +225,8 @@ class EnvironmentNormalizer:
         -------
         NormalizationReport
         """
-        indicators: List[EvasionIndicator] = []
-        patches: List[Patch] = []
+        indicators: list[EvasionIndicator] = []
+        patches: list[Patch] = []
 
         # Determine executable section ranges
         exec_ranges = self._identify_executable_sections(binary_data)
@@ -253,7 +251,7 @@ class EnvironmentNormalizer:
         indicators.extend(self._scan_self_modifying(binary_data))
 
         # Build category counts & risk score
-        category_counts: Dict[str, int] = {}
+        category_counts: dict[str, int] = {}
         for ind in indicators:
             key = ind.category.value
             category_counts[key] = category_counts.get(key, 0) + 1
@@ -270,7 +268,7 @@ class EnvironmentNormalizer:
     def apply_patches(
         self,
         binary_data: bytes,
-        patches: List[Patch],
+        patches: list[Patch],
     ) -> bytes:
         """
         Apply patches to *binary_data* and return the modified copy.
@@ -278,7 +276,7 @@ class EnvironmentNormalizer:
         Patches are applied in offset order.  Overlapping patches are skipped.
         """
         data = bytearray(binary_data)
-        patched_ranges: List[Tuple[int, int]] = []
+        patched_ranges: list[tuple[int, int]] = []
 
         for p in sorted(patches, key=lambda x: x.offset):
             end = p.offset + len(p.original)
@@ -305,7 +303,7 @@ class EnvironmentNormalizer:
     @staticmethod
     def _identify_executable_sections(
         data: bytes,
-    ) -> List[Tuple[int, int]]:
+    ) -> list[tuple[int, int]]:
         """
         Parse PE or ELF headers to extract (offset, end) ranges of
         executable sections.
@@ -320,13 +318,13 @@ class EnvironmentNormalizer:
         return parsed.executable_ranges()
 
     @staticmethod
-    def _in_exec_range(offset: int, exec_ranges: List[Tuple[int, int]]) -> bool:
+    def _in_exec_range(offset: int, exec_ranges: list[tuple[int, int]]) -> bool:
         """Check whether *offset* falls within any executable section."""
         return any(start <= offset < end for start, end in exec_ranges)
 
-    def _scan_imports(self, data: bytes) -> List[EvasionIndicator]:
+    def _scan_imports(self, data: bytes) -> list[EvasionIndicator]:
         """Scan for anti-debug API import names in the binary."""
-        results: List[EvasionIndicator] = []
+        results: list[EvasionIndicator] = []
         for sig, (name, desc) in _ANTI_DEBUG_IMPORTS.items():
             idx = data.find(sig)
             if idx != -1:
@@ -344,11 +342,11 @@ class EnvironmentNormalizer:
     def _scan_instructions(
         self,
         data: bytes,
-        exec_ranges: Optional[List[Tuple[int, int]]] = None,
-    ) -> Tuple[List[EvasionIndicator], List[Patch]]:
+        exec_ranges: list[tuple[int, int]] | None = None,
+    ) -> tuple[list[EvasionIndicator], list[Patch]]:
         """Scan executable sections for anti-debug / timing instruction patterns."""
-        indicators: List[EvasionIndicator] = []
-        patches: List[Patch] = []
+        indicators: list[EvasionIndicator] = []
+        patches: list[Patch] = []
         ranges = exec_ranges or [(0, len(data))]
 
         for pattern, name, category, desc, patchable in _INSTRUCTION_PATTERNS:
@@ -382,10 +380,10 @@ class EnvironmentNormalizer:
                 offset = idx + len(pattern)
         return indicators, patches
 
-    def _scan_artefact_strings(self, data: bytes) -> List[EvasionIndicator]:
+    def _scan_artefact_strings(self, data: bytes) -> list[EvasionIndicator]:
         """Scan for VM/sandbox environment artefact strings."""
-        results: List[EvasionIndicator] = []
-        seen: Set[str] = set()
+        results: list[EvasionIndicator] = []
+        seen: set[str] = set()
         for sig, (name, category) in _ENV_ARTEFACTS.items():
             idx = data.find(sig)
             if idx != -1 and name not in seen:
@@ -404,10 +402,10 @@ class EnvironmentNormalizer:
     def _scan_anti_disasm(
         self,
         data: bytes,
-        exec_ranges: Optional[List[Tuple[int, int]]] = None,
-    ) -> List[EvasionIndicator]:
+        exec_ranges: list[tuple[int, int]] | None = None,
+    ) -> list[EvasionIndicator]:
         """Scan executable sections for anti-disassembly tricks."""
-        results: List[EvasionIndicator] = []
+        results: list[EvasionIndicator] = []
         ranges = exec_ranges or [(0, len(data))]
 
         for pattern, name, desc in _ANTI_DISASM_PATTERNS:
@@ -433,14 +431,14 @@ class EnvironmentNormalizer:
                 offset = idx + len(pattern)
         return results
 
-    def _scan_self_modifying(self, data: bytes) -> List[EvasionIndicator]:
+    def _scan_self_modifying(self, data: bytes) -> list[EvasionIndicator]:
         """
         Detect indicators of self-modifying code (SMC).
 
         Heuristic: look for ``VirtualProtect`` combined with write to
         executable sections, or ``WriteProcessMemory`` targeting self.
         """
-        results: List[EvasionIndicator] = []
+        results: list[EvasionIndicator] = []
         if b"VirtualProtect" in data and b"WriteProcessMemory" in data:
             results.append(EvasionIndicator(
                 category=EvasionCategory.SELF_MODIFYING,
@@ -465,7 +463,7 @@ class EnvironmentNormalizer:
     # -- scoring ------------------------------------------------------------
 
     @staticmethod
-    def _compute_risk(indicators: List[EvasionIndicator]) -> float:
+    def _compute_risk(indicators: list[EvasionIndicator]) -> float:
         """Compute a 0.0–1.0 risk score from detected indicators."""
         if not indicators:
             return 0.0

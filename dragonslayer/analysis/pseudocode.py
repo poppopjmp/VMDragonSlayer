@@ -29,13 +29,14 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from dragonslayer.analysis.handler_semantics import (
-    SemanticOpcodeTable,
     OpcodeTableEntry,
+    SemanticOpcodeTable,
     VMOperation,
 )
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
@@ -70,11 +71,11 @@ class PseudocodeResult:
     text: str = ""
     line_count: int = 0
     style: str = "linear"   # "linear" | "structured" | "c_like"
-    warnings: List[str] = field(default_factory=list)
-    var_widths: Dict[str, int] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    var_widths: dict[str, int] = field(default_factory=dict)
     """Mapping of SSA variable name → operand width in bytes."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise pseudocode metadata and text to a JSON-compatible dict."""
         return {
             "line_count": self.line_count,
@@ -89,7 +90,7 @@ class PseudocodeResult:
 # ---------------------------------------------------------------------------
 
 # Each template uses {dst}, {src}, {src2}, {imm}, {label} placeholders.
-_OP_TEMPLATES: Dict[str, str] = {
+_OP_TEMPLATES: dict[str, str] = {
     VMOperation.ADD:   "{dst} = {src} + {src2}",
     VMOperation.SUB:   "{dst} = {src} - {src2}",
     VMOperation.MUL:   "{dst} = {src} * {src2}",
@@ -119,7 +120,7 @@ _OP_TEMPLATES: Dict[str, str] = {
 
 # Width-qualified load/store templates (used when operand_width is known).
 # Maps operand_width in bytes → C-style pointer cast.
-_WIDTH_CAST: Dict[int, str] = {
+_WIDTH_CAST: dict[int, str] = {
     1: "BYTE",
     2: "WORD",
     4: "DWORD",
@@ -127,7 +128,7 @@ _WIDTH_CAST: Dict[int, str] = {
 }
 
 # Width → C type name for variable declarations.
-_WIDTH_TYPE: Dict[int, str] = {
+_WIDTH_TYPE: dict[int, str] = {
     1: "uint8_t",
     2: "uint16_t",
     4: "uint32_t",
@@ -141,15 +142,15 @@ _WIDTH_TYPE: Dict[int, str] = {
 
 def emit_linear(
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
 ) -> PseudocodeResult:
     """Emit a linear pseudocode listing (no control-flow structuring).
 
     Uses def-use chain tracking to name variables by the handler that
     produced them, rather than sequential numbering.
     """
-    lines: List[str] = []
-    warnings: List[str] = []
+    lines: list[str] = []
+    warnings: list[str] = []
     namer = _DefUseNamer()
 
     for i, boundary in enumerate(boundaries):
@@ -227,7 +228,7 @@ class _DefUseNamer:
     result.
     """
 
-    _OP_PREFIX: Dict[str, str] = {
+    _OP_PREFIX: dict[str, str] = {
         VMOperation.ADD: "sum", VMOperation.SUB: "diff",
         VMOperation.MUL: "prod", VMOperation.DIV: "quot",
         VMOperation.AND: "band", VMOperation.OR: "bor",
@@ -240,11 +241,11 @@ class _DefUseNamer:
     }
 
     def __init__(self) -> None:
-        self._counters: Dict[str, int] = {}
-        self._stack: List[str] = []  # simulated VM stack of variable names
-        self._last_def: Optional[str] = None
+        self._counters: dict[str, int] = {}
+        self._stack: list[str] = []  # simulated VM stack of variable names
+        self._last_def: str | None = None
         # Track width (bytes) per variable name.
-        self._var_widths: Dict[str, int] = {}
+        self._var_widths: dict[str, int] = {}
 
     def _next_name(self, op: str) -> str:
         prefix = self._OP_PREFIX.get(op, "v")
@@ -281,7 +282,7 @@ class _DefUseNamer:
         """Return the recorded width for *name*, or 0 if unknown."""
         return self._var_widths.get(name, 0)
 
-    def all_var_widths(self) -> Dict[str, int]:
+    def all_var_widths(self) -> dict[str, int]:
         """Return a copy of ``{var_name: width_bytes}``."""
         return dict(self._var_widths)
 
@@ -396,10 +397,14 @@ def _format_instruction_ssa(
         dst = "retval"
         src2 = "0"
     elif op == VMOperation.RET:
-        dst = ""; src = ""; src2 = ""
+        dst = ""
+        src = ""
+        src2 = ""
     else:
         # NOP / UNKNOWN
-        dst = ""; src = ""; src2 = ""
+        dst = ""
+        src = ""
+        src2 = ""
 
     try:
         return template.format(
@@ -416,7 +421,7 @@ def _format_instruction_ssa(
 
 def emit_structured(
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     handler_cfg: Any = None,
 ) -> PseudocodeResult:
     """Emit structured pseudocode using handler-level CFG.
@@ -427,8 +432,8 @@ def emit_structured(
     if handler_cfg is None or not NX_AVAILABLE:
         return emit_linear(opcode_table, boundaries)
 
-    lines: List[str] = []
-    warnings: List[str] = []
+    lines: list[str] = []
+    warnings: list[str] = []
     namer = _DefUseNamer()
     open_loops = 0  # track how many while(true){ we've opened
 
@@ -438,7 +443,7 @@ def emit_structured(
     back_edge_target_addrs: set[int] = set()
     if NX_AVAILABLE and handler_cfg is not None:
         try:
-            for u, v, data in handler_cfg.edges(data=True):
+            for _u, v, data in handler_cfg.edges(data=True):
                 if data.get("type") == "back_edge":
                     back_edge_target_indices.add(v)
                     back_edge_target_addrs.add(v)
@@ -446,7 +451,7 @@ def emit_structured(
             pass
 
     # Map boundary index to handler address for back-edge matching
-    boundary_addrs = {i: b.handler_address for i, b in enumerate(boundaries)}
+    {i: b.handler_address for i, b in enumerate(boundaries)}
 
     for i, boundary in enumerate(boundaries):
         entry = opcode_table.lookup_handler(boundary.handler_address)
@@ -469,16 +474,16 @@ def emit_structured(
 
             # Structured control-flow.
             if op == VMOperation.JCC:
-                lines.append(f"    if (flags) {{")
+                lines.append("    if (flags) {")
                 lines.append(f"      goto loc_{boundary.vip_value + entry.vip_delta:#x};")
-                lines.append(f"    }}")
+                lines.append("    }")
                 continue
             elif op == VMOperation.JMP:
                 target_vip = boundary.vip_value + entry.vip_delta
                 lines.append(f"    goto loc_{target_vip:#x};")
                 continue
             elif op == VMOperation.RET:
-                lines.append(f"    return;")
+                lines.append("    return;")
                 continue
 
             line = _format_instruction_ssa(entry, boundary, i, namer)
@@ -522,7 +527,7 @@ def emit_structured(
 class StructuredBlock:
     """A block within a structured region tree."""
     block_id: int = 0
-    lines: List[str] = field(default_factory=list)
+    lines: list[str] = field(default_factory=list)
     is_loop_header: bool = False
     is_exit: bool = False
 
@@ -536,22 +541,22 @@ class StructuredRegion:
     """
     kind: str = "block"
     condition: str = ""
-    children: List[Any] = field(default_factory=list)   # StructuredRegion | StructuredBlock
-    case_labels: List[str] = field(default_factory=list)  # switch/case
+    children: list[Any] = field(default_factory=list)   # StructuredRegion | StructuredBlock
+    case_labels: list[str] = field(default_factory=list)  # switch/case
 
 
 def _block_lines(
     block: Any,
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     namer: _DefUseNamer,
-    boundary_map: Dict[int, int],
-) -> List[str]:
+    boundary_map: dict[int, int],
+) -> list[str]:
     """Emit pseudocode lines for a single basic block.
 
     *boundary_map* maps ``handler_address → boundary index``.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     instructions = getattr(block, "instructions", [])
     for vm_insn in instructions:
         handler_addr = getattr(vm_insn, "handler_address", 0)
@@ -584,7 +589,7 @@ def _block_lines(
 def _classify_block_outedges(
     block_id: int,
     cfg: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Classify the outgoing edges of *block_id*.
 
     Returns a dict with keys:
@@ -624,7 +629,7 @@ def _compute_immediate_postdominator(
     cfg_graph: Any,
     block_id: int,
     exit_ids: set,
-) -> Optional[int]:
+) -> int | None:
     """Find the immediate post-dominator of *block_id*.
 
     Uses reverse-graph BFS convergence: if both branches of a conditional
@@ -636,7 +641,7 @@ def _compute_immediate_postdominator(
 
     # Build the reverse graph
     try:
-        rgraph = cfg_graph.reverse()
+        cfg_graph.reverse()
     except _GRAPH_ERRORS:
         return None
 
@@ -690,7 +695,7 @@ def _compute_immediate_postdominator(
 # Irreducible CFG detection & node-splitting  (Batch 35)
 # ---------------------------------------------------------------------------
 
-def is_reducible(cfg_graph: Any, entry: Optional[int] = None) -> bool:
+def is_reducible(cfg_graph: Any, entry: int | None = None) -> bool:
     """Test whether *cfg_graph* is reducible using the T1/T2 algorithm.
 
     A CFG is reducible iff repeated application of T1 (self-loop removal)
@@ -715,7 +720,7 @@ def is_reducible(cfg_graph: Any, entry: Optional[int] = None) -> bool:
             changed = True
 
         # T2: collapse nodes with exactly one predecessor (in-degree 1)
-        to_remove: List[Any] = []
+        to_remove: list[Any] = []
         for node in list(g.nodes()):
             if g.in_degree(node) == 1:
                 pred = next(iter(g.predecessors(node)))
@@ -736,8 +741,8 @@ def is_reducible(cfg_graph: Any, entry: Optional[int] = None) -> bool:
 
 def find_irreducible_sccs(
     cfg_graph: Any,
-    entry: Optional[int] = None,
-) -> List[set]:
+    entry: int | None = None,
+) -> list[set]:
     """Return the strongly-connected components that make the CFG irreducible.
 
     An SCC is irreducible if it has multiple entry nodes (nodes reachable
@@ -747,7 +752,7 @@ def find_irreducible_sccs(
     if not NX_AVAILABLE or cfg_graph is None:
         return []
 
-    irreducible: List[set] = []
+    irreducible: list[set] = []
     for scc_nodes in nx.strongly_connected_components(cfg_graph):
         if len(scc_nodes) <= 1:
             continue
@@ -783,7 +788,7 @@ def split_irreducible_scc(
     g = cfg_graph.copy()
 
     # Find entries: nodes with predecessors outside the SCC
-    entries: List[Any] = []
+    entries: list[Any] = []
     for node in scc_nodes:
         for pred in g.predecessors(node):
             if pred not in scc_nodes:
@@ -817,7 +822,7 @@ def split_irreducible_scc(
     return g
 
 
-def make_reducible(cfg_graph: Any, entry: Optional[int] = None) -> Any:
+def make_reducible(cfg_graph: Any, entry: int | None = None) -> Any:
     """Iteratively split nodes until the CFG becomes reducible.
 
     Returns a (possibly modified) copy of *cfg_graph*.  Limits to 10
@@ -839,7 +844,7 @@ def make_reducible(cfg_graph: Any, entry: Optional[int] = None) -> Any:
 def structure_cfg(
     cfg: Any,
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
 ) -> StructuredRegion:
     """Perform Cifuentes-style structural analysis on a HandlerCFG.
 
@@ -849,17 +854,17 @@ def structure_cfg(
     namer = _DefUseNamer()
 
     # Build boundary lookup
-    boundary_map: Dict[int, int] = {}
+    boundary_map: dict[int, int] = {}
     for idx, bnd in enumerate(boundaries):
         boundary_map[bnd.handler_address] = idx
 
     # Get blocks and topo order
-    blocks_by_id: Dict[int, Any] = {}
+    blocks_by_id: dict[int, Any] = {}
     for b in getattr(cfg, "blocks", []):
         bid = getattr(b, "block_id", id(b))
         blocks_by_id[bid] = b
 
-    topo: List[int] = []
+    topo: list[int] = []
     try:
         topo = cfg.topological_order()
     except _GRAPH_ERRORS:
@@ -867,13 +872,11 @@ def structure_cfg(
 
     # Loop headers
     loop_headers: set[int] = set()
-    try:
+    with contextlib.suppress(_GRAPH_ERRORS):
         loop_headers = set(cfg.loop_headers())
-    except _GRAPH_ERRORS:
-        pass
 
     # Natural loops: header → body set
-    loop_bodies: Dict[int, set[int]] = {}
+    loop_bodies: dict[int, set[int]] = {}
     try:
         from dragonslayer.analysis.bytecode_cfg import detect_natural_loops
         loops = detect_natural_loops(cfg)
@@ -888,7 +891,7 @@ def structure_cfg(
     # Exit blocks
     exit_ids: set[int] = set()
     try:
-        exit_ids = {b for b in cfg.exit_blocks()}
+        exit_ids = set(cfg.exit_blocks())
     except _GRAPH_ERRORS:
         for bid, blk in blocks_by_id.items():
             if getattr(blk, "is_exit", False):
@@ -1029,7 +1032,7 @@ def structure_cfg(
             # Switch/case
             cases = []
             case_labels = []
-            for tgt, etype in out_info["targets"]:
+            for tgt, _etype in out_info["targets"]:
                 case_labels.append(f"case_{tgt}")
                 cases.append(_structure_block(tgt) if tgt not in emitted else
                              StructuredRegion(kind="block", children=[
@@ -1070,10 +1073,10 @@ def structure_cfg(
 def emit_region(
     region: StructuredRegion,
     indent: int = 0,
-) -> List[str]:
+) -> list[str]:
     """Recursively emit pseudocode lines from a :class:`StructuredRegion` tree."""
     pad = "    " * indent
-    lines: List[str] = []
+    lines: list[str] = []
 
     if region.kind == "block":
         for child in region.children:
@@ -1142,7 +1145,7 @@ def emit_region(
 
 def emit_cifuentes(
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     handler_cfg: Any = None,
 ) -> PseudocodeResult:
     """Emit structured pseudocode using Cifuentes-style analysis.
@@ -1176,7 +1179,7 @@ def emit_cifuentes(
 # ---------------------------------------------------------------------------
 
 
-def _extract_context_registers(context_layout: Any) -> Dict[str, str]:
+def _extract_context_registers(context_layout: Any) -> dict[str, str]:
     """Extract role → register mapping from a VMContextLayout or dict.
 
     Returns an ordered dict like ``{"vSP": "rsp", "table_base": "rbx"}``.
@@ -1184,7 +1187,7 @@ def _extract_context_registers(context_layout: Any) -> Dict[str, str]:
     if context_layout is None:
         return {}
 
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
 
     if isinstance(context_layout, dict):
         # From to_dict() output: look for known keys.
@@ -1212,7 +1215,7 @@ def _extract_context_registers(context_layout: Any) -> Dict[str, str]:
     return result
 
 
-def _extract_cluster_summary(clustering: Any) -> Dict[str, int]:
+def _extract_cluster_summary(clustering: Any) -> dict[str, int]:
     """Extract cluster_name → handler_count from clustering result.
 
     Returns an ordered dict like ``{"vm_add": 3, "vm_push": 2}``.
@@ -1220,7 +1223,7 @@ def _extract_cluster_summary(clustering: Any) -> Dict[str, int]:
     if clustering is None:
         return {}
 
-    result: Dict[str, int] = {}
+    result: dict[str, int] = {}
 
     if isinstance(clustering, dict):
         clusters = clustering.get("clusters", [])
@@ -1264,7 +1267,7 @@ def _apply_context_renaming(
         return text
 
     # Invert to register → pretty_name.
-    _PRETTY: Dict[str, str] = {
+    _PRETTY: dict[str, str] = {
         "vsp": "vSP",
         "table_base": "hTable",
         "key_register": "vKey",
@@ -1272,7 +1275,7 @@ def _apply_context_renaming(
         "vip_register": "vIP",
         "vip": "vIP",
     }
-    rename_map: Dict[str, str] = {}
+    rename_map: dict[str, str] = {}
     for role, reg in role_map.items():
         pretty = _PRETTY.get(role.lower(), role)
         rename_map[reg.lower()] = pretty
@@ -1296,7 +1299,7 @@ def _eliminate_trivial_dead(text: str) -> str:
 
     lines = text.split("\n")
     # Identify assignments that define SSA-style vars.
-    assignments: Dict[int, str] = {}  # line_idx → var_name
+    assignments: dict[int, str] = {}  # line_idx → var_name
     for i, ln in enumerate(lines):
         stripped = ln.strip()
         m = _re.match(r"([a-z]+_\d+)\s*=", stripped)
@@ -1308,7 +1311,7 @@ def _eliminate_trivial_dead(text: str) -> str:
 
     # Count total mentions of each variable across all lines.
     full = "\n".join(lines)
-    var_counts: Dict[str, int] = {}
+    var_counts: dict[str, int] = {}
     for var in set(assignments.values()):
         var_counts[var] = len(_re.findall(rf"\b{_re.escape(var)}\b", full))
 
@@ -1331,7 +1334,7 @@ def _eliminate_trivial_dead(text: str) -> str:
 
 def emit_c_like(
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     handler_cfg: Any = None,
     *,
     function_name: str = "vm_func",
@@ -1358,7 +1361,7 @@ def emit_c_like(
     else:
         inner = emit_structured(opcode_table, boundaries, handler_cfg)
 
-    header_lines: List[str] = []
+    header_lines: list[str] = []
 
     # ── VM context layout annotation (Batch 20) ─────────────────────
     ctx_regs = _extract_context_registers(context_layout)
@@ -1389,7 +1392,7 @@ def emit_c_like(
     var_names = set(_re.findall(r"\b([a-z]+_\d+)\b", inner.text))
     if var_names:
         # Group variables by their width for per-type declarations.
-        width_groups: Dict[int, List[str]] = {}
+        width_groups: dict[int, list[str]] = {}
         fallback_width = 8 if any(
             e.semantic.operand_width == 8 for e in opcode_table.entries
         ) else 4
@@ -1437,7 +1440,7 @@ def emit_c_like(
 
 def emit_pseudocode(
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     handler_cfg: Any = None,
     *,
     style: str = "c_like",

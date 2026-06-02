@@ -13,11 +13,12 @@ Heavy dependency: ``qiling``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -33,7 +34,7 @@ except (ImportError, OSError):
     pass
 
 
-def _detect_rootfs(file_data: bytes, context: PluginContext) -> Optional[str]:
+def _detect_rootfs(file_data: bytes, context: PluginContext) -> str | None:
     """
     Heuristic root-FS detection.
 
@@ -94,7 +95,7 @@ class QilingAnalyzer(Plugin):
     ) -> PluginResult:
         t0 = time.monotonic()
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".bin")
             os.write(fd, file_data)
@@ -127,7 +128,7 @@ class QilingAnalyzer(Plugin):
         file_path: str,
         file_data: bytes,
         ctx: PluginContext,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         rootfs = _detect_rootfs(file_data, ctx)
         if not rootfs:
             raise FileNotFoundError(
@@ -135,14 +136,14 @@ class QilingAnalyzer(Plugin):
                 "install rootfs at /qiling/rootfs/<arch>_<os>"
             )
 
-        executed_blocks: List[Dict[str, int]] = []
+        executed_blocks: list[dict[str, int]] = []
         block_set: set[int] = set()
         max_blocks = int(ctx.config.get("qiling.max_blocks", 50_000))
         max_insns = int(ctx.config.get("qiling.max_instructions", 200_000))
 
         # Per-instruction trace data
-        instruction_trace: List[Dict[str, Any]] = []
-        mem_accesses: List[Dict[str, Any]] = []
+        instruction_trace: list[dict[str, Any]] = []
+        mem_accesses: list[dict[str, Any]] = []
         insn_count = 0
 
         # Determine architecture for register snapshot
@@ -186,12 +187,10 @@ class QilingAnalyzer(Plugin):
             insn_count += 1
 
             # Register snapshot
-            reg_snapshot: Dict[str, int] = {}
+            reg_snapshot: dict[str, int] = {}
             for rname in _REG_LIST:
-                try:
+                with contextlib.suppress(ValueError, TypeError, AttributeError, RuntimeError):
                     reg_snapshot[rname] = ql.arch.regs.read(rname)
-                except (ValueError, TypeError, AttributeError, RuntimeError):
-                    pass
 
             # Read raw instruction bytes
             try:
@@ -255,7 +254,6 @@ class QilingAnalyzer(Plugin):
 
         # Memory access hooks
         try:
-            from qiling.const import QL_INTERCEPT  # type: ignore[import-untyped]
 
             ql.hook_mem_read(_mem_read_hook)
             ql.hook_mem_write(_mem_write_hook)

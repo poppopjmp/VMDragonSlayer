@@ -22,7 +22,7 @@ import math
 import struct
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class Section:
     writable: bool = False
     readable: bool = True
 
-    def file_range(self) -> Tuple[int, int]:
+    def file_range(self) -> tuple[int, int]:
         """Return ``(raw_offset, raw_offset + raw_size)``."""
         return (self.raw_offset, self.raw_offset + self.raw_size)
 
@@ -85,7 +85,7 @@ class ImportEntry:
     """One imported function."""
     library: str
     name: str
-    ordinal: Optional[int] = None
+    ordinal: int | None = None
 
 
 @dataclass
@@ -103,25 +103,25 @@ class ParsedBinary:
     architecture: Architecture = Architecture.UNKNOWN
     image_base: int = 0
     entry_point: int = 0
-    sections: List[Section] = field(default_factory=list)
-    imports: List[ImportEntry] = field(default_factory=list)
-    exports: List[ExportEntry] = field(default_factory=list)
+    sections: list[Section] = field(default_factory=list)
+    imports: list[ImportEntry] = field(default_factory=list)
+    exports: list[ExportEntry] = field(default_factory=list)
     raw_size: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # -- convenience helpers ------------------------------------------------
 
     @property
-    def executable_sections(self) -> List[Section]:
+    def executable_sections(self) -> list[Section]:
         """Sections with the executable flag set."""
         return [s for s in self.sections if s.executable]
 
     @property
-    def writable_sections(self) -> List[Section]:
+    def writable_sections(self) -> list[Section]:
         """Sections with the writable flag set."""
         return [s for s in self.sections if s.writable]
 
-    def executable_ranges(self) -> List[Tuple[int, int]]:
+    def executable_ranges(self) -> list[tuple[int, int]]:
         """File-offset ranges of executable sections.
 
         Falls back to ``[(0, raw_size)]`` when no sections have the exec flag.
@@ -129,7 +129,7 @@ class ParsedBinary:
         ranges = [s.file_range() for s in self.executable_sections]
         return ranges if ranges else [(0, self.raw_size)]
 
-    def section_containing(self, file_offset: int) -> Optional[Section]:
+    def section_containing(self, file_offset: int) -> Section | None:
         """Return the section that contains *file_offset*, or ``None``."""
         for sec in self.sections:
             start, end = sec.file_range()
@@ -137,7 +137,7 @@ class ParsedBinary:
                 return sec
         return None
 
-    def section_at_va(self, va: int) -> Optional[Section]:
+    def section_at_va(self, va: int) -> Section | None:
         """Return the section containing virtual address *va*, or ``None``."""
         rva = va - self.image_base
         for sec in self.sections:
@@ -145,7 +145,7 @@ class ParsedBinary:
                 return sec
         return None
 
-    def va_to_offset(self, va: int) -> Optional[int]:
+    def va_to_offset(self, va: int) -> int | None:
         """Convert a virtual address to a file offset, or ``None``."""
         sec = self.section_at_va(va)
         if sec is None:
@@ -153,20 +153,20 @@ class ParsedBinary:
         rva = va - self.image_base
         return sec.raw_offset + (rva - sec.virtual_address)
 
-    def offset_to_va(self, offset: int) -> Optional[int]:
+    def offset_to_va(self, offset: int) -> int | None:
         """Convert a file offset to a virtual address, or ``None``."""
         sec = self.section_containing(offset)
         if sec is None:
             return None
         return self.image_base + sec.virtual_address + (offset - sec.raw_offset)
 
-    def load_sections(self, data: bytes) -> Dict[int, bytes]:
+    def load_sections(self, data: bytes) -> dict[int, bytes]:
         """Map each section into a dict keyed by virtual address.
 
         Returns ``{va: section_bytes}`` for each section whose raw data
         is present in *data*.
         """
-        loaded: Dict[int, bytes] = {}
+        loaded: dict[int, bytes] = {}
         for sec in self.sections:
             start = sec.raw_offset
             end = start + sec.raw_size
@@ -176,7 +176,7 @@ class ParsedBinary:
                 loaded[va] = sec_data
         return loaded
 
-    def read_va(self, data: bytes, va: int, size: int) -> Optional[bytes]:
+    def read_va(self, data: bytes, va: int, size: int) -> bytes | None:
         """Read *size* bytes from the binary at virtual address *va*.
 
         *data* is the full raw binary content.  Returns ``None`` if the
@@ -187,7 +187,7 @@ class ParsedBinary:
             return None
         return data[off:off + size]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the parsed binary metadata and sections to a JSON-compatible dict."""
         return {
             "format": self.format.value,
@@ -334,8 +334,8 @@ def _lief_entry_point(binary: Any, fmt: BinaryFormat) -> int:
         return 0
 
 
-def _lief_sections(binary: Any, data: bytes) -> List[Section]:
-    result: List[Section] = []
+def _lief_sections(binary: Any, data: bytes) -> list[Section]:
+    result: list[Section] = []
     try:
         for sec in binary.sections:
             name = sec.name or ""
@@ -375,8 +375,8 @@ def _lief_sections(binary: Any, data: bytes) -> List[Section]:
     return result
 
 
-def _lief_imports(binary: Any, fmt: BinaryFormat) -> List[ImportEntry]:
-    result: List[ImportEntry] = []
+def _lief_imports(binary: Any, fmt: BinaryFormat) -> list[ImportEntry]:
+    result: list[ImportEntry] = []
     try:
         if fmt == BinaryFormat.PE:
             for imp in binary.imports:
@@ -392,8 +392,8 @@ def _lief_imports(binary: Any, fmt: BinaryFormat) -> List[ImportEntry]:
     return result
 
 
-def _lief_exports(binary: Any, fmt: BinaryFormat) -> List[ExportEntry]:
-    result: List[ExportEntry] = []
+def _lief_exports(binary: Any, fmt: BinaryFormat) -> list[ExportEntry]:
+    result: list[ExportEntry] = []
     try:
         if fmt == BinaryFormat.PE and binary.has_exports:
             for entry in binary.get_export().entries:
@@ -429,7 +429,7 @@ def _parse_with_struct(data: bytes) -> ParsedBinary:
 
 def _parse_pe_struct(data: bytes) -> ParsedBinary:
     """Parse PE format using struct only."""
-    sections: List[Section] = []
+    sections: list[Section] = []
     image_base = 0
     entry_point = 0
     arch = Architecture.UNKNOWN
@@ -500,7 +500,7 @@ def _parse_pe_struct(data: bytes) -> ParsedBinary:
 
 def _parse_elf_struct(data: bytes) -> ParsedBinary:
     """Parse ELF format using struct only."""
-    sections: List[Section] = []
+    sections: list[Section] = []
     arch = Architecture.UNKNOWN
     entry_point = 0
 
@@ -570,14 +570,14 @@ def _parse_elf_struct(data: bytes) -> ParsedBinary:
     )
 
 
-def _elf32_section(data: bytes, off: int) -> Optional[tuple]:
+def _elf32_section(data: bytes, off: int) -> tuple | None:
     sh_flags = struct.unpack_from("<I", data, off + 8)[0]
     sh_offset = struct.unpack_from("<I", data, off + 16)[0]
     sh_size = struct.unpack_from("<I", data, off + 20)[0]
     return (sh_flags, sh_offset, sh_size)
 
 
-def _elf64_section(data: bytes, off: int) -> Optional[tuple]:
+def _elf64_section(data: bytes, off: int) -> tuple | None:
     sh_flags = struct.unpack_from("<Q", data, off + 8)[0]
     sh_offset = struct.unpack_from("<Q", data, off + 24)[0]
     sh_size = struct.unpack_from("<Q", data, off + 32)[0]

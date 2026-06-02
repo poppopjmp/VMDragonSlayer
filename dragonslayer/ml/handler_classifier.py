@@ -28,16 +28,17 @@ from __future__ import annotations
 import json
 import logging
 import math
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
-from dragonslayer.ml.model import BaseModel, PredictionResult, VMHandlerModel
-from dragonslayer.ml.pipeline import FeatureExtractor, FeatureVector
-from dragonslayer.ml.classifier import VMClassifier
-from dragonslayer.ml.taxonomy import CANONICAL_CATEGORIES, canonicalize as _canonicalize
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
     HandlerBoundary,
 )
+from dragonslayer.ml.classifier import VMClassifier
+from dragonslayer.ml.model import PredictionResult, VMHandlerModel
+from dragonslayer.ml.pipeline import FeatureExtractor
+from dragonslayer.ml.taxonomy import CANONICAL_CATEGORIES
+from dragonslayer.ml.taxonomy import canonicalize as _canonicalize
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def _safe_int(v: Any) -> int:
     return int(v)
 
 
-def _handler_feature_spec() -> Dict[str, Any]:
+def _handler_feature_spec() -> dict[str, Any]:
     """Build the feature spec dict for FeatureExtractor."""
 
     return {
@@ -90,7 +91,7 @@ def _handler_feature_spec() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 # B87: Default heuristic thresholds — can be overridden via JSON config.
-_DEFAULT_HEURISTIC_CONFIG: Dict[str, Any] = {
+_DEFAULT_HEURISTIC_CONFIG: dict[str, Any] = {
     "rules": [
         {"label": "nop",          "confidence": 0.70, "max_insn": 3},
         {"label": "control_flow", "confidence": 0.50, "abs_delta_eq": 0},
@@ -118,13 +119,13 @@ class TrainedHandlerModel(VMHandlerModel):
 
     def __init__(self) -> None:
         super().__init__()
-        self._sklearn_model: Optional[Any] = None
-        self._label_names: List[str] = HANDLER_CATEGORIES
-        self._heuristic_config: Dict[str, Any] = dict(_DEFAULT_HEURISTIC_CONFIG)
+        self._sklearn_model: Any | None = None
+        self._label_names: list[str] = HANDLER_CATEGORIES
+        self._heuristic_config: dict[str, Any] = dict(_DEFAULT_HEURISTIC_CONFIG)
 
     # ---- heuristic config -----------------------------------------------
 
-    def configure_heuristics(self, config: Dict[str, Any]) -> None:
+    def configure_heuristics(self, config: dict[str, Any]) -> None:
         """Override heuristic thresholds with a custom config dict.
 
         The *config* dictionary should match the structure of
@@ -138,13 +139,13 @@ class TrainedHandlerModel(VMHandlerModel):
             self._heuristic_config["default_confidence"] = config["default_confidence"]
 
     @classmethod
-    def load_heuristic_config(cls, path: str) -> Dict[str, Any]:
+    def load_heuristic_config(cls, path: str) -> dict[str, Any]:
         """Load heuristic config from a JSON file.
 
         Returns the parsed dict (also usable with :meth:`configure_heuristics`).
         Raises ``FileNotFoundError`` or ``json.JSONDecodeError`` on failure.
         """
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
 
     # ---- load -----------------------------------------------------------
@@ -166,18 +167,18 @@ class TrainedHandlerModel(VMHandlerModel):
                 logger.info("Model file %s not found; using heuristic mode", path)
                 return
             with open(p, "rb") as fh:
-                obj = pickle.load(fh)  # noqa: S301
+                obj = pickle.load(fh)  # noqa: S301  # nosec B301 — trusted local model artifact only
             if hasattr(obj, "predict_proba"):
                 self._sklearn_model = obj
                 logger.info("Loaded sklearn model from %s", path)
             else:
                 logger.warning("Loaded object has no predict_proba; heuristic mode")
-        except (OSError, IOError, ValueError, TypeError, pickle.UnpicklingError, EOFError) as exc:
+        except (OSError, ValueError, TypeError, pickle.UnpicklingError, EOFError) as exc:
             logger.warning("Failed to load model from %s: %s", path, exc)
 
     # ---- predict --------------------------------------------------------
 
-    def predict(self, features: Dict[str, Any]) -> PredictionResult:
+    def predict(self, features: dict[str, Any]) -> PredictionResult:
         """Classify one handler from its feature vector."""
         values = features.get("values", [])
         names = features.get("names", [])
@@ -187,7 +188,7 @@ class TrainedHandlerModel(VMHandlerModel):
         return self._predict_heuristic(values, names)
 
     def _predict_sklearn(
-        self, values: List[float], names: List[str],
+        self, values: list[float], names: list[str],
     ) -> PredictionResult:
         """Prediction via trained sklearn model."""
         import numpy as np
@@ -198,7 +199,7 @@ class TrainedHandlerModel(VMHandlerModel):
         best_idx = int(proba.argmax())
         label = str(classes[best_idx])
         conf = float(proba[best_idx])
-        prob_dict = {str(c): float(p) for c, p in zip(classes, proba)}
+        prob_dict = {str(c): float(p) for c, p in zip(classes, proba, strict=False)}
         return PredictionResult(
             label=_canonicalize(label),
             confidence=conf,
@@ -207,7 +208,7 @@ class TrainedHandlerModel(VMHandlerModel):
         )
 
     def _predict_heuristic(
-        self, values: List[float], names: List[str],
+        self, values: list[float], names: list[str],
     ) -> PredictionResult:
         """Rule-based classification when no trained model is available.
 
@@ -215,7 +216,7 @@ class TrainedHandlerModel(VMHandlerModel):
         can be overridden via :meth:`configure_heuristics` or loaded from
         a JSON file.
         """
-        feat = dict(zip(names, values))
+        feat = dict(zip(names, values, strict=False))
 
         insn_count = feat.get("instruction_count", 0)
         vip_delta = feat.get("vip_delta", 0)
@@ -248,7 +249,7 @@ class TrainedHandlerModel(VMHandlerModel):
                 break
 
         # Build probability distribution centred on the chosen label.
-        probs = {c: 0.0 for c in HANDLER_CATEGORIES}
+        probs = dict.fromkeys(HANDLER_CATEGORIES, 0.0)
         probs[label] = conf
         remaining = 1.0 - conf
         others = [c for c in HANDLER_CATEGORIES if c != label]
@@ -270,8 +271,8 @@ class TrainedHandlerModel(VMHandlerModel):
 # ---------------------------------------------------------------------------
 
 def build_handler_classifier(
-    model_path: Optional[str] = None,
-    heuristic_config_path: Optional[str] = None,
+    model_path: str | None = None,
+    heuristic_config_path: str | None = None,
 ) -> VMClassifier:
     """Create a ready-to-use classifier for handler boundaries.
 
@@ -300,8 +301,8 @@ def build_handler_classifier(
 def classify_handlers(
     boundaries: Sequence[HandlerBoundary],
     *,
-    model_path: Optional[str] = None,
-) -> List[PredictionResult]:
+    model_path: str | None = None,
+) -> list[PredictionResult]:
     """Classify a list of handler boundaries.
 
     Convenience wrapper that builds a classifier and runs it on each
@@ -315,7 +316,7 @@ def classify_handlers(
         One :class:`PredictionResult` per boundary, in order.
     """
     clf = build_handler_classifier(model_path)
-    results: List[PredictionResult] = []
+    results: list[PredictionResult] = []
     for b in boundaries:
         data = {
             "handler_address": b.handler_address,

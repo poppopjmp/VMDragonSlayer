@@ -34,7 +34,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
+from typing import Any, TypedDict
 
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
@@ -97,7 +97,7 @@ class VMOperation:
 
 
 # Map native x86 mnemonics → VM semantic operations.
-_MNEMONIC_MAP: Dict[str, str] = {
+_MNEMONIC_MAP: dict[str, str] = {
     "add": VMOperation.ADD,
     "adc": VMOperation.ADD,
     "sub": VMOperation.SUB,
@@ -327,7 +327,7 @@ _MNEMONIC_MAP: Dict[str, str] = {
 
 # Instructions that are typically VM infrastructure / junk code.
 # Used by junk-code filter to down-weight noise instructions.
-_JUNK_MNEMONICS: Set[str] = {
+_JUNK_MNEMONICS: set[str] = {
     "nop", "int3", "ud2", "hlt",
     # Opaque predicate building blocks
     "pushf", "pushfd", "pushfq", "popf", "popfd", "popfq",
@@ -374,8 +374,8 @@ class SemanticOpcodeTableDict(TypedDict):
     """Shape returned by :meth:`SemanticOpcodeTable.to_dict`."""
     handler_count: int
     unique_operations: int
-    operations_summary: Dict[str, int]
-    entries: List[OpcodeTableEntryDict]
+    operations_summary: dict[str, int]
+    entries: list[OpcodeTableEntryDict]
 
 
 @dataclass
@@ -403,7 +403,7 @@ class HandlerSemantic:
     reads_memory: bool = False
     writes_memory: bool = False
     modifies_flags: bool = False
-    mnemonic_histogram: Dict[str, int] = field(default_factory=dict)
+    mnemonic_histogram: dict[str, int] = field(default_factory=dict)
     detail: str = ""
 
     def to_dict(self) -> HandlerSemanticDict:
@@ -456,23 +456,23 @@ class SemanticOpcodeTable:
         unique_operations: Number of distinct semantic operations.
     """
 
-    entries: List[OpcodeTableEntry] = field(default_factory=list)
+    entries: list[OpcodeTableEntry] = field(default_factory=list)
     handler_count: int = 0
     unique_operations: int = 0
 
-    def lookup_opcode(self, opcode: int) -> Optional[OpcodeTableEntry]:
+    def lookup_opcode(self, opcode: int) -> OpcodeTableEntry | None:
         for e in self.entries:
             if e.opcode == opcode:
                 return e
         return None
 
-    def lookup_handler(self, address: int) -> Optional[OpcodeTableEntry]:
+    def lookup_handler(self, address: int) -> OpcodeTableEntry | None:
         for e in self.entries:
             if e.handler_address == address:
                 return e
         return None
 
-    def operations_summary(self) -> Dict[str, int]:
+    def operations_summary(self) -> dict[str, int]:
         """Count how many opcodes map to each semantic operation."""
         counter: Counter = Counter()
         for e in self.entries:
@@ -494,10 +494,10 @@ class SemanticOpcodeTable:
 
 def analyse_handler_semantics(
     trace: ExecutionTrace,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     *,
-    opcode_assignments: Optional[Dict[int, int]] = None,
-    symbolic_summaries: Optional[Dict[int, Any]] = None,
+    opcode_assignments: dict[int, int] | None = None,
+    symbolic_summaries: dict[int, Any] | None = None,
 ) -> SemanticOpcodeTable:
     """Analyse handler semantics from trace instruction slices.
 
@@ -525,8 +525,8 @@ def analyse_handler_semantics(
         A :class:`SemanticOpcodeTable` with one entry per unique handler.
     """
     # Deduplicate by handler address — same native handler = same semantics.
-    seen_handlers: Dict[int, HandlerSemantic] = {}
-    boundary_by_handler: Dict[int, HandlerBoundary] = {}
+    seen_handlers: dict[int, HandlerSemantic] = {}
+    boundary_by_handler: dict[int, HandlerBoundary] = {}
 
     for boundary in boundaries:
         addr = boundary.handler_address
@@ -552,7 +552,7 @@ def analyse_handler_semantics(
             addr: idx for idx, addr in enumerate(sorted(seen_handlers.keys()))
         }
 
-    entries: List[OpcodeTableEntry] = []
+    entries: list[OpcodeTableEntry] = []
     for addr, semantic in sorted(seen_handlers.items()):
         opcode = opcode_assignments.get(addr, 0)
         boundary = boundary_by_handler[addr]
@@ -582,7 +582,7 @@ def analyse_handler_semantics(
 #
 # The patterns intentionally ignore register-name specifics so that
 # "init_rax + init_rbx" and "init_r12 + init_rsi" both match ADD.
-_SYM_PATTERNS: List[Tuple[re.Pattern[str], str, float]] = [
+_SYM_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     # (compiled_regex, VMOperation, confidence)
     # Arithmetic
     (re.compile(r"init_\w+\s*\+\s*init_\w+"), VMOperation.ADD, 0.92),
@@ -618,7 +618,7 @@ _RE_LEA_NOP = re.compile(r"(\w+),\s*\[\1\]$")
 def _classify_from_symbolic(
     address: int,
     summary: Any,
-) -> Optional[HandlerSemantic]:
+) -> HandlerSemantic | None:
     """Try to classify handler from its symbolic summary.
 
     Returns a ``HandlerSemantic`` with high confidence when the
@@ -647,7 +647,7 @@ def _classify_from_symbolic(
     input_syms = s.get("input_symbols") or {}
     # An output register is "interesting" if its final value differs from
     # its initial symbolic input.
-    interesting_exprs: List[str] = []
+    interesting_exprs: list[str] = []
     for rname, expr_str in regs.items():
         init_sym = input_syms.get(rname, "")
         if expr_str != init_sym and expr_str != "0" and expr_str != str(0):
@@ -682,7 +682,7 @@ def _classify_from_symbolic(
         )
 
     # Pattern-match the expression strings
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
     for pattern, vm_op, conf in _SYM_PATTERNS:
         if pattern.search(combined):
             scores[vm_op] = max(scores.get(vm_op, 0.0), conf)
@@ -706,9 +706,9 @@ def _classify_from_symbolic(
 
 def _classify_handler(
     address: int,
-    instructions: List[TraceInstruction],
+    instructions: list[TraceInstruction],
     *,
-    symbolic_summary: Optional[Any] = None,
+    symbolic_summary: Any | None = None,
 ) -> HandlerSemantic:
     """Classify a single handler from its native instruction trace.
 
@@ -743,7 +743,7 @@ def _classify_handler(
         effective = taint_sliced
 
     # Build mnemonic histogram.
-    mnemonics: List[str] = []
+    mnemonics: list[str] = []
     for ti in effective:
         mnem = _extract_mnemonic(ti.disassembly)
         if mnem:
@@ -766,7 +766,7 @@ def _classify_handler(
 
     # Score each potential VM operation by how well the mnemonic
     # histogram matches expected patterns.
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
 
     # push/pop are VM stack infrastructure — de-weight them so the
     # "core" operation dominates.  Same for SIMD load/store.
@@ -874,8 +874,8 @@ def _extract_mnemonic(disasm: str) -> str:
 
 
 def _filter_junk(
-    instructions: List[TraceInstruction],
-) -> List[TraceInstruction]:
+    instructions: list[TraceInstruction],
+) -> list[TraceInstruction]:
     """Remove likely junk / opaque-predicate code from a handler slice.
 
     Junk-code patterns common in VM-protected binaries:
@@ -890,7 +890,7 @@ def _filter_junk(
     if not instructions:
         return instructions
 
-    filtered: List[TraceInstruction] = []
+    filtered: list[TraceInstruction] = []
     skip_until_label = False
 
     for i, ti in enumerate(instructions):
@@ -968,9 +968,12 @@ def _mnemonic_to_vm_op(mnem: str, disasm: str = "") -> str:
                 return VMOperation.STORE
             return VMOperation.LOAD
         # Context-dependent resolution for SIMD data-movement
-        if vm_op == VMOperation.SIMD_LOAD and disasm:
-            if _accesses_memory(disasm, "write"):
-                return VMOperation.SIMD_STORE
+        if (
+            vm_op == VMOperation.SIMD_LOAD
+            and disasm
+            and _accesses_memory(disasm, "write")
+        ):
+            return VMOperation.SIMD_STORE
         return vm_op
     if mnem in _JCC_PREFIXES:
         return VMOperation.JCC
@@ -997,7 +1000,10 @@ def _accesses_memory(disasm: str, mode: str) -> bool:
     if is_att:
         # AT&T: source is first, destination is last
         parts = disasm.split(",")
-        has_mem = lambda s: "(" in s and ")" in s
+
+        def has_mem(s: str) -> bool:
+            return "(" in s and ")" in s
+
         if mode == "write" and parts:
             return has_mem(parts[-1])  # AT&T dest is last
         if mode == "read" and parts:
@@ -1014,8 +1020,8 @@ def _accesses_memory(disasm: str, mode: str) -> bool:
 
 
 def _taint_slice(
-    instructions: List[TraceInstruction],
-) -> List[TraceInstruction]:
+    instructions: list[TraceInstruction],
+) -> list[TraceInstruction]:
     """Taint-based semantic slicing of a handler's instructions.
 
     Taints likely VM context registers (rsi/rbp/rdi/esi/ebp/edi) and
@@ -1030,8 +1036,8 @@ def _taint_slice(
 
     try:
         from dragonslayer.analysis.taint_tracking.tracker import (
-            TaintTracker,
             TaintTag,
+            TaintTracker,
         )
     except ImportError:
         return instructions
@@ -1043,8 +1049,8 @@ def _taint_slice(
         mnem = parts[0].lower() if parts else "nop"
         operands = parts[1] if len(parts) > 1 else ""
 
-        reads: List[str] = []
-        writes: List[str] = []
+        reads: list[str] = []
+        writes: list[str] = []
         # Use mnemonic-aware extraction from trace_ingestion module.
         try:
             from .trace_ingestion import _extract_reg_reads_writes
@@ -1076,7 +1082,7 @@ def _taint_slice(
     result = tracker.analyze(lifted)
 
     # Collect addresses of tainted instructions
-    tainted_addrs: Set[int] = set()
+    tainted_addrs: set[int] = set()
     for event in result.events:
         addr = event.get("address", 0) if isinstance(event, dict) else getattr(event, "address", 0)
         if addr:
@@ -1096,7 +1102,7 @@ _COMMON_TAINT_REGS = {
 }
 
 # Precompiled word-boundary patterns for each register (fallback path)
-_TAINT_REG_PATTERNS: Dict[str, re.Pattern[str]] = {
+_TAINT_REG_PATTERNS: dict[str, re.Pattern[str]] = {
     reg: re.compile(r"\b" + re.escape(reg) + r"\b")
     for reg in sorted(_COMMON_TAINT_REGS, key=len, reverse=True)
 }
@@ -1121,18 +1127,18 @@ class _TaintableInstruction:
     mnemonic: str
     operands: str
     category: str
-    reads: List[str] = field(default_factory=list)
-    writes: List[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
 
 
-def _estimate_operands(hist: Dict[str, int]) -> int:
+def _estimate_operands(hist: dict[str, int]) -> int:
     """Estimate the number of VM operands from push/pop usage."""
     pushes = hist.get("push", 0)
     pops = hist.get("pop", 0)
     return max(pushes, pops, 1)
 
 
-def _estimate_width(instructions: List[TraceInstruction]) -> int:
+def _estimate_width(instructions: list[TraceInstruction]) -> int:
     """Estimate operand width from register names in disassembly."""
     for ti in instructions:
         text = ti.disassembly.lower()

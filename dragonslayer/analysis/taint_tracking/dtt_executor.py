@@ -14,9 +14,9 @@ accurate analysis.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .tracker import TaintTracker, TaintTag, TaintResult
+from .tracker import TaintTag, TaintTracker
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +52,9 @@ class DTTExecutor:
         self,
         instructions: list,
         *,
-        taint_sources: Optional[Dict[str, str]] = None,
-        triton_taint_flow: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        taint_sources: dict[str, str] | None = None,
+        triton_taint_flow: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """
         Execute taint tracking with per-instruction snapshots.
 
@@ -90,7 +90,7 @@ class DTTExecutor:
             self._tracker.taint_register(reg, tag)
 
         # --- Seed from Triton taint_flow if provided --------------------
-        triton_seeded: List[str] = []
+        triton_seeded: list[str] = []
         if triton_taint_flow:
             for entry in triton_taint_flow:
                 for reg in entry.get("tainted_regs", []):
@@ -115,7 +115,7 @@ class DTTExecutor:
                         triton_seeded.append(rn)
 
         # Execute with snapshots
-        snapshots: List[Dict[str, Any]] = []
+        snapshots: list[dict[str, Any]] = []
         for insn in instructions:
             # Snapshot before
             state_before = self._tracker.get_state()

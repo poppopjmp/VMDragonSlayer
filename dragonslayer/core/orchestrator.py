@@ -15,38 +15,38 @@ then aggregates everything into a single ``AnalysisResult``.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import logging
 import tempfile
 import time
 import uuid
-import concurrent.futures
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
     Protocol,
-    Sequence,
     TypedDict,
     runtime_checkable,
 )
 
+if TYPE_CHECKING:
+    from ..analysis.pattern_analysis.database import PatternDatabase
+    from ..analysis.pattern_analysis.recognizer import PatternRecognizer
+    from ..api.client import MetroplexGatewayClient
+
+from ..utils.metrics import AnalysisMetrics
 from .config import get_config
 from .exceptions import (
-    AnalysisError,
     AnalysisTimeoutError,
-    ConfigurationError,
     InvalidDataError,
     VMDragonSlayerError,
 )
-from ..utils.metrics import AnalysisMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +66,9 @@ class AnalysisOptionsDict(TypedDict, total=False):
     """Typed options accepted by :class:`AnalysisRequest`."""
 
     timeout: float
-    engines: List[str]
+    engines: list[str]
     depth: int
-    scoring_config: Dict[str, float]
+    scoring_config: dict[str, float]
 
 
 class AnalysisMetadataDict(TypedDict, total=False):
@@ -78,7 +78,7 @@ class AnalysisMetadataDict(TypedDict, total=False):
     content_type: str
     size: int
     source: str
-    tags: List[str]
+    tags: list[str]
 
 
 class AnalysisResultDict(TypedDict):
@@ -87,14 +87,14 @@ class AnalysisResultDict(TypedDict):
     success: bool
     analysis_id: str
     timestamp: str
-    file_info: Dict[str, Any]
+    file_info: dict[str, Any]
     analysis_type: str
-    results: Dict[str, Any]
-    engine_results: List[Dict[str, Any]]
+    results: dict[str, Any]
+    engine_results: list[dict[str, Any]]
     execution_time: float
-    errors: List[str]
-    confidence_scores: Dict[str, float]
-    metrics: Dict[str, Any]
+    errors: list[str]
+    confidence_scores: dict[str, float]
+    metrics: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -152,19 +152,19 @@ class FileInfo:
         sha1: SHA-1 hex digest.
         sha256: SHA-256 hex digest.
     """
-    path: Optional[str] = None
+    path: str | None = None
     size: int = 0
     md5: str = ""
     sha1: str = ""
     sha256: str = ""
 
     @classmethod
-    def from_bytes(cls, data: bytes, path: Optional[str] = None) -> "FileInfo":
+    def from_bytes(cls, data: bytes, path: str | None = None) -> FileInfo:
         return cls(
             path=path,
             size=len(data),
-            md5=hashlib.md5(data).hexdigest(),
-            sha1=hashlib.sha1(data).hexdigest(),
+            md5=hashlib.md5(data, usedforsecurity=False).hexdigest(),
+            sha1=hashlib.sha1(data, usedforsecurity=False).hexdigest(),
             sha256=hashlib.sha256(data).hexdigest(),
         )
 
@@ -174,9 +174,9 @@ class AnalysisRequest:
     """Immutable description of *what* to analyse and *how*."""
     binary_data: bytes
     analysis_type: AnalysisType = AnalysisType.HYBRID
-    options: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    file_info: Optional[FileInfo] = None
+    options: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    file_info: FileInfo | None = None
 
     def __post_init__(self) -> None:
         if not self.binary_data:
@@ -195,8 +195,8 @@ class EngineResult:
     """Output from one analysis engine or plugin."""
     engine: str
     success: bool
-    data: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    data: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
     duration: float = 0.0
     confidence: float = 0.0
 
@@ -233,14 +233,14 @@ class AnalysisResult:
     success: bool
     analysis_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    file_info: Dict[str, Any] = field(default_factory=dict)
+    file_info: dict[str, Any] = field(default_factory=dict)
     analysis_type: str = ""
-    results: Dict[str, Any] = field(default_factory=dict)
-    engine_results: List[EngineResult] = field(default_factory=list)
+    results: dict[str, Any] = field(default_factory=dict)
+    engine_results: list[EngineResult] = field(default_factory=list)
     execution_time: float = 0.0
-    errors: List[str] = field(default_factory=list)
-    confidence_scores: Dict[str, float] = field(default_factory=dict)
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    confidence_scores: dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> AnalysisResultDict:
         d = asdict(self)
@@ -264,7 +264,7 @@ class _EngineRegistry:
     # -- Pattern Analysis (local, always available) -------------------------
 
     @property
-    def pattern_db(self) -> "PatternDatabase":
+    def pattern_db(self) -> PatternDatabase:
         """Return the lazily-loaded :class:`PatternDatabase` instance."""
         if self._pattern_db is None:
             from ..analysis.pattern_analysis.database import PatternDatabase
@@ -286,7 +286,7 @@ class _EngineRegistry:
         return self._pattern_db
 
     @property
-    def pattern_recognizer(self) -> "PatternRecognizer":
+    def pattern_recognizer(self) -> PatternRecognizer:
         """Return the lazily-loaded :class:`PatternRecognizer` instance."""
         if self._pattern_recognizer is None:
             from ..analysis.pattern_analysis.recognizer import PatternRecognizer
@@ -296,7 +296,7 @@ class _EngineRegistry:
     # -- Metroplex Gateway client -------------------------------------------
 
     @property
-    def gateway_client(self) -> "MetroplexGatewayClient":
+    def gateway_client(self) -> MetroplexGatewayClient:
         """Return the lazily-created :class:`MetroplexGatewayClient`."""
         if self._gateway_client is None:
             from ..api.client import MetroplexGatewayClient
@@ -318,7 +318,7 @@ class _EngineRegistry:
 # ---------------------------------------------------------------------------
 
 # Maps composite analysis types → the individual engines they expand to.
-_COMPOSITE_TYPES: Dict[AnalysisType, List[str]] = {
+_COMPOSITE_TYPES: dict[AnalysisType, list[str]] = {
     AnalysisType.HYBRID: ["pattern_analysis", "vm_discovery"],
     AnalysisType.FULL_ANALYSIS: [
         "pattern_analysis",
@@ -371,7 +371,7 @@ class Orchestrator:
         result = orch.analyze_binary(binary_data, AnalysisType.HYBRID)
     """
 
-    def __init__(self, config: Optional[Any] = None) -> None:
+    def __init__(self, config: Any | None = None) -> None:
         self.config = config or get_config()
         self._engines = _EngineRegistry()
         self._executor = ThreadPoolExecutor(
@@ -382,7 +382,7 @@ class Orchestrator:
 
     # B64: Context-manager protocol ------------------------------------------
 
-    def __enter__(self) -> "Orchestrator":
+    def __enter__(self) -> Orchestrator:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
@@ -391,7 +391,7 @@ class Orchestrator:
 
     # B68: Async context manager ---------------------------------------------
 
-    async def __aenter__(self) -> "Orchestrator":
+    async def __aenter__(self) -> Orchestrator:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
@@ -407,8 +407,8 @@ class Orchestrator:
         binary_data: bytes,
         analysis_type: AnalysisType | str = AnalysisType.HYBRID,
         *,
-        options: Dict[str, Any] | None = None,
-        metadata: Dict[str, Any] | None = None,
+        options: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AnalysisResult:
         """Synchronous analysis — the main entry point."""
         request = AnalysisRequest(
@@ -424,8 +424,8 @@ class Orchestrator:
         binary_data: bytes,
         analysis_type: AnalysisType | str = AnalysisType.HYBRID,
         *,
-        options: Dict[str, Any] | None = None,
-        metadata: Dict[str, Any] | None = None,
+        options: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AnalysisResult:
         """Async wrapper that runs the synchronous dispatch in a thread."""
         loop = asyncio.get_running_loop()
@@ -475,8 +475,8 @@ class Orchestrator:
             fut = self._executor.submit(_run_engine)
             futures[fut] = engine_name
 
-        engine_results: List[EngineResult] = []
-        errors: List[str] = []
+        engine_results: list[EngineResult] = []
+        errors: list[str] = []
         timeout = self.config.get("analysis.timeout", 1800)
 
         try:
@@ -510,8 +510,8 @@ class Orchestrator:
         elapsed = time.monotonic() - t0
 
         # Aggregate
-        combined_results: Dict[str, Any] = {}
-        confidence_scores: Dict[str, float] = {}
+        combined_results: dict[str, Any] = {}
+        confidence_scores: dict[str, float] = {}
         for er in engine_results:
             combined_results[er.engine] = er.data
             if er.confidence > 0:
@@ -549,7 +549,6 @@ class Orchestrator:
             PipelineConfig,
             create_full_pipeline,
             create_vmprotect_devirt_pipeline,
-            create_quick_scan_pipeline,
         )
 
         self.metrics = AnalysisMetrics()  # fresh metrics per pipeline run
@@ -603,7 +602,7 @@ class Orchestrator:
                     "limit_seconds": pipeline_timeout,
                     "analysis_type": request.analysis_type.value,
                 },
-            )
+            ) from None
         except _ENGINE_ERRORS as exc:
             elapsed = time.monotonic() - t0
             logger.exception("Pipeline failed")
@@ -619,10 +618,10 @@ class Orchestrator:
             )
 
         # Convert PipelineResult → AnalysisResult for API compatibility
-        engine_results: List[EngineResult] = []
-        combined_results: Dict[str, Any] = {}
-        confidence_scores: Dict[str, float] = {}
-        errors: List[str] = pipe_result.errors[:]
+        engine_results: list[EngineResult] = []
+        combined_results: dict[str, Any] = {}
+        confidence_scores: dict[str, float] = {}
+        errors: list[str] = pipe_result.errors[:]
 
         for sr in pipe_result.stages:
             er = EngineResult(
@@ -660,14 +659,14 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_engines(analysis_type: AnalysisType) -> List[str]:
+    def _resolve_engines(analysis_type: AnalysisType) -> list[str]:
         """Expand a composite analysis type into individual engine names."""
         if analysis_type in _COMPOSITE_TYPES:
             return list(_COMPOSITE_TYPES[analysis_type])
         # Single-engine types map 1-to-1
         return [analysis_type.value]
 
-    def _get_engine_handler(self, engine_name: str) -> Optional[EngineHandler]:
+    def _get_engine_handler(self, engine_name: str) -> EngineHandler | None:
         """Return a callable ``(AnalysisRequest) → EngineResult`` or *None*."""
         handlers = {
             "pattern_analysis": self._run_pattern_analysis,
@@ -698,7 +697,7 @@ class Orchestrator:
     @staticmethod
     def _run_engine_safe(
         engine_name: str,
-        fn: Callable[[], tuple[Dict[str, Any], float]],
+        fn: Callable[[], tuple[dict[str, Any], float]],
     ) -> EngineResult:
         """Run *fn* with timing and fault-tolerance.
 
@@ -735,7 +734,7 @@ class Orchestrator:
         ``PatternRecognizer.recognize()`` expects a hex-encoded string, not
         raw ``bytes``.  We convert here so the caller doesn't need to know.
         """
-        def _do() -> tuple[Dict[str, Any], float]:
+        def _do() -> tuple[dict[str, Any], float]:
             recognizer = self._engines.pattern_recognizer
             hex_str = request.binary_data.hex().upper()
             matches = recognizer.recognize(hex_str)
@@ -768,7 +767,7 @@ class Orchestrator:
 
     def _run_vm_discovery(self, request: AnalysisRequest) -> EngineResult:
         """VM-presence detection delegated to the canonical VMDetector."""
-        def _do() -> tuple[Dict[str, Any], float]:
+        def _do() -> tuple[dict[str, Any], float]:
             from ..analysis.vm_discovery.detector import VMDetector
             detector = VMDetector()
             result = detector.detect(request.binary_data)
@@ -794,7 +793,7 @@ class Orchestrator:
         into a single :class:`EngineResult` whose ``data`` dict maps plugin
         names to their individual ``PluginResult.to_dict()`` output.
         """
-        from ..plugins import Stage, PluginContext, get_all_plugins
+        from ..plugins import PluginContext, get_all_plugins
         from ..plugins._storage import create_storage
 
         t0 = time.monotonic()
@@ -824,7 +823,7 @@ class Orchestrator:
                 )
 
                 file_path = request.metadata.get("filename", "")
-                plugin_results: Dict[str, Any] = {}
+                plugin_results: dict[str, Any] = {}
                 total_confidence = 0.0
                 successes = 0
 
@@ -903,11 +902,11 @@ class Orchestrator:
         self,
         request: AnalysisRequest,
         *,
-        plugins: Optional[List[str]],
-        stage: Optional[int],
+        plugins: list[str] | None,
+        stage: int | None,
         label: str,
     ) -> EngineResult:
-        def _do() -> tuple[Dict[str, Any], float]:
+        def _do() -> tuple[dict[str, Any], float]:
             client = self._engines.gateway_client
             gw_response = client.scan(
                 file_bytes=request.binary_data,
@@ -931,7 +930,7 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def get_supported_analysis_types() -> List[str]:
+    def get_supported_analysis_types() -> list[str]:
         return [t.value for t in AnalysisType]
 
     def shutdown(self) -> None:
@@ -967,7 +966,7 @@ class VMDragonSlayerAPI:
         self,
         binary_data: bytes,
         analysis_type: str = "hybrid",
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         **options: Any,
     ) -> AnalysisResultDict:
         """Analyse *binary_data* and return a structured result dict.
@@ -994,7 +993,7 @@ class VMDragonSlayerAPI:
         self,
         binary_data: bytes,
         analysis_type: str = "hybrid",
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         **options: Any,
     ) -> AnalysisResultDict:
         """Async variant that offloads analysis to a thread.
@@ -1014,12 +1013,12 @@ class VMDragonSlayerAPI:
         self,
         binary_data: bytes,
         *,
-        stages: List[str] | None = None,
+        stages: list[str] | None = None,
         llm_enabled: bool = True,
         max_workers: int = 4,
         timeout: float = 600,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Run the configurable analysis pipeline.
 
         Unlike :meth:`analyze_binary_data` which always runs the
@@ -1046,7 +1045,7 @@ class VMDragonSlayerAPI:
         """
         from ..core.pipeline import AnalysisPipeline, PipelineConfig
 
-        config_kwargs: Dict[str, Any] = {
+        config_kwargs: dict[str, Any] = {
             "llm_enabled": llm_enabled,
             "max_workers": max_workers,
             "timeout": timeout,
@@ -1067,12 +1066,12 @@ class VMDragonSlayerAPI:
         self,
         binary_data: bytes,
         *,
-        stages: List[str] | None = None,
+        stages: list[str] | None = None,
         llm_enabled: bool = True,
         max_workers: int = 4,
         timeout: float = 600,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Async variant of :meth:`run_pipeline`.
 
         Offloads pipeline execution to a thread to avoid blocking
@@ -1091,5 +1090,5 @@ class VMDragonSlayerAPI:
         )
 
     @staticmethod
-    def get_supported_analysis_types() -> List[str]:
+    def get_supported_analysis_types() -> list[str]:
         return Orchestrator.get_supported_analysis_types()

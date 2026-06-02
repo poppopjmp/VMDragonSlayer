@@ -25,18 +25,16 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
     TraceInstruction,
-    TraceMemoryAccess,
-    TraceControlFlow,
-    HandlerMarker,
-    parse_trace_text,
     from_shared_data,
+    parse_trace_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,8 +84,8 @@ class TraceConfig:
     capture_registers: bool = True
     capture_memory: bool = True
     timeout_seconds: float = 60.0
-    entry_point: Optional[int] = None
-    memory_map: Dict[int, int] = field(default_factory=dict)
+    entry_point: int | None = None
+    memory_map: dict[int, int] = field(default_factory=dict)
 
     def validate(self) -> list[str]:
         """Return a list of validation errors (empty = valid)."""
@@ -115,14 +113,14 @@ class CollectionResult:
     backend: str
     elapsed_seconds: float
     truncated: bool = False
-    error: Optional[str] = None
-    config: Optional[TraceConfig] = None
+    error: str | None = None
+    config: TraceConfig | None = None
 
     @property
     def success(self) -> bool:
         return self.error is None and len(self.trace.instructions) > 0
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return a JSON-serialisable summary."""
         return {
             "backend": self.backend,
@@ -305,7 +303,7 @@ def _collect_via_plugin(
     Falls back to :func:`_collect_external_stub` when the plugin is
     unavailable (dependency not installed).
     """
-    from dragonslayer.plugins import get_all_plugins, PluginContext, Stage
+    from dragonslayer.plugins import PluginContext, Stage, get_all_plugins
 
     # Map backend → plugin name
     _backend_name = {
@@ -366,7 +364,7 @@ def _collect_via_plugin(
 # ═══════════════════════════════════════════════════════════════════════════
 
 def collect_trace_from_plugin(
-    shared_data: Dict[str, Any],
+    shared_data: dict[str, Any],
     plugin: str = "auto",
 ) -> CollectionResult:
     """Build an :class:`ExecutionTrace` from plugin-provided shared_data.
@@ -387,9 +385,9 @@ def collect_trace_from_plugin(
     CollectionResult
     """
     from dragonslayer.analysis.trace_ingestion import (
-        from_triton_result,
         from_angr_result,
         from_qiling_result,
+        from_triton_result,
     )
 
     t0 = time.monotonic()
@@ -427,7 +425,7 @@ def collect_trace_from_plugin(
         )
 
 
-def _infer_plugin(shared_data: Dict[str, Any]) -> str:
+def _infer_plugin(shared_data: dict[str, Any]) -> str:
     """Infer the plugin source from shared_data keys."""
     if "triton" in shared_data or "taint_flow" in shared_data:
         return "triton"
@@ -487,7 +485,7 @@ def collect_trace_from_file(
 def filter_trace(
     trace: ExecutionTrace,
     *,
-    address_range: Tuple[int, int] | None = None,
+    address_range: tuple[int, int] | None = None,
     max_instructions: int | None = None,
     include_mnemonics: Sequence[str] | None = None,
     exclude_mnemonics: Sequence[str] | None = None,
@@ -510,7 +508,7 @@ def filter_trace(
     ExecutionTrace
         New filtered trace (original is not mutated).
     """
-    instrs: List[TraceInstruction] = list(trace.instructions)
+    instrs: list[TraceInstruction] = list(trace.instructions)
 
     if address_range is not None:
         lo, hi = address_range
@@ -533,10 +531,7 @@ def filter_trace(
     if max_instructions is not None:
         instrs = instrs[:max_instructions]
 
-    # Filter memory accesses and control flow to match kept addresses
-    kept_addrs = {i.address for i in instrs}
-
-    mem = [m for m in trace.memory_accesses if m.address in kept_addrs or True]
+    mem = list(trace.memory_accesses)
     cf = list(trace.control_flow)
     if address_range is not None:
         lo, hi = address_range
@@ -544,10 +539,7 @@ def filter_trace(
 
     return ExecutionTrace(
         instructions=instrs,
-        memory_accesses=mem if address_range is None else [
-            m for m in trace.memory_accesses
-            # Memory accesses relate to instruction addresses; keep on overlap.
-        ],
+        memory_accesses=mem if address_range is None else list(trace.memory_accesses),
         control_flow=cf,
         handlers=list(trace.handlers),
         metadata={**trace.metadata, "filtered": True},
@@ -574,7 +566,7 @@ def merge_traces(*traces: ExecutionTrace) -> ExecutionTrace:
     return merged
 
 
-def trace_statistics(trace: ExecutionTrace) -> Dict[str, Any]:
+def trace_statistics(trace: ExecutionTrace) -> dict[str, Any]:
     """Compute summary statistics for a trace.
 
     Returns a JSON-serialisable dict with instruction distribution,

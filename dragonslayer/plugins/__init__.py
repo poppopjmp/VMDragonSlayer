@@ -32,9 +32,9 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from dragonslayer.api.storage import StorageBackend
@@ -75,8 +75,8 @@ class PluginResultDict(TypedDict):
 
     plugin: str
     success: bool
-    data: Dict[str, Any]
-    error: Optional[str]
+    data: dict[str, Any]
+    error: str | None
     duration: float
     confidence: float
 
@@ -95,8 +95,8 @@ class PluginResult:
     """
     plugin: str
     success: bool
-    data: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    data: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
     duration: float = 0.0
     confidence: float = 0.0
 
@@ -124,8 +124,8 @@ class PluginContext:
         Writable directory for temporary artefacts.
     """
     storage: StorageBackend | None = None
-    config: Dict[str, Any] = field(default_factory=dict)
-    shared_data: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
+    shared_data: dict[str, Any] = field(default_factory=dict)
     sample_hash: str = ""
     work_dir: str = ""
 
@@ -142,7 +142,7 @@ class PluginContext:
         with self._lock:
             return self.shared_data.get(key, default)
 
-    def update_shared(self, mapping: Dict[str, Any]) -> None:
+    def update_shared(self, mapping: dict[str, Any]) -> None:
         """Thread-safe bulk update of ``shared_data``."""
         with self._lock:
             self.shared_data.update(mapping)
@@ -206,7 +206,7 @@ class Plugin(ABC):
     def _make_result(
         self,
         success: bool,
-        data: Dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
         error: str | None = None,
         duration: float = 0.0,
         confidence: float = 0.0,
@@ -298,10 +298,10 @@ class Plugin(ABC):
 # Plugin registry
 # ---------------------------------------------------------------------------
 
-_REGISTRY: Dict[str, Type[Plugin]] = {}
+_REGISTRY: dict[str, type[Plugin]] = {}
 
 
-def register_plugin(cls: Type[Plugin]) -> Type[Plugin]:
+def register_plugin(cls: type[Plugin]) -> type[Plugin]:
     """Class decorator: register *cls* in the global plugin registry."""
     if not cls.name:
         raise ValueError(f"{cls.__qualname__} must set a 'name' class attribute")
@@ -325,7 +325,7 @@ def get_plugin(name: str) -> Plugin | None:
     return cls()
 
 
-def list_plugins(stage: Stage | None = None, available_only: bool = True) -> List[str]:
+def list_plugins(stage: Stage | None = None, available_only: bool = True) -> list[str]:
     """Return names of registered plugins, optionally filtered by stage."""
     _ensure_discovered()
     out: list[str] = []
@@ -338,7 +338,7 @@ def list_plugins(stage: Stage | None = None, available_only: bool = True) -> Lis
     return out
 
 
-def get_all_plugins(stage: Stage | None = None, available_only: bool = True) -> List[Plugin]:
+def get_all_plugins(stage: Stage | None = None, available_only: bool = True) -> list[Plugin]:
     """Return instantiated plugin objects."""
     plugins: list[Plugin] = []
     for name in list_plugins(stage=stage, available_only=available_only):
@@ -355,7 +355,7 @@ def get_all_plugins(stage: Stage | None = None, available_only: bool = True) -> 
 
 def validate_plugin_dependencies(
     stage: Stage | None = None,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """Check that every plugin's ``depends_on`` names are satisfiable.
 
     Returns a mapping of ``{plugin_name: [missing_dep_names]}`` for
@@ -364,7 +364,7 @@ def validate_plugin_dependencies(
     """
     _ensure_discovered()
     available_names = set(list_plugins(stage=stage, available_only=True))
-    problems: Dict[str, List[str]] = {}
+    problems: dict[str, list[str]] = {}
     for name in available_names:
         cls = _REGISTRY.get(name)
         if cls is None:
@@ -375,7 +375,7 @@ def validate_plugin_dependencies(
     return problems
 
 
-def sort_plugins_by_deps(plugins: List[Plugin]) -> List[Plugin]:
+def sort_plugins_by_deps(plugins: list[Plugin]) -> list[Plugin]:
     """Topological sort of *plugins* respecting ``depends_on``.
 
     Plugins with no dependencies come first.  If a cycle is detected
@@ -388,8 +388,8 @@ def sort_plugins_by_deps(plugins: List[Plugin]) -> List[Plugin]:
     available = set(name_to_plugin.keys())
 
     # Kahn's algorithm
-    in_degree: Dict[str, int] = {p.name: 0 for p in plugins}
-    dependents: Dict[str, List[str]] = {p.name: [] for p in plugins}
+    in_degree: dict[str, int] = {p.name: 0 for p in plugins}
+    dependents: dict[str, list[str]] = {p.name: [] for p in plugins}
     for p in plugins:
         for dep in p.depends_on:
             if dep in available:

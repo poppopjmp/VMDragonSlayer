@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
+from typing import TypedDict
 
 try:
     import networkx as nx
@@ -37,7 +37,6 @@ except ImportError:  # pragma: no cover
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
     TraceInstruction,
-    TraceControlFlow,
 )
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
     HandlerBoundary,
@@ -58,7 +57,7 @@ class BasicBlock:
     start_address: int
     end_address: int
     instruction_count: int = 0
-    addresses: List[int] = field(default_factory=list)
+    addresses: list[int] = field(default_factory=list)
 
     @property
     def size(self) -> int:
@@ -75,8 +74,8 @@ class CFGStatsDict(TypedDict):
     back_edge_count: int
     loop_count: int
     strongly_connected_components: int
-    entry_points: List[str]
-    exit_points: List[str]
+    entry_points: list[str]
+    exit_points: list[str]
 
 
 @dataclass
@@ -98,8 +97,8 @@ class CFGStats:
     back_edge_count: int = 0
     loop_count: int = 0
     strongly_connected_components: int = 0
-    entry_points: List[int] = field(default_factory=list)
-    exit_points: List[int] = field(default_factory=list)
+    entry_points: list[int] = field(default_factory=list)
+    exit_points: list[int] = field(default_factory=list)
 
     def to_dict(self) -> CFGStatsDict:
         return {
@@ -121,7 +120,7 @@ def build_instruction_cfg(
     trace: ExecutionTrace,
     *,
     include_fallthrough: bool = True,
-) -> "nx.DiGraph":
+) -> nx.DiGraph:
     """Build an instruction-level CFG from an execution trace.
 
     Nodes are unique instruction addresses.  Edges are observed
@@ -146,7 +145,7 @@ def build_instruction_cfg(
     G: nx.DiGraph = nx.DiGraph()
 
     # ---- nodes from instructions ----------------------------------------
-    seen: Dict[int, TraceInstruction] = {}
+    seen: dict[int, TraceInstruction] = {}
     for ti in trace.instructions:
         if ti.address not in seen:
             seen[ti.address] = ti
@@ -186,7 +185,7 @@ def build_instruction_cfg(
 # Basic-block recovery
 # ---------------------------------------------------------------------------
 
-def extract_basic_blocks(G: "nx.DiGraph") -> List[BasicBlock]:
+def extract_basic_blocks(G: nx.DiGraph) -> list[BasicBlock]:
     """Extract basic blocks from an instruction-level CFG.
 
     A basic block starts at a node that is an entry point, a branch
@@ -197,7 +196,7 @@ def extract_basic_blocks(G: "nx.DiGraph") -> List[BasicBlock]:
         raise RuntimeError("networkx is required")
 
     # Identify block leaders.
-    leaders: Set[int] = set()
+    leaders: set[int] = set()
     nodes = sorted(G.nodes)
     if nodes:
         leaders.add(nodes[0])
@@ -217,7 +216,7 @@ def extract_basic_blocks(G: "nx.DiGraph") -> List[BasicBlock]:
 
     # Build blocks by sorting leaders and grouping nodes.
     sorted_leaders = sorted(leaders)
-    blocks: List[BasicBlock] = []
+    blocks: list[BasicBlock] = []
     all_nodes_sorted = sorted(G.nodes)
 
     for i, leader in enumerate(sorted_leaders):
@@ -241,8 +240,8 @@ def extract_basic_blocks(G: "nx.DiGraph") -> List[BasicBlock]:
 # ---------------------------------------------------------------------------
 
 def build_handler_cfg(
-    boundaries: List[HandlerBoundary],
-) -> "nx.DiGraph":
+    boundaries: list[HandlerBoundary],
+) -> nx.DiGraph:
     """Build a handler-level CFG from segmentation boundaries.
 
     Each node represents one handler invocation (keyed by index).
@@ -266,7 +265,7 @@ def build_handler_cfg(
         G.add_edge(i, i + 1, type="sequential")
 
     # Detect back-edges (repeated handler addresses → potential loops).
-    addr_first: Dict[int, int] = {}
+    addr_first: dict[int, int] = {}
     for i, b in enumerate(boundaries):
         if b.handler_address in addr_first:
             first_idx = addr_first[b.handler_address]
@@ -282,7 +281,7 @@ def build_handler_cfg(
 # CFG analysis helpers
 # ---------------------------------------------------------------------------
 
-def analyse_cfg(G: "nx.DiGraph") -> CFGStats:
+def analyse_cfg(G: nx.DiGraph) -> CFGStats:
     """Compute summary statistics for a CFG."""
     if not NX_AVAILABLE:
         raise RuntimeError("networkx is required")
@@ -315,9 +314,9 @@ def analyse_cfg(G: "nx.DiGraph") -> CFGStats:
 
 
 def find_dominators(
-    G: "nx.DiGraph",
-    entry: Optional[int] = None,
-) -> Dict[int, int]:
+    G: nx.DiGraph,
+    entry: int | None = None,
+) -> dict[int, int]:
     """Return the immediate dominator map {node: idom}.
 
     If *entry* is ``None``, the first entry point (in-degree 0) is used.
@@ -328,8 +327,5 @@ def find_dominators(
         return {}
     if entry is None:
         entries = [n for n in G.nodes if G.in_degree(n) == 0]
-        if not entries:
-            entry = min(G.nodes)
-        else:
-            entry = min(entries)
+        entry = min(G.nodes) if not entries else min(entries)
     return nx.immediate_dominators(G, entry)

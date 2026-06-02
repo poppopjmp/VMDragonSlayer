@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -86,10 +86,10 @@ class MetroplexGatewayClient:
         file_bytes: bytes,
         filename: str = "sample.bin",
         *,
-        plugins: Optional[List[str]] = None,
-        stage: Optional[int] = None,
-        timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        plugins: list[str] | None = None,
+        stage: int | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """
         Upload *file_bytes* to the gateway and return the aggregated result.
 
@@ -101,7 +101,7 @@ class MetroplexGatewayClient:
                 status_code=413,
             )
 
-        params: Dict[str, str] = {}
+        params: dict[str, str] = {}
         if plugins:
             params["plugins"] = ",".join(plugins)
         if stage is not None:
@@ -118,11 +118,11 @@ class MetroplexGatewayClient:
             with httpx.Client(verify=self.verify_ssl, timeout=effective_timeout + 10) as client:
                 resp = client.post(url, files=files, params=params)
         except httpx.TimeoutException as exc:
-            raise GatewayError(f"Gateway request timed out after {effective_timeout}s: {exc}")
+            raise GatewayError(f"Gateway request timed out after {effective_timeout}s: {exc}") from exc
         except httpx.ConnectError as exc:
-            raise GatewayError(f"Cannot connect to gateway at {url}: {exc}")
+            raise GatewayError(f"Cannot connect to gateway at {url}: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise NetworkError(f"HTTP error communicating with gateway: {exc}")
+            raise NetworkError(f"HTTP error communicating with gateway: {exc}") from exc
 
         if resp.status_code != 200:
             raise APIError(
@@ -133,7 +133,7 @@ class MetroplexGatewayClient:
         try:
             return resp.json()
         except (ValueError, TypeError) as exc:
-            raise APIError(f"Gateway returned non-JSON response: {exc}")
+            raise APIError(f"Gateway returned non-JSON response: {exc}") from exc
 
     def scan_plugin(
         self,
@@ -141,8 +141,8 @@ class MetroplexGatewayClient:
         file_bytes: bytes,
         filename: str = "sample.bin",
         *,
-        timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """
         Send a sample directly to one plugin, bypassing the gateway.
 
@@ -157,11 +157,11 @@ class MetroplexGatewayClient:
             with httpx.Client(verify=self.verify_ssl, timeout=effective_timeout + 10) as client:
                 resp = client.post(url, files=files)
         except httpx.TimeoutException as exc:
-            raise GatewayError(f"Plugin {plugin_name} timed out: {exc}")
+            raise GatewayError(f"Plugin {plugin_name} timed out: {exc}") from exc
         except httpx.ConnectError as exc:
-            raise GatewayError(f"Cannot connect to plugin {plugin_name} at {url}: {exc}")
+            raise GatewayError(f"Cannot connect to plugin {plugin_name} at {url}: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise NetworkError(f"HTTP error talking to {plugin_name}: {exc}")
+            raise NetworkError(f"HTTP error talking to {plugin_name}: {exc}") from exc
 
         if resp.status_code != 200:
             raise APIError(
@@ -172,9 +172,9 @@ class MetroplexGatewayClient:
         try:
             return resp.json()
         except (ValueError, TypeError) as exc:
-            raise APIError(f"Plugin {plugin_name} returned non-JSON response: {exc}")
+            raise APIError(f"Plugin {plugin_name} returned non-JSON response: {exc}") from exc
 
-    def list_plugins(self) -> List[Dict[str, Any]]:
+    def list_plugins(self) -> list[dict[str, Any]]:
         """``GET /plugins`` — list all registered plugin endpoints."""
         url = f"{self.gateway_url}/plugins"
         try:
@@ -183,9 +183,9 @@ class MetroplexGatewayClient:
             resp.raise_for_status()
             return resp.json()
         except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
-            raise GatewayError(f"Failed to list plugins: {exc}")
+            raise GatewayError(f"Failed to list plugins: {exc}") from exc
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """``GET /health`` — gateway health check."""
         url = f"{self.gateway_url}/health"
         try:
@@ -194,7 +194,7 @@ class MetroplexGatewayClient:
             resp.raise_for_status()
             return resp.json()
         except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
-            raise GatewayError(f"Gateway health check failed: {exc}")
+            raise GatewayError(f"Gateway health check failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +224,7 @@ class APIClient:
         binary_data: bytes,
         analysis_type: str = "hybrid",
         **options: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """``POST /upload-analyze`` — multipart file upload."""
         url = f"{self.base_url}/upload-analyze"
         files = {"file": ("sample.bin", io.BytesIO(binary_data), "application/octet-stream")}
@@ -234,9 +234,9 @@ class APIClient:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(url, files=files, params=params)
         except httpx.TimeoutException as exc:
-            raise NetworkError(f"Timed out connecting to {url}: {exc}")
+            raise NetworkError(f"Timed out connecting to {url}: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise NetworkError(f"HTTP error: {exc}")
+            raise NetworkError(f"HTTP error: {exc}") from exc
 
         if resp.status_code != 200:
             raise APIError(
@@ -245,7 +245,7 @@ class APIClient:
             )
         return resp.json()
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """``GET /health``."""
         url = f"{self.base_url}/health"
         with httpx.Client(timeout=5) as client:
@@ -253,7 +253,7 @@ class APIClient:
         resp.raise_for_status()
         return resp.json()
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         """``GET /status``."""
         url = f"{self.base_url}/status"
         with httpx.Client(timeout=5) as client:

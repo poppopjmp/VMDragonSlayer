@@ -22,7 +22,14 @@ from __future__ import annotations
 import logging
 import struct
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+
+from dragonslayer.analysis.trace_ingestion import (
+    ExecutionTrace,
+    TraceControlFlow,
+    TraceInstruction,
+    TraceMemoryAccess,
+)
+from dragonslayer.core.disassembler import create_disassembler as _create_disasm
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +38,42 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 try:
     from unicorn import (
-        Uc, UC_ARCH_X86, UC_MODE_32, UC_MODE_64,
-        UC_HOOK_CODE, UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE,
-        UC_HOOK_MEM_UNMAPPED, UC_MEM_WRITE, UC_MEM_READ,
+        UC_ARCH_X86,
+        UC_HOOK_CODE,
+        UC_HOOK_MEM_READ,
+        UC_HOOK_MEM_UNMAPPED,
+        UC_HOOK_MEM_WRITE,
+        UC_MODE_32,
+        UC_MODE_64,
+        Uc,
     )
     from unicorn.x86_const import (
-        UC_X86_REG_RAX, UC_X86_REG_RBX, UC_X86_REG_RCX, UC_X86_REG_RDX,
-        UC_X86_REG_RSI, UC_X86_REG_RDI, UC_X86_REG_RBP, UC_X86_REG_RSP,
-        UC_X86_REG_R8, UC_X86_REG_R9, UC_X86_REG_R10, UC_X86_REG_R11,
-        UC_X86_REG_R12, UC_X86_REG_R13, UC_X86_REG_R14, UC_X86_REG_R15,
-        UC_X86_REG_RIP,
-        UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX,
-        UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP, UC_X86_REG_ESP,
+        UC_X86_REG_EAX,
+        UC_X86_REG_EBP,
+        UC_X86_REG_EBX,
+        UC_X86_REG_ECX,
+        UC_X86_REG_EDI,
+        UC_X86_REG_EDX,
         UC_X86_REG_EIP,
+        UC_X86_REG_ESI,
+        UC_X86_REG_ESP,
+        UC_X86_REG_R8,
+        UC_X86_REG_R9,
+        UC_X86_REG_R10,
+        UC_X86_REG_R11,
+        UC_X86_REG_R12,
+        UC_X86_REG_R13,
+        UC_X86_REG_R14,
+        UC_X86_REG_R15,
+        UC_X86_REG_RAX,
+        UC_X86_REG_RBP,
+        UC_X86_REG_RBX,
+        UC_X86_REG_RCX,
+        UC_X86_REG_RDI,
+        UC_X86_REG_RDX,
+        UC_X86_REG_RIP,
+        UC_X86_REG_RSI,
+        UC_X86_REG_RSP,
     )
     UNICORN_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -57,20 +87,10 @@ if UNICORN_AVAILABLE:
     _UC_ERRORS = (*_UC_ERRORS, UcError)
 
 try:
-    import capstone  # type: ignore[import-untyped]
+    import capstone  # type: ignore[import-untyped]  # noqa: F401  (availability probe)
     CAPSTONE_AVAILABLE = True
 except ImportError:
     CAPSTONE_AVAILABLE = False
-
-from dragonslayer.core.disassembler import create_disassembler as _create_disasm
-
-from dragonslayer.analysis.trace_ingestion import (
-    ExecutionTrace,
-    TraceInstruction,
-    TraceMemoryAccess,
-    TraceControlFlow,
-)
-
 
 # ---------------------------------------------------------------------------
 # Disassembler helper — delegates to unified Disassembler
@@ -82,7 +102,7 @@ def _make_disassembler(arch: str):
     return _create_disasm(arch_str)
 
 
-def _disassemble_one(dis, code: bytes, address: int) -> Tuple[str, int]:
+def _disassemble_one(dis, code: bytes, address: int) -> tuple[str, int]:
     """Disassemble one instruction, return (disasm_text, size)."""
     if dis is not None:
         return dis.disassemble_to_text(code, address)
@@ -136,7 +156,7 @@ class TraceConfig:
     stack_address: int = 0       # 0 = use default for arch
     stack_size: int = _STACK_SIZE
     auto_map_unmapped: bool = True
-    stop_addresses: List[int] = field(default_factory=list)
+    stop_addresses: list[int] = field(default_factory=list)
 
 
 class TraceEngine:
@@ -153,7 +173,7 @@ class TraceEngine:
         Optional configuration.  Uses defaults when ``None``.
     """
 
-    def __init__(self, arch: str = "x86_64", config: Optional[TraceConfig] = None) -> None:
+    def __init__(self, arch: str = "x86_64", config: TraceConfig | None = None) -> None:
         if not UNICORN_AVAILABLE:
             raise RuntimeError(
                 "Unicorn engine is required for TraceEngine. "
@@ -172,12 +192,12 @@ class TraceEngine:
         self._bit_width = 64 if self._is_64 else 32
 
         # Trace buffers (populated by hooks)
-        self._instructions: List[TraceInstruction] = []
-        self._mem_accesses: List[TraceMemoryAccess] = []
-        self._control_flow: List[TraceControlFlow] = []
+        self._instructions: list[TraceInstruction] = []
+        self._mem_accesses: list[TraceMemoryAccess] = []
+        self._control_flow: list[TraceControlFlow] = []
         self._insn_count = 0
-        self._prev_addr: Optional[int] = None
-        self._mapped_regions: List[Tuple[int, int]] = []
+        self._prev_addr: int | None = None
+        self._mapped_regions: list[tuple[int, int]] = []
 
     @staticmethod
     def available() -> bool:
@@ -194,8 +214,8 @@ class TraceEngine:
         entry_va: int,
         *,
         image_base: int = 0x400000,
-        max_insns: Optional[int] = None,
-        initial_regs: Optional[Dict[str, int]] = None,
+        max_insns: int | None = None,
+        initial_regs: dict[str, int] | None = None,
     ) -> ExecutionTrace:
         """Produce an execution trace from raw binary content.
 
@@ -294,8 +314,8 @@ class TraceEngine:
         parsed_binary,
         data: bytes,
         *,
-        entry_va: Optional[int] = None,
-        max_insns: Optional[int] = None,
+        entry_va: int | None = None,
+        max_insns: int | None = None,
     ) -> ExecutionTrace:
         """Trace a parsed binary using its metadata.
 
@@ -349,10 +369,7 @@ class TraceEngine:
 
     def _region_overlaps(self, base: int, size: int) -> bool:
         end = base + size
-        for rb, rs in self._mapped_regions:
-            if base < rb + rs and end > rb:
-                return True
-        return False
+        return any(base < rb + rs and end > rb for rb, rs in self._mapped_regions)
 
     # ------------------------------------------------------------------
     # Register helpers
@@ -369,7 +386,7 @@ class TraceEngine:
         if uc_id is not None:
             self._uc.reg_write(uc_id, value)
 
-    def _read_all_regs(self) -> Dict[str, int]:
+    def _read_all_regs(self) -> dict[str, int]:
         return {name: self._uc.reg_read(uc_id) for name, uc_id in self._reg_map.items()}
 
     # ------------------------------------------------------------------

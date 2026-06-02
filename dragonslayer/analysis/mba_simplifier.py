@@ -36,7 +36,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import z3
@@ -58,7 +57,7 @@ class MBAResult:
     original: str
     simplified: str
     proven: bool = False
-    rule_name: Optional[str] = None
+    rule_name: str | None = None
     bit_width: int = 64
     iterations: int = 1
 
@@ -70,7 +69,7 @@ class MBAStats:
     simplified: int = 0
     proven: int = 0
     failed: int = 0
-    rules_applied: Dict[str, int] = field(default_factory=dict)
+    rules_applied: dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +78,7 @@ class MBAStats:
 
 def _known_rules(
     x: z3.BitVecRef, y: z3.BitVecRef
-) -> List[Tuple[str, z3.BitVecRef, z3.BitVecRef]]:
+) -> list[tuple[str, z3.BitVecRef, z3.BitVecRef]]:
     """Return ``(rule_name, pattern_expr, simplified_expr)`` triples.
 
     Each rule asserts that ``pattern_expr`` is semantically identical to
@@ -136,7 +135,7 @@ def _known_rules(
 
 def _known_rules_3(
     x: z3.BitVecRef, y: z3.BitVecRef, w: z3.BitVecRef,
-) -> List[Tuple[str, z3.BitVecRef, z3.BitVecRef]]:
+) -> list[tuple[str, z3.BitVecRef, z3.BitVecRef]]:
     """MBA rules involving three variables.
 
     VMProtect commonly generates 3-variable obfuscations such as::
@@ -196,7 +195,7 @@ def simplify_expr(
     expr: z3.BitVecRef,
     bit_width: int = 64,
     timeout_ms: int = 5000,
-) -> Tuple[z3.BitVecRef, Optional[str]]:
+) -> tuple[z3.BitVecRef, str | None]:
     """Try known rewrite rules, then fall back to z3 ``simplify()``.
 
     Supports expressions with 2 *or* 3 free variables.  For 3-variable
@@ -220,9 +219,10 @@ def simplify_expr(
             for rule_name, pattern, replacement in _known_rules(x, y):
                 candidate = z3.substitute(replacement, (x, va), (y, vb))
                 pattern_inst = z3.substitute(pattern, (x, va), (y, vb))
-                if _z3_eq(z3.simplify(pattern_inst), z3.simplify(expr)):
-                    if verify_equivalence(expr, candidate, timeout_ms):
-                        return candidate, rule_name
+                if _z3_eq(
+                    z3.simplify(pattern_inst), z3.simplify(expr)
+                ) and verify_equivalence(expr, candidate, timeout_ms):
+                    return candidate, rule_name
 
     # --- 3-variable expressions: try every ordered triple ---
     if len(free_vars) >= 3:
@@ -230,9 +230,10 @@ def simplify_expr(
             for rule_name, pattern, replacement in _known_rules_3(x, y, w):
                 candidate = z3.substitute(replacement, (x, va), (y, vb), (w, vc))
                 pattern_inst = z3.substitute(pattern, (x, va), (y, vb), (w, vc))
-                if _z3_eq(z3.simplify(pattern_inst), z3.simplify(expr)):
-                    if verify_equivalence(expr, candidate, timeout_ms):
-                        return candidate, rule_name
+                if _z3_eq(
+                    z3.simplify(pattern_inst), z3.simplify(expr)
+                ) and verify_equivalence(expr, candidate, timeout_ms):
+                    return candidate, rule_name
 
     # Fallback: z3 built-in simplifier with aggressive tactics.
     simplified = z3.simplify(
@@ -253,7 +254,7 @@ def simplify_expr(
 
 # Coefficient → operation lookup tables for 1- and 2-variable linear MBAs.
 # Tuple index maps to corner-point bitmask: bit *i* set ⇒ var[i] = −1.
-_COEFF_SIGS_1VAR: Dict[Tuple[int, ...], str] = {
+_COEFF_SIGS_1VAR: dict[tuple[int, ...], str] = {
     (0, 0): "zero",
     (0, 1): "x",
     (1, 0): "~x",
@@ -261,7 +262,7 @@ _COEFF_SIGS_1VAR: Dict[Tuple[int, ...], str] = {
     (1, 1): "-1",
 }
 
-_COEFF_SIGS_2VAR: Dict[Tuple[int, ...], str] = {
+_COEFF_SIGS_2VAR: dict[tuple[int, ...], str] = {
     (0, 0, 0, 0): "zero",
     (0, 1, 0, 1): "x",
     (0, 0, 1, 1): "y",
@@ -287,9 +288,9 @@ _COEFF_SIGS_2VAR: Dict[Tuple[int, ...], str] = {
 
 def _linear_mba_coefficients(
     expr: z3.BitVecRef,
-    free_vars: List[z3.BitVecRef],
+    free_vars: list[z3.BitVecRef],
     bit_width: int,
-) -> Optional[List[int]]:
+) -> list[int] | None:
     """Extract linear MBA coefficients via corner-point evaluation.
 
     For *n* free variables, evaluates the expression at the 2^n points
@@ -309,7 +310,7 @@ def _linear_mba_coefficients(
     modulus = 1 << bit_width
     half = modulus >> 1
     all_ones = modulus - 1
-    coefficients: List[int] = []
+    coefficients: list[int] = []
 
     for mask in range(1 << n):
         subs = [
@@ -357,10 +358,10 @@ def _linear_mba_coefficients(
 
 
 def _reconstruct_from_coefficients(
-    coefficients: List[int],
-    free_vars: List[z3.BitVecRef],
+    coefficients: list[int],
+    free_vars: list[z3.BitVecRef],
     bit_width: int,
-) -> Optional[Tuple[z3.BitVecRef, str]]:
+) -> tuple[z3.BitVecRef, str] | None:
     """Reconstruct a minimal expression from its linear MBA coefficients.
 
     Uses lookup tables for 1- and 2-variable expressions and falls
@@ -374,7 +375,7 @@ def _reconstruct_from_coefficients(
         label = _COEFF_SIGS_1VAR.get(key)
         if label is not None:
             (xv,) = free_vars
-            _b1: Dict[str, z3.BitVecRef] = {
+            _b1: dict[str, z3.BitVecRef] = {
                 "zero": z3.BitVecVal(0, bit_width),
                 "x": xv, "~x": ~xv, "-x": -xv,
                 "-1": z3.BitVecVal(-1, bit_width),
@@ -386,7 +387,7 @@ def _reconstruct_from_coefficients(
         label = _COEFF_SIGS_2VAR.get(key)
         if label is not None:
             x, y = free_vars
-            _b2: Dict[str, z3.BitVecRef] = {
+            _b2: dict[str, z3.BitVecRef] = {
                 "zero": z3.BitVecVal(0, bit_width),
                 "x": x, "y": y,
                 "x + y": x + y, "x - y": x - y, "y - x": y - x,
@@ -405,19 +406,19 @@ def _reconstruct_from_coefficients(
 
 
 def _build_minterm_sum(
-    coefficients: List[int],
-    free_vars: List[z3.BitVecRef],
+    coefficients: list[int],
+    free_vars: list[z3.BitVecRef],
     bit_width: int,
-) -> Optional[Tuple[z3.BitVecRef, str]]:
+) -> tuple[z3.BitVecRef, str] | None:
     """Construct ``Σ cᵢ · mintermᵢ`` and z3-simplify the result."""
     n = len(free_vars)
-    terms: List[z3.BitVecRef] = []
+    terms: list[z3.BitVecRef] = []
 
     for mask in range(1 << n):
         c = coefficients[mask]
         if c == 0:
             continue
-        mt: Optional[z3.BitVecRef] = None
+        mt: z3.BitVecRef | None = None
         for i in range(n):
             factor = free_vars[i] if (mask >> i) & 1 else ~free_vars[i]
             mt = factor if mt is None else (mt & factor)
@@ -470,7 +471,7 @@ def simplify_expr_deep(
     bit_width: int = 64,
     timeout_ms: int = 5000,
     max_rounds: int = 5,
-) -> Tuple[z3.BitVecRef, Optional[str], int]:
+) -> tuple[z3.BitVecRef, str | None, int]:
     """Iterative deep simplification combining all available techniques.
 
     Each round applies (in order):
@@ -490,7 +491,7 @@ def simplify_expr_deep(
     """
     best = expr
     best_size = _ast_size(expr)
-    rule_name: Optional[str] = None
+    rule_name: str | None = None
     iterations = 0
 
     for _ in range(max_rounds):
@@ -500,10 +501,9 @@ def simplify_expr_deep(
         # --- 1. bottom-up sub-expression ---
         candidate = _simplify_children(best, bit_width, timeout_ms)
         cand_size = _ast_size(candidate)
-        if cand_size < best_size:
-            if verify_equivalence(best, candidate, timeout_ms):
-                best, best_size = candidate, cand_size
-                rule_name = rule_name or "subexpr_simplify"
+        if cand_size < best_size and verify_equivalence(best, candidate, timeout_ms):
+            best, best_size = candidate, cand_size
+            rule_name = rule_name or "subexpr_simplify"
 
         # --- 2. static rewrite rules ---
         result, rname = simplify_expr(best, bit_width, timeout_ms)
@@ -525,20 +525,24 @@ def simplify_expr_deep(
                 if recon is not None:
                     recon_expr, recon_name = recon
                     recon_size = _ast_size(recon_expr)
-                    if recon_size < best_size:
-                        if verify_equivalence(best, recon_expr, timeout_ms):
-                            best, best_size = recon_expr, recon_size
-                            rule_name = recon_name
+                    if recon_size < best_size and verify_equivalence(
+                        best, recon_expr, timeout_ms
+                    ):
+                        best, best_size = recon_expr, recon_size
+                        rule_name = recon_name
 
         # --- 4. z3 aggressive simplify ---
         z3s = z3.simplify(
             best, som=True, pull_cheap_ite=True, local_ctx=True,
         )
         z3s_size = _ast_size(z3s)
-        if z3s_size < best_size and not _z3_eq(z3s, best):
-            if verify_equivalence(best, z3s, timeout_ms):
-                best, best_size = z3s, z3s_size
-                rule_name = rule_name or "z3_simplify"
+        if (
+            z3s_size < best_size
+            and not _z3_eq(z3s, best)
+            and verify_equivalence(best, z3s, timeout_ms)
+        ):
+            best, best_size = z3s, z3s_size
+            rule_name = rule_name or "z3_simplify"
 
         # Fixed-point?
         if _z3_eq(best, prev):
@@ -594,16 +598,16 @@ def simplify_mba(
 # ---------------------------------------------------------------------------
 
 def simplify_batch(
-    expressions: List[str],
+    expressions: list[str],
     bit_width: int = 64,
     timeout_ms: int = 5000,
-) -> Tuple[List[MBAResult], MBAStats]:
+) -> tuple[list[MBAResult], MBAStats]:
     """Simplify a list of MBA expression strings.
 
     Returns ``(results, stats)``.
     """
     stats = MBAStats()
-    results: List[MBAResult] = []
+    results: list[MBAResult] = []
 
     for text in expressions:
         stats.total += 1
@@ -625,10 +629,10 @@ def simplify_batch(
 # ---------------------------------------------------------------------------
 
 def simplify_handler_operands(
-    disassembly_lines: List[str],
+    disassembly_lines: list[str],
     bit_width: int = 64,
     timeout_ms: int = 3000,
-) -> List[str]:
+) -> list[str]:
     """Best-effort MBA simplification on operand sub-expressions.
 
     Scans each line for ``0x``-prefixed hex constants combined with
@@ -643,7 +647,7 @@ def simplify_handler_operands(
         r"\(([^()]+)\)\s*([+\-])\s*\(([^()]+)\)",
     )
 
-    out: List[str] = []
+    out: list[str] = []
     for line in disassembly_lines:
         m = _MBA_LIKE.search(line)
         if m:
@@ -659,10 +663,10 @@ def simplify_handler_operands(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _free_bitvec_vars(expr: z3.ExprRef) -> List[z3.BitVecRef]:
+def _free_bitvec_vars(expr: z3.ExprRef) -> list[z3.BitVecRef]:
     """Collect free BitVec variables in *expr*."""
     seen: set[str] = set()
-    result: List[z3.BitVecRef] = []
+    result: list[z3.BitVecRef] = []
 
     def _walk(e: z3.ExprRef) -> None:
         if z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED:
@@ -685,7 +689,7 @@ def _z3_eq(a: z3.ExprRef, b: z3.ExprRef) -> bool:
 
 def _parse_expr(
     text: str,
-    variables: Dict[str, z3.BitVecRef],
+    variables: dict[str, z3.BitVecRef],
     bit_width: int,
 ) -> z3.BitVecRef:
     """Parse a simple C-style expression into a z3 BitVec expression.
@@ -697,10 +701,10 @@ def _parse_expr(
     tokens = _tokenize(text)
     pos = [0]  # mutable index
 
-    def _peek() -> Optional[str]:
+    def _peek() -> str | None:
         return tokens[pos[0]] if pos[0] < len(tokens) else None
 
-    def _consume(expected: Optional[str] = None) -> str:
+    def _consume(expected: str | None = None) -> str:
         tok = tokens[pos[0]]
         if expected is not None and tok != expected:
             raise ValueError(f"Expected {expected!r}, got {tok!r}")
@@ -781,5 +785,5 @@ _TOKEN_RE = re.compile(
 )
 
 
-def _tokenize(text: str) -> List[str]:
+def _tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text)

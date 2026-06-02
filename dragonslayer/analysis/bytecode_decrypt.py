@@ -47,12 +47,14 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -169,21 +171,19 @@ def _apply_cipher_step(value: int, step: CipherStep, key: int, width: int) -> in
 
 
 def auto_detect_cipher_chain(
-    decode_transforms: List[KeyTransform],
-) -> List[CipherStep]:
+    decode_transforms: list[KeyTransform],
+) -> list[CipherStep]:
     """Infer a cipher chain from existing decode transforms.
 
     Simple heuristic: the first transform that operates on the opcode
     is the primary cipher step.  Any additional opcode-sourced transforms
     form extra rounds.  Falls back to a single XOR step (standard VMP).
     """
-    chain: List[CipherStep] = []
+    chain: list[CipherStep] = []
     for t in decode_transforms:
         if t.operand_source == "opcode":
-            try:
+            with contextlib.suppress(ValueError):
                 chain.append(CipherStep(op=CipherOp(t.op.value), operand_source="key"))
-            except ValueError:
-                pass
     if not chain:
         chain.append(CipherStep(op=CipherOp.XOR, operand_source="key"))
     return chain
@@ -194,7 +194,7 @@ def auto_detect_cipher_chain(
 # ---------------------------------------------------------------------------
 
 # Inverse operations — used to derive a re-encryption (inverse) chain.
-_CIPHER_INVERSE: Dict[CipherOp, CipherOp] = {
+_CIPHER_INVERSE: dict[CipherOp, CipherOp] = {
     CipherOp.XOR: CipherOp.XOR,     # XOR is self-inverse
     CipherOp.ADD: CipherOp.SUB,
     CipherOp.SUB: CipherOp.ADD,
@@ -205,7 +205,7 @@ _CIPHER_INVERSE: Dict[CipherOp, CipherOp] = {
 }
 
 
-def inverse_cipher_chain(chain: List[CipherStep]) -> List[CipherStep]:
+def inverse_cipher_chain(chain: list[CipherStep]) -> list[CipherStep]:
     """Derive the inverse cipher chain (for re-encryption / patching).
 
     The inverse chain applies the inverse operation of each step in
@@ -217,7 +217,7 @@ def inverse_cipher_chain(chain: List[CipherStep]) -> List[CipherStep]:
         The inverted chain.  Raises ``ValueError`` if any step has no
         known inverse.
     """
-    inv: List[CipherStep] = []
+    inv: list[CipherStep] = []
     for step in reversed(chain):
         inv_op = _CIPHER_INVERSE.get(step.op)
         if inv_op is None:
@@ -227,7 +227,7 @@ def inverse_cipher_chain(chain: List[CipherStep]) -> List[CipherStep]:
 
 
 def verify_cipher_chain(
-    chain: List[CipherStep],
+    chain: list[CipherStep],
     *,
     width: int = 8,
     num_samples: int = 16,
@@ -273,7 +273,7 @@ def verify_cipher_chain(
 
 
 def cipher_chain_entropy_drop(
-    chain: List[CipherStep],
+    chain: list[CipherStep],
     encrypted: bytes,
     key: int,
     width: int = 8,
@@ -289,7 +289,7 @@ def cipher_chain_entropy_drop(
     def _shannon(data: bytes) -> float:
         if not data:
             return 0.0
-        freq: Dict[int, int] = {}
+        freq: dict[int, int] = {}
         for b in data:
             freq[b] = freq.get(b, 0) + 1
         total = len(data)
@@ -322,7 +322,7 @@ def parse_decode_transforms(
     *,
     fetch_register: str = "",
     key_register: str = "",
-) -> List[KeyTransform]:
+) -> list[KeyTransform]:
     """Parse string transform descriptors into :class:`KeyTransform` objects.
 
     Parameters
@@ -341,7 +341,7 @@ def parse_decode_transforms(
         Ordered transform sequence.  Returns an empty list when no
         transforms are detected (implying no key encryption).
     """
-    results: List[KeyTransform] = []
+    results: list[KeyTransform] = []
 
     for raw in raw_transforms:
         m = _TRANSFORM_RE.search(raw.strip())
@@ -361,9 +361,7 @@ def parse_decode_transforms(
 
         # Determine operand source
         if op in (TransformOp.NOT, TransformOp.NEG,
-                  TransformOp.BSWAP, TransformOp.INC, TransformOp.DEC):
-            operand_source = ""
-        elif not src_raw:
+                  TransformOp.BSWAP, TransformOp.INC, TransformOp.DEC) or not src_raw:
             operand_source = ""
         elif _is_register(src_raw):
             # If the source reg is the fetch register → "opcode"
@@ -374,9 +372,7 @@ def parse_decode_transforms(
             norm_key = _normalize_alias(key_register)
             if norm_src == norm_fetch:
                 operand_source = "opcode"
-            elif norm_src == _normalize_alias(dst_reg):
-                operand_source = "key"
-            elif norm_key and norm_src == norm_key:
+            elif norm_src == _normalize_alias(dst_reg) or norm_key and norm_src == norm_key:
                 operand_source = "key"
             else:
                 # Could be an operand register aliased from the fetch
@@ -384,10 +380,7 @@ def parse_decode_transforms(
         else:
             # Immediate value
             imm = _parse_immediate(src_raw)
-            if imm is not None:
-                operand_source = f"imm:{imm}"
-            else:
-                operand_source = "opcode"
+            operand_source = f"imm:{imm}" if imm is not None else "opcode"
 
         results.append(KeyTransform(op=op, operand_source=operand_source))
 
@@ -417,11 +410,11 @@ class BytecodeDecryptor:
         How many bytes each raw opcode occupies (1 or 2).
     """
 
-    transforms: List[KeyTransform] = field(default_factory=list)
+    transforms: list[KeyTransform] = field(default_factory=list)
     initial_key: int = 0
     key_width: int = 32
     opcode_width: int = 1
-    cipher_chain: List[CipherStep] = field(default_factory=list)  # B81: multi-round
+    cipher_chain: list[CipherStep] = field(default_factory=list)  # B81: multi-round
 
     def __post_init__(self) -> None:
         self._mask = _WIDTH_MASK.get(self.key_width, 0xFFFFFFFF)
@@ -434,7 +427,7 @@ class BytecodeDecryptor:
         *,
         start_offset: int = 0,
         max_opcodes: int = 50000,
-    ) -> Tuple[bytes, List[int]]:
+    ) -> tuple[bytes, list[int]]:
         """Decrypt the bytecode stream, returning plaintext bytes and per-opcode keys.
 
         Returns
@@ -449,7 +442,7 @@ class BytecodeDecryptor:
 
         key = self.initial_key & self._mask
         out = bytearray(len(encrypted))
-        keys: List[int] = []
+        keys: list[int] = []
         offset = start_offset
         ow = self.opcode_width
         opcode_count = 0
@@ -496,7 +489,7 @@ class BytecodeDecryptor:
 
         return bytes(out), keys
 
-    def decrypt_single(self, encrypted_opcode: int, current_key: int) -> Tuple[int, int]:
+    def decrypt_single(self, encrypted_opcode: int, current_key: int) -> tuple[int, int]:
         """Decrypt one opcode and return (plaintext_opcode, next_key).
 
         Useful for trace-synchronized decryption where we advance
@@ -513,7 +506,7 @@ class BytecodeDecryptor:
         *,
         start_offset: int = 0,
         max_opcodes: int = 50000,
-    ) -> Tuple[bytes, List[int]]:
+    ) -> tuple[bytes, list[int]]:
         """Decrypt using a multi-round cipher chain.
 
         Like :meth:`decrypt`, but applies each :class:`CipherStep` in
@@ -532,7 +525,7 @@ class BytecodeDecryptor:
         ow = self.opcode_width
         opcode_mask = (1 << (ow * 8)) - 1
         out = bytearray(len(encrypted))
-        keys: List[int] = []
+        keys: list[int] = []
         offset = start_offset
         opcode_count = 0
 
@@ -629,7 +622,7 @@ def detect_initial_key(
     dispatcher_match: Any,
     *,
     key_register: str = "",
-) -> Optional[int]:
+) -> int | None:
     """Extract the initial rolling-key value from the first dispatcher visit.
 
     Parameters
@@ -722,7 +715,7 @@ class HandlerTableEntry:
 class DecryptedHandlerTable:
     """Complete decrypted handler dispatch table."""
 
-    entries: List[HandlerTableEntry] = field(default_factory=list)
+    entries: list[HandlerTableEntry] = field(default_factory=list)
     encoding_detected: str = "plain"
     table_base: int = 0
     key_used: int = 0
@@ -732,10 +725,10 @@ class DecryptedHandlerTable:
         return len(self.entries)
 
     @property
-    def addresses(self) -> List[int]:
+    def addresses(self) -> list[int]:
         return [e.decrypted_address for e in self.entries]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "count": self.count,
             "encoding": self.encoding_detected,
@@ -762,7 +755,7 @@ def decrypt_handler_table(
     max_entries: int = 256,
     image_base: int = 0,
     table_key: int = 0,
-    known_handler_addresses: Optional[List[int]] = None,
+    known_handler_addresses: list[int] | None = None,
 ) -> DecryptedHandlerTable:
     """Decrypt VMProtect's encrypted handler dispatch table.
 
@@ -808,7 +801,7 @@ def decrypt_handler_table(
     if offset < 0 or offset >= len(binary_data):
         return DecryptedHandlerTable(table_base=table_base)
 
-    raw_entries: List[int] = []
+    raw_entries: list[int] = []
     consecutive_zeros = 0
     for i in range(max_entries):
         pos = offset + i * entry_scale
@@ -831,7 +824,7 @@ def decrypt_handler_table(
     known_set = set(known_handler_addresses or [])
 
     # Try each decoding scheme and pick the best
-    candidates: List[Tuple[str, List[int], int]] = []
+    candidates: list[tuple[str, list[int], int]] = []
 
     # Scheme 1: Plain absolute pointers
     plain = raw_entries[:]
@@ -859,7 +852,7 @@ def decrypt_handler_table(
         candidates.append(("rva_relative_image", rva_ib, rva_ib_valid))
 
     # Scheme 4: Signed RVA-relative to table_base
-    signed_rva: List[int] = []
+    signed_rva: list[int] = []
     for v in raw_entries:
         if entry_scale == 4:
             sv = struct.unpack("<i", struct.pack("<I", v & 0xFFFFFFFF))[0]
@@ -905,11 +898,11 @@ def decrypt_handler_table(
     )
 
     # Filter to valid entries (stop at first invalid gap)
-    result_entries: List[HandlerTableEntry] = []
-    for i, (raw, dec) in enumerate(zip(raw_entries, best_decoded)):
+    result_entries: list[HandlerTableEntry] = []
+    for i, (raw, dec) in enumerate(zip(raw_entries, best_decoded, strict=False)):
         if dec == 0:
             break
-        if not (base_address <= dec < binary_end) and not (dec in known_set):
+        if not (base_address <= dec < binary_end) and dec not in known_set:
             # Allow a few invalid entries (VMProtect sometimes has gaps)
             if len(result_entries) > 3:
                 break
@@ -930,12 +923,12 @@ def decrypt_handler_table(
 
 
 def _detect_table_xor_key(
-    raw_entries: List[int],
+    raw_entries: list[int],
     known_addresses: set,
     mask: int,
     base_address: int = 0,
     binary_end: int = 0,
-) -> Optional[int]:
+) -> int | None:
     """Try to detect the XOR key by matching raw entries against known addresses.
 
     If ``raw[i] ^ key == known_addr``, then ``key = raw[i] ^ known_addr``.
@@ -943,7 +936,7 @@ def _detect_table_xor_key(
     *positional* matches (raw[i] ^ key must equal SOME known addr, but
     we also require the result to be within the binary range).
     """
-    key_votes: Dict[int, int] = {}
+    key_votes: dict[int, int] = {}
     for raw in raw_entries:
         for known in known_addresses:
             candidate_key = (raw ^ known) & mask
@@ -984,11 +977,11 @@ def _detect_table_xor_key(
 
 def make_decryptor_from_dispatcher(
     dispatcher_match: Any,
-    trace_records: Optional[Sequence[Any]] = None,
+    trace_records: Sequence[Any] | None = None,
     *,
     key_width: int = 0,
     opcode_width: int = 0,
-) -> Optional[BytecodeDecryptor]:
+) -> BytecodeDecryptor | None:
     """Create a :class:`BytecodeDecryptor` from a dispatcher match.
 
     This is the primary integration point:
@@ -1066,10 +1059,10 @@ def make_decryptor_from_dispatcher(
 
 def make_generic_decryptor(
     dispatcher_match: Any,
-    trace_records: Optional[Sequence[Any]] = None,
+    trace_records: Sequence[Any] | None = None,
     *,
     max_key_bytes: int = 4,
-) -> Optional[BytecodeDecryptor]:
+) -> BytecodeDecryptor | None:
     """Create a decryptor for non-VMProtect protectors via XOR key search.
 
     Performs frequency analysis on the bytecode region referenced by
@@ -1204,7 +1197,7 @@ def _normalize_alias(reg: str) -> str:
     return _REG_CANONICAL.get(reg.lower().strip(), reg.lower().strip())
 
 
-def _register_aliases(reg: str) -> List[str]:
+def _register_aliases(reg: str) -> list[str]:
     """Return all width-aliases of a register for dict lookup."""
     canon = _normalize_alias(reg)
     aliases = [reg.lower()]
@@ -1214,7 +1207,7 @@ def _register_aliases(reg: str) -> List[str]:
     return aliases
 
 
-def _parse_immediate(s: str) -> Optional[int]:
+def _parse_immediate(s: str) -> int | None:
     """Parse an immediate value from a string."""
     s = s.strip().rstrip("h")
     try:

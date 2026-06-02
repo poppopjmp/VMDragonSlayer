@@ -33,10 +33,11 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,9 @@ class TraceInstruction:
     size: int
     raw_bytes: bytes
     disassembly: str
-    registers: Dict[str, int] = field(default_factory=dict)
+    registers: dict[str, int] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the instruction to a JSON-compatible dict."""
         return {
             "address": self.address,
@@ -73,7 +74,7 @@ class TraceMemoryAccess:
     size: int
     value: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the memory access to a JSON-compatible dict."""
         return {
             "type": self.type,
@@ -90,7 +91,7 @@ class TraceControlFlow:
     source: int
     target: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the control-flow edge to a JSON-compatible dict."""
         return {"type": self.type, "source": self.source, "target": self.target}
 
@@ -102,7 +103,7 @@ class HandlerMarker:
     address: int
     handler_type: str = "unknown"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the handler marker to a JSON-compatible dict."""
         return {
             "handler_id": self.handler_id,
@@ -118,11 +119,11 @@ class ExecutionTrace:
     Acts as the bridge between dynamic analysis output and the
     static analysis pipeline stages.
     """
-    instructions: List[TraceInstruction] = field(default_factory=list)
-    memory_accesses: List[TraceMemoryAccess] = field(default_factory=list)
-    control_flow: List[TraceControlFlow] = field(default_factory=list)
-    handlers: List[HandlerMarker] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    instructions: list[TraceInstruction] = field(default_factory=list)
+    memory_accesses: list[TraceMemoryAccess] = field(default_factory=list)
+    control_flow: list[TraceControlFlow] = field(default_factory=list)
+    handlers: list[HandlerMarker] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     source: str = "unknown"  # "angr", "triton", "qiling", "file", ...
 
     # ---- Conversion helpers --------------------------------------------
@@ -140,9 +141,6 @@ class ExecutionTrace:
         try:
             from dragonslayer.analysis.symbolic_execution.lifter import (
                 InstructionLifter,
-                LiftedInstruction,
-                _MNEMONIC_CATEGORIES,
-                InstructionCategory,
             )
             lifter_available = InstructionLifter.available()
         except ImportError:
@@ -161,13 +159,8 @@ class ExecutionTrace:
         arch = self.metadata.get("arch", "x86_64")
         lifter = InstructionLifter(arch=arch)
 
-        # Build a lookup from address → TraceInstruction for metadata overlay.
-        trace_lookup: Dict[int, TraceInstruction] = {
-            ti.address: ti for ti in self.instructions
-        }
-
         # Per-instruction taint from Triton taint_flow (address → bool).
-        taint_by_addr: Dict[int, bool] = {}
+        taint_by_addr: dict[int, bool] = {}
         for tf in self.metadata.get("taint_flow_raw", []):
             addr = tf.get("address", 0)
             taint_by_addr[addr] = tf.get("is_tainted", False)
@@ -195,7 +188,7 @@ class ExecutionTrace:
         return results
 
     @staticmethod
-    def _simple_from_trace(ti: TraceInstruction) -> "_SimpleInstruction":
+    def _simple_from_trace(ti: TraceInstruction) -> _SimpleInstruction:
         """Build a duck-typed LiftedInstruction from disassembly text."""
         parts = ti.disassembly.split(None, 1)
         mnemonic = parts[0].lower() if parts else "nop"
@@ -215,7 +208,7 @@ class ExecutionTrace:
         )
 
     def _as_simple_instructions(self) -> list:
-        taint_by_addr: Dict[int, bool] = {}
+        taint_by_addr: dict[int, bool] = {}
         for tf in self.metadata.get("taint_flow_raw", []):
             addr = tf.get("address", 0)
             taint_by_addr[addr] = tf.get("is_tainted", False)
@@ -227,7 +220,7 @@ class ExecutionTrace:
             result.append(si)
         return result
 
-    def extract_code_regions(self) -> Dict[int, bytes]:
+    def extract_code_regions(self) -> dict[int, bytes]:
         """Group consecutive trace instructions by address into code blobs.
 
         Returns ``{start_addr: bytes}`` for each contiguous region,
@@ -236,7 +229,7 @@ class ExecutionTrace:
         if not self.instructions:
             return {}
 
-        regions: Dict[int, bytearray] = {}
+        regions: dict[int, bytearray] = {}
         sorted_insts = sorted(self.instructions, key=lambda i: i.address)
 
         current_start = sorted_insts[0].address
@@ -260,7 +253,7 @@ class ExecutionTrace:
         """Set of unique instruction addresses in the trace."""
         return {i.address for i in self.instructions}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise trace metadata to a JSON-compatible dict.
 
         Does not include the full instruction/memory/CF data — only
@@ -289,12 +282,10 @@ _COMMON_REGS = {
 # Sorted longest-first so that "r12" matches before "r1".
 _COMMON_REGS_SORTED = sorted(_COMMON_REGS, key=len, reverse=True)
 
-import re as _re
-
 # Matches a register name at a word boundary.
-_REG_RE = _re.compile(
-    r"\b(" + "|".join(_re.escape(r) for r in _COMMON_REGS_SORTED) + r")\b",
-    _re.IGNORECASE,
+_REG_RE = re.compile(
+    r"\b(" + "|".join(re.escape(r) for r in _COMMON_REGS_SORTED) + r")\b",
+    re.IGNORECASE,
 )
 
 # Instructions that read both operands and write only flags.
@@ -402,11 +393,11 @@ class _SimpleInstruction:
     operands: str
     category: str
     raw_bytes: bytes
-    reads: List[str] = field(default_factory=list)
-    writes: List[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
     is_branch: bool = False
-    branch_target: Optional[int] = None
-    registers: Dict[str, int] = field(default_factory=dict)
+    branch_target: int | None = None
+    registers: dict[str, int] = field(default_factory=dict)
     is_tainted: bool = False
 
 
@@ -447,7 +438,7 @@ def parse_trace_text(text: str) -> ExecutionTrace:
                 size = _parse_int(parts[1])
                 raw = bytes.fromhex(parts[2].replace(" ", "")) if parts[2] else b""
                 disasm = parts[3]
-                regs: Dict[str, int] = {}
+                regs: dict[str, int] = {}
                 if len(parts) >= 5 and parts[4]:
                     for pair in parts[4].split(","):
                         kv = pair.split("=", 1)
@@ -503,7 +494,7 @@ def _parse_int(s: str) -> int:
 # DYNAMIC PLUGIN ADAPTERS
 # ---------------------------------------------------------------------------
 
-def from_shared_data(shared_data: Dict[str, Any]) -> ExecutionTrace:
+def from_shared_data(shared_data: dict[str, Any]) -> ExecutionTrace:
     """Build an :class:`ExecutionTrace` from pipeline ``shared_data``.
 
     Merges output from ``triton``, ``angr``, and ``qiling`` keys.
@@ -547,7 +538,7 @@ def from_shared_data(shared_data: Dict[str, Any]) -> ExecutionTrace:
     return trace
 
 
-def from_triton_result(data: Dict[str, Any]) -> ExecutionTrace:
+def from_triton_result(data: dict[str, Any]) -> ExecutionTrace:
     """Convert a Triton plugin's result dict to :class:`ExecutionTrace`."""
     trace = ExecutionTrace(source="triton")
     _ingest_triton(data, trace)
@@ -555,7 +546,7 @@ def from_triton_result(data: Dict[str, Any]) -> ExecutionTrace:
     return trace
 
 
-def from_angr_result(data: Dict[str, Any]) -> ExecutionTrace:
+def from_angr_result(data: dict[str, Any]) -> ExecutionTrace:
     """Convert an angr plugin's result dict to :class:`ExecutionTrace`."""
     trace = ExecutionTrace(source="angr")
     _ingest_angr(data, trace)
@@ -563,7 +554,7 @@ def from_angr_result(data: Dict[str, Any]) -> ExecutionTrace:
     return trace
 
 
-def from_qiling_result(data: Dict[str, Any]) -> ExecutionTrace:
+def from_qiling_result(data: dict[str, Any]) -> ExecutionTrace:
     """Convert a Qiling plugin's result dict to :class:`ExecutionTrace`."""
     trace = ExecutionTrace(source="qiling")
     _ingest_qiling(data, trace)
@@ -574,7 +565,7 @@ def from_qiling_result(data: Dict[str, Any]) -> ExecutionTrace:
 # Internal ingest helpers
 # ---------------------------------------------------------------------------
 
-def _ingest_triton(data: Dict[str, Any], trace: ExecutionTrace) -> None:
+def _ingest_triton(data: dict[str, Any], trace: ExecutionTrace) -> None:
     """Ingest Triton's enriched per-instruction trace data.
 
     Reads instruction_trace[] (address, size, raw_bytes hex, disassembly,
@@ -600,12 +591,10 @@ def _ingest_triton(data: Dict[str, Any], trace: ExecutionTrace) -> None:
 
             regs = entry.get("registers", {})
             # Ensure register values are ints
-            int_regs: Dict[str, int] = {}
+            int_regs: dict[str, int] = {}
             for k, v in regs.items():
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     int_regs[k] = int(v)
-                except (TypeError, ValueError):
-                    pass
 
             trace.instructions.append(TraceInstruction(
                 address=addr,
@@ -663,7 +652,7 @@ def _ingest_triton(data: Dict[str, Any], trace: ExecutionTrace) -> None:
         trace.source = "shared_data+triton"
 
 
-def _ingest_angr(data: Dict[str, Any], trace: ExecutionTrace) -> None:
+def _ingest_angr(data: dict[str, Any], trace: ExecutionTrace) -> None:
     """Ingest angr's enriched handler traces and function data.
 
     Reads handler_traces[] (per-handler instruction list with address,
@@ -688,12 +677,10 @@ def _ingest_angr(data: Dict[str, Any], trace: ExecutionTrace) -> None:
                 raw = b""
 
             regs = entry.get("registers", {})
-            int_regs: Dict[str, int] = {}
+            int_regs: dict[str, int] = {}
             for k, v in regs.items():
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     int_regs[k] = int(v)
-                except (TypeError, ValueError):
-                    pass
 
             trace.instructions.append(TraceInstruction(
                 address=addr,
@@ -738,7 +725,7 @@ def _ingest_angr(data: Dict[str, Any], trace: ExecutionTrace) -> None:
         trace.source = "angr"
 
 
-def _ingest_qiling(data: Dict[str, Any], trace: ExecutionTrace) -> None:
+def _ingest_qiling(data: dict[str, Any], trace: ExecutionTrace) -> None:
     """Ingest Qiling's enriched per-instruction trace data.
 
     Reads instruction_trace[] (address, size, raw_bytes hex, disassembly,
@@ -763,12 +750,10 @@ def _ingest_qiling(data: Dict[str, Any], trace: ExecutionTrace) -> None:
                 raw = b""
 
             regs = entry.get("registers", {})
-            int_regs: Dict[str, int] = {}
+            int_regs: dict[str, int] = {}
             for k, v in regs.items():
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     int_regs[k] = int(v)
-                except (TypeError, ValueError):
-                    pass
 
             trace.instructions.append(TraceInstruction(
                 address=addr,

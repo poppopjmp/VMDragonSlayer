@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ def _parse_int(s: str) -> int:
     return int(s)
 
 
-def _eval_binop(left: int, op: str, right: int) -> Optional[int]:
+def _eval_binop(left: int, op: str, right: int) -> int | None:
     """Safely evaluate a binary operation on two integers."""
     try:
         if op == "+":
@@ -114,7 +113,7 @@ def _const_fold_replace(m: re.Match) -> str:
 # ---------------------------------------------------------------------------
 
 # Patterns: var OP identity → var
-_IDENTITY_PATTERNS: List[Tuple[re.Pattern, str]] = [
+_IDENTITY_PATTERNS: list[tuple[re.Pattern, str]] = [
     # x + 0  →  x
     (re.compile(r"(\b\w+)\s*\+\s*0\b"), r"\1"),
     # 0 + x  →  x
@@ -172,7 +171,7 @@ _C_TYPES = {
 }
 
 
-def propagate_types(text: str, var_widths: Dict[str, int]) -> str:
+def propagate_types(text: str, var_widths: dict[str, int]) -> str:
     """Replace generic ``int`` declarations with sized C types.
 
     Scans for lines like ``  int varname_N;`` and replaces with
@@ -185,7 +184,7 @@ def propagate_types(text: str, var_widths: Dict[str, int]) -> str:
         return text
 
     lines = text.split("\n")
-    result: List[str] = []
+    result: list[str] = []
 
     for line in lines:
         # Declaration: "  int var_name;"
@@ -233,7 +232,7 @@ def fold_self_cancel(text: str) -> str:
 def simplify_pseudocode(
     text: str,
     *,
-    var_widths: Optional[Dict[str, int]] = None,
+    var_widths: dict[str, int] | None = None,
 ) -> str:
     """Apply all expression simplification passes to pseudocode text.
 

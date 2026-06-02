@@ -13,10 +13,10 @@ transparently.
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any
 
 from .database import Pattern, PatternDatabase
-from .yara_engine import YaraEngine, YaraMatch, YARA_AVAILABLE
+from .yara_engine import YARA_AVAILABLE, YaraEngine
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +25,15 @@ logger = logging.getLogger(__name__)
 class Match:
     """
     Represents a pattern match result.
-    
+
     """
     pattern: Pattern
     start_offset: int
     end_offset: int
     confidence: float
     matched_bytes: str
-    context: Dict[str, Any] = None
-    
+    context: dict[str, Any] = None
+
     def __post_init__(self) -> None:
         if self.context is None:
             self.context = {}
@@ -47,7 +47,7 @@ class PatternRecognizer:
     for ~10-100× faster scanning.  The pure-Python regex path is kept as a
     seamless fallback.
     """
-    
+
     def __init__(self, database: PatternDatabase, *, use_yara: bool = True) -> None:
         """
         Initialize pattern recognizer.
@@ -61,10 +61,10 @@ class PatternRecognizer:
             patterns to YARA rules once and use them for all subsequent scans.
         """
         self.database = database
-        self._compiled_patterns: Dict[str, re.Pattern] = {}
+        self._compiled_patterns: dict[str, re.Pattern] = {}
 
         # YARA engine (preferred)
-        self._yara: Optional[YaraEngine] = None
+        self._yara: YaraEngine | None = None
         if use_yara and YARA_AVAILABLE:
             try:
                 engine = YaraEngine()
@@ -74,12 +74,12 @@ class PatternRecognizer:
                     logger.info("YARA engine active – %d rules compiled", n)
             except (ValueError, TypeError, AttributeError, RuntimeError, OSError):
                 logger.warning("YARA compilation failed – falling back to regex", exc_info=True)
-    
-    def recognize(self, 
+
+    def recognize(self,
                   instruction_bytes: str,
                   min_confidence: float = 0.7,
-                  architecture: Optional[str] = None,
-                  handler_type: Optional[str] = None) -> List[Match]:
+                  architecture: str | None = None,
+                  handler_type: str | None = None) -> list[Match]:
         """
         Recognize patterns in instruction byte sequence.
 
@@ -97,7 +97,7 @@ class PatternRecognizer:
 
         # B70: normalise semantics (strip NOP junk) before matching
         normalised = self.normalize_semantics(instruction_bytes)
-        
+
         # ---- YARA fast path ----
         if self._yara is not None:
             return self._recognize_yara(
@@ -106,7 +106,7 @@ class PatternRecognizer:
                 architecture=architecture,
                 handler_type=handler_type,
             )
-        
+
         # ---- Regex fallback ----
         return self._recognize_regex(
             normalised,
@@ -114,12 +114,12 @@ class PatternRecognizer:
             architecture=architecture,
             handler_type=handler_type,
         )
-    
+
     def recognize_single(self,
                         instruction_bytes: str,
                         min_confidence: float = 0.7,
-                        architecture: Optional[str] = None,
-                        handler_type: Optional[str] = None) -> Optional[Match]:
+                        architecture: str | None = None,
+                        handler_type: str | None = None) -> Match | None:
         """
         Recognize the best matching pattern.
 
@@ -143,7 +143,7 @@ class PatternRecognizer:
             handler_type=handler_type
         )
         return matches[0] if matches else None
-    
+
     # ------------------------------------------------------------------
     # YARA fast path
     # ------------------------------------------------------------------
@@ -153,16 +153,16 @@ class PatternRecognizer:
         instruction_bytes: str,
         *,
         min_confidence: float = 0.7,
-        architecture: Optional[str] = None,
-        handler_type: Optional[str] = None,
-    ) -> List[Match]:
+        architecture: str | None = None,
+        handler_type: str | None = None,
+    ) -> list[Match]:
         """Use the YARA engine for matching and translate results to Match."""
         assert self._yara is not None
 
         yara_hits = self._yara.scan_hex(instruction_bytes, min_confidence=min_confidence)
 
         # Build a set of acceptable pattern IDs when filtering by arch/type
-        allowed_ids: Optional[set] = None
+        allowed_ids: set | None = None
         if architecture or handler_type:
             allowed = self.database.search(
                 architecture=architecture,
@@ -207,9 +207,9 @@ class PatternRecognizer:
         instruction_bytes: str,
         *,
         min_confidence: float = 0.7,
-        architecture: Optional[str] = None,
-        handler_type: Optional[str] = None,
-    ) -> List[Match]:
+        architecture: str | None = None,
+        handler_type: str | None = None,
+    ) -> list[Match]:
         """Pure-Python regex matching (original algorithm)."""
         patterns = self.database.search(
             architecture=architecture,
@@ -233,8 +233,8 @@ class PatternRecognizer:
         matches.sort(key=lambda m: m.confidence, reverse=True)
         logger.info("Regex found %d matches (min_confidence=%.2f)", len(matches), min_confidence)
         return matches
-    
-    def _match_pattern(self, pattern: Pattern, normalized_bytes: str) -> List[Match]:
+
+    def _match_pattern(self, pattern: Pattern, normalized_bytes: str) -> list[Match]:
         """
         Match a single pattern against byte sequence.
 
@@ -249,25 +249,25 @@ class PatternRecognizer:
             List of :class:`Match` instances (may be empty).
         """
         matches = []
-        
+
         # Try main signature
         match = self._try_match(pattern, pattern.signature, normalized_bytes, 0)
         if match:
             matches.append(match)
-        
+
         # Try variants
         for i, variant in enumerate(pattern.variants):
             match = self._try_match(pattern, variant, normalized_bytes, i + 1)
             if match:
                 matches.append(match)
-        
+
         return matches
-    
-    def _try_match(self, 
-                   pattern: Pattern, 
-                   signature: str, 
+
+    def _try_match(self,
+                   pattern: Pattern,
+                   signature: str,
                    normalized_bytes: str,
-                   variant_index: int) -> Optional[Match]:
+                   variant_index: int) -> Match | None:
         """
         Try matching a specific signature.
 
@@ -285,7 +285,7 @@ class PatternRecognizer:
         """
         # Normalize signature
         sig_normalized = self._normalize_bytes(signature)
-        
+
         # Convert to regex pattern if wildcards present
         if pattern.wildcards or '?' in sig_normalized:
             regex_pattern = self._signature_to_regex(sig_normalized)
@@ -293,12 +293,12 @@ class PatternRecognizer:
         else:
             # Exact match
             return self._exact_match(pattern, sig_normalized, normalized_bytes, variant_index)
-    
+
     def _exact_match(self,
                      pattern: Pattern,
                      signature: str,
                      normalized_bytes: str,
-                     variant_index: int) -> Optional[Match]:
+                     variant_index: int) -> Match | None:
         """
         Perform exact byte matching.
 
@@ -321,12 +321,12 @@ class PatternRecognizer:
             return None
 
         confidence = pattern.confidence
-        
+
         if variant_index > 0:
-            confidence *= 0.95 
-        
+            confidence *= 0.95
+
         matched_bytes = normalized_bytes[index:index + len(signature)]
-        
+
         return Match(
             pattern=pattern,
             start_offset=index // 2,  # Convert to byte offset
@@ -335,12 +335,12 @@ class PatternRecognizer:
             matched_bytes=self._format_bytes(matched_bytes),
             context={'variant_index': variant_index, 'match_type': 'exact'}
         )
-    
+
     def _regex_match(self,
                      pattern: Pattern,
                      regex_pattern: str,
                      normalized_bytes: str,
-                     variant_index: int) -> Optional[Match]:
+                     variant_index: int) -> Match | None:
         """
         Perform regex-based matching with wildcards.
 
@@ -360,31 +360,31 @@ class PatternRecognizer:
         # Compile and cache regex
         if regex_pattern not in self._compiled_patterns:
             self._compiled_patterns[regex_pattern] = re.compile(regex_pattern)
-        
+
         compiled = self._compiled_patterns[regex_pattern]
         match = compiled.search(normalized_bytes)
-        
+
         if not match:
             return None
-        
+
         matched_str = match.group(0)
-        wildcard_count = regex_pattern.count('.{2}') 
+        wildcard_count = regex_pattern.count('.{2}')
         total_bytes = len(matched_str) // 2
         exact_bytes = total_bytes - wildcard_count
-        
+
         # Base confidence from pattern
         confidence = pattern.confidence
-        
+
         # Adjust for wildcard ratio (more exact bytes = higher confidence)
         if total_bytes > 0:
             exactness_ratio = exact_bytes / total_bytes
-            confidence *= (0.7 + 0.3 * exactness_ratio)  
+            confidence *= (0.7 + 0.3 * exactness_ratio)
         else:
             exactness_ratio = 0.0
         # Apply variant penalty
         if variant_index > 0:
             confidence *= 0.95
-        
+
         return Match(
             pattern=pattern,
             start_offset=match.start() // 2,
@@ -398,7 +398,7 @@ class PatternRecognizer:
                 'exactness_ratio': exactness_ratio
             }
         )
-    
+
     def _signature_to_regex(self, signature: str) -> str:
         """
         Convert signature with wildcards to regex pattern.
@@ -417,7 +417,7 @@ class PatternRecognizer:
         escaped_parts = [re.escape(p) for p in parts]
         regex = '.{2}'.join(escaped_parts)
         return regex
-    
+
     def _normalize_bytes(self, byte_string: str) -> str:
         """
         Normalize byte string by removing spaces, pipes, and converting to uppercase.
@@ -435,7 +435,7 @@ class PatternRecognizer:
         normalized = byte_string.replace(' ', '').replace('|', '').replace(',', '')
         normalized = normalized.replace('\n', '').replace('\t', '')
         return normalized.upper()
-    
+
     def _format_bytes(self, byte_string: str) -> str:
         """
         Format byte string with spaces for readability.
@@ -449,8 +449,8 @@ class PatternRecognizer:
             Space-separated hex string (e.g. ``"4D 5A 90"``).
         """
         return ' '.join(byte_string[i:i+2] for i in range(0, len(byte_string), 2))
-    
-    def get_statistics(self) -> Dict[str, Any]:
+
+    def get_statistics(self) -> dict[str, Any]:
         """
         Get recognizer statistics.
 
@@ -471,7 +471,7 @@ class PatternRecognizer:
     # Semantically equivalent instruction rewrites (mnemonic-level).
     # Used by ``normalize_semantics`` to canonicalise instructions before
     # byte-level matching, improving resilience to trivial obfuscation.
-    _SEMANTIC_EQUIV: Dict[str, str] = {
+    _SEMANTIC_EQUIV: dict[str, str] = {
         # Arithmetic / logic equivalences
         "test": "and",        # TEST and AND set the same flags; normalise to AND
         "sal": "shl",         # SAL is identical to SHL
@@ -512,7 +512,7 @@ class PatternRecognizer:
     # B71/B73: Extended opcode-byte equivalences — maps obfuscator-favoured
     # byte sequences to their canonical forms.  Used for byte-level pattern
     # normalisation AFTER hex-string NOP stripping.
-    _OPCODE_EQUIV: Dict[str, str] = {
+    _OPCODE_EQUIV: dict[str, str] = {
         # SUB reg, 0  →  NOP (no effect)
         "83E800": "90",      # sub eax, 0
         "83E900": "90",      # sub ecx, 0
@@ -591,7 +591,7 @@ class PatternRecognizer:
 
     # Protector prologue signatures — byte patterns that distinguish
     # VMProtect and Themida/Code Virtualizer at version granularity.
-    _VERSION_SIGS: List[Dict[str, Any]] = [
+    _VERSION_SIGS: list[dict[str, Any]] = [
         # VMProtect 3.0.x: pushad + large immediate load
         {"protector": "VMProtect", "version": "3.0.x", "confidence": 0.85,
          "pattern": r"60.{0,8}B8[0-9A-Fa-f]{8}"},
@@ -613,7 +613,7 @@ class PatternRecognizer:
     ]
 
     # B82: Map from YARA rule names → (protector, version, base_confidence)
-    _YARA_VERSION_MAP: Dict[str, Tuple[str, str, float]] = {
+    _YARA_VERSION_MAP: dict[str, tuple[str, str, float]] = {
         # --- VMProtect ---
         "VMP_30_Handler_Prologue": ("VMProtect", "3.0.x", 0.85),
         "VMP_31_Handler_Prologue": ("VMProtect", "3.1.x", 0.85),
@@ -641,7 +641,7 @@ class PatternRecognizer:
     def version_fingerprint(
         self,
         instruction_bytes: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Identify the protector and version from prologue bytes.
 
         Uses regex signatures, and — when the YARA engine is active —
@@ -656,27 +656,28 @@ class PatternRecognizer:
             or ``{"protector": "unknown", "version": "unknown",
                   "confidence": 0.0, "engines": []}``
         """
-        best: Dict[str, Any] = {
+        best: dict[str, Any] = {
             "protector": "unknown",
             "version": "unknown",
             "confidence": 0.0,
             "engines": [],
         }
 
-        regex_hit: Optional[Dict[str, Any]] = None
-        yara_hit: Optional[Tuple[str, str, float]] = None
+        regex_hit: dict[str, Any] | None = None
+        yara_hit: tuple[str, str, float] | None = None
 
         # 1. Regex-based detection
         normalised = instruction_bytes.replace(" ", "")
         for sig in self._VERSION_SIGS:
             try:
-                if re.search(sig["pattern"], normalised, re.IGNORECASE):
-                    if sig["confidence"] > (regex_hit or {}).get("confidence", 0.0):
-                        regex_hit = {
-                            "protector": sig["protector"],
-                            "version": sig["version"],
-                            "confidence": sig["confidence"],
-                        }
+                if re.search(
+                    sig["pattern"], normalised, re.IGNORECASE
+                ) and sig["confidence"] > (regex_hit or {}).get("confidence", 0.0):
+                    regex_hit = {
+                        "protector": sig["protector"],
+                        "version": sig["version"],
+                        "confidence": sig["confidence"],
+                    }
             except re.error:
                 continue
 
@@ -696,7 +697,7 @@ class PatternRecognizer:
                 pass  # hex decode / YARA scan failure
 
         # 3. Merge results — boost confidence when both agree
-        engines: List[str] = []
+        engines: list[str] = []
         if regex_hit:
             best = {**regex_hit, "engines": ["regex"]}
             engines.append("regex")
@@ -729,19 +730,19 @@ class PatternRecognizer:
 class SequenceRecognizer:
     """
     Recognizes patterns across instruction sequences (multi-instruction patterns).
-    
+
     """
-    
+
     def __init__(self, database: PatternDatabase) -> None:
 
         self.database = database
         self.recognizer = PatternRecognizer(database)
-    
+
     def recognize_sequence(self,
-                          instructions: List[str],
+                          instructions: list[str],
                           window_size: int = 5,
                           min_confidence: float = 0.7,
-                          architecture: Optional[str] = None) -> List[Match]:
+                          architecture: str | None = None) -> list[Match]:
         """
         Recognize patterns across a sequence of instructions.
 
@@ -760,34 +761,34 @@ class SequenceRecognizer:
             descending confidence.
         """
         all_matches = []
-        
+
         # Sliding window over instructions
         for i in range(len(instructions) - window_size + 1):
             window = instructions[i:i + window_size]
             combined_bytes = ' '.join(window)
-            
+
             # Recognize in this window
             matches = self.recognizer.recognize(
                 combined_bytes,
                 min_confidence=min_confidence,
                 architecture=architecture
             )
-            
+
             # Adjust offsets to account for window position
             # The match offsets are byte-level from the combined hex string;
             # store the window index separately so callers know the context.
             for match in matches:
                 match.context['window_start'] = i
                 match.context['window_size'] = window_size
-            
+
             all_matches.extend(matches)
-        
+
         # Remove duplicate matches (same pattern, overlapping ranges)
         unique_matches = self._deduplicate_matches(all_matches)
-        
+
         return unique_matches
-    
-    def _deduplicate_matches(self, matches: List[Match]) -> List[Match]:
+
+    def _deduplicate_matches(self, matches: list[Match]) -> list[Match]:
         """
         Remove duplicate/overlapping matches, keeping highest confidence.
 
@@ -802,30 +803,30 @@ class SequenceRecognizer:
         """
         if not matches:
             return []
-        
+
         # Sort by confidence (highest first)
         matches.sort(key=lambda m: m.confidence, reverse=True)
-        
+
         unique = []
         used_ranges = []
-        
+
         for match in matches:
             match_range = (match.start_offset, match.end_offset)
-            
+
             # Check if this range overlaps with any used range
             overlaps = False
             for used_range in used_ranges:
                 if self._ranges_overlap(match_range, used_range):
                     overlaps = True
                     break
-            
+
             if not overlaps:
                 unique.append(match)
                 used_ranges.append(match_range)
-        
+
         return unique
-    
-    def _ranges_overlap(self, range1: Tuple[int, int], range2: Tuple[int, int]) -> bool:
+
+    def _ranges_overlap(self, range1: tuple[int, int], range2: tuple[int, int]) -> bool:
         """
         Check if two ranges overlap.
 

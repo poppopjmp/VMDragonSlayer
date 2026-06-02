@@ -40,27 +40,32 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
+
+from dragonslayer.core.disassembler import (
+    CAPSTONE_AVAILABLE as _DISASM_AVAILABLE,
+)
+from dragonslayer.core.disassembler import (
+    Disassembler as _Disassembler,
+)
+from dragonslayer.core.disassembler import (
+    create_disassembler as _create_disasm,
+)
 
 logger = logging.getLogger(__name__)
 
 # Try to import capstone for refined disassembly-based validation.
 _HAS_CAPSTONE = False
 try:
-    import capstone  # type: ignore[import-untyped]
+    import capstone  # type: ignore[import-untyped]  # noqa: F401  (availability probe)
     _HAS_CAPSTONE = True
 except ImportError:
     pass
-
-from dragonslayer.core.disassembler import (
-    Disassembler as _Disassembler,
-    create_disassembler as _create_disasm,
-    CAPSTONE_AVAILABLE as _DISASM_AVAILABLE,
-)
-
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -88,16 +93,16 @@ class VmEntryCandidate:
     push_count: int = 0
     """Number of register-save ``push`` instructions in prologue."""
 
-    bytecode_address: Optional[int] = None
+    bytecode_address: int | None = None
     """If detected, the immediate loaded as bytecode pointer."""
 
-    dispatcher_target: Optional[int] = None
+    dispatcher_target: int | None = None
     """If detected, the address jumped to (dispatcher)."""
 
     reason: str = ""
     """Human-readable reason for flagging this address."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the VM entry candidate to a JSON-compatible dict."""
         return {
             "rva": self.rva,
@@ -116,7 +121,7 @@ class VmEntryCandidate:
 class VmEntryReport:
     """Results of VM entry point scanning."""
 
-    entries: List[VmEntryCandidate] = field(default_factory=list)
+    entries: list[VmEntryCandidate] = field(default_factory=list)
     sections_scanned: int = 0
     bytes_scanned: int = 0
     method: str = "raw"
@@ -126,11 +131,11 @@ class VmEntryReport:
         """Total number of VM entry candidates found."""
         return len(self.entries)
 
-    def top(self, n: int = 10) -> List[VmEntryCandidate]:
+    def top(self, n: int = 10) -> list[VmEntryCandidate]:
         """Return the top *n* candidates sorted by descending confidence."""
         return sorted(self.entries, key=lambda e: -e.confidence)[:n]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the VM entry report to a JSON-compatible dict."""
         return {
             "count": self.count,
@@ -197,7 +202,7 @@ class SectionInfo:
     executable: bool = True
 
     @classmethod
-    def from_pe_dict(cls, d: Dict[str, Any]) -> "SectionInfo":
+    def from_pe_dict(cls, d: dict[str, Any]) -> SectionInfo:
         """Build from PE analyzer section dict (hex strings)."""
         def _h(v: Any) -> int:
             if isinstance(v, int):
@@ -219,7 +224,7 @@ class SectionInfo:
 # Raw byte-level scanner
 # ---------------------------------------------------------------------------
 
-def _count_push_prefix_64(data: bytes, offset: int) -> Tuple[int, int]:
+def _count_push_prefix_64(data: bytes, offset: int) -> tuple[int, int]:
     """Count consecutive push-register instructions starting at *offset*.
 
     Returns ``(push_count, bytes_consumed)``.
@@ -252,7 +257,7 @@ def _count_push_prefix_64(data: bytes, offset: int) -> Tuple[int, int]:
     return pushes, i - offset
 
 
-def _count_push_prefix_32(data: bytes, offset: int) -> Tuple[int, int]:
+def _count_push_prefix_32(data: bytes, offset: int) -> tuple[int, int]:
     """Count push-register instructions at *offset* for 32-bit mode."""
     i = offset
     end = min(offset + 40, len(data))
@@ -260,10 +265,7 @@ def _count_push_prefix_32(data: bytes, offset: int) -> Tuple[int, int]:
 
     while i < end:
         b = data[i]
-        if b in _PUSH_REG32:
-            pushes += 1
-            i += 1
-        elif b == _PUSHF:
+        if b in _PUSH_REG32 or b == _PUSHF:
             pushes += 1
             i += 1
         elif b == _PUSHAD:
@@ -277,7 +279,7 @@ def _count_push_prefix_32(data: bytes, offset: int) -> Tuple[int, int]:
 
 def _detect_load_and_jump_64(
     data: bytes, offset: int, section_rva: int
-) -> Tuple[Optional[int], Optional[int]]:
+) -> tuple[int | None, int | None]:
     """After push prefix, look for ``mov reg, imm64`` then ``jmp/call``.
 
     Returns ``(bytecode_address, jump_target_rva)`` or (None, None).
@@ -285,8 +287,8 @@ def _detect_load_and_jump_64(
     end = min(offset + 20, len(data))
     i = offset
 
-    bytecode_addr: Optional[int] = None
-    jmp_target: Optional[int] = None
+    bytecode_addr: int | None = None
+    jmp_target: int | None = None
 
     # Try MOV r64, imm64 (REX.W + 0xB8..0xBF + 8 bytes)
     if i + 10 <= end and data[i] == _REX_W and data[i + 1] in _MOV_R64_IMM:
@@ -329,13 +331,13 @@ def _detect_load_and_jump_64(
 
 def _detect_load_and_jump_32(
     data: bytes, offset: int, section_rva: int
-) -> Tuple[Optional[int], Optional[int]]:
+) -> tuple[int | None, int | None]:
     """32-bit variant: ``mov reg, imm32`` + ``jmp/call``."""
     end = min(offset + 20, len(data))
     i = offset
 
-    bytecode_addr: Optional[int] = None
-    jmp_target: Optional[int] = None
+    bytecode_addr: int | None = None
+    jmp_target: int | None = None
 
     if i + 5 <= end and data[i] in _MOV_R32_IMM:
         bytecode_addr = struct.unpack_from("<I", data, i + 1)[0]
@@ -371,7 +373,7 @@ def _refine_with_capstone(
     max_insns: int = 30,
     *,
     disassembler: _Disassembler | None = None,
-) -> Tuple[int, Optional[int], Optional[int], str]:
+) -> tuple[int, int | None, int | None, str]:
     """Disassemble a short prologue and check for push-save + load + branch.
 
     Parameters
@@ -393,9 +395,9 @@ def _refine_with_capstone(
         dis = _create_disasm(arch_str)
 
     push_count = 0
-    load_imm: Optional[int] = None
-    branch_target: Optional[int] = None
-    reason_parts: List[str] = []
+    load_imm: int | None = None
+    branch_target: int | None = None
+    reason_parts: list[str] = []
 
     insns = dis.disassemble(
         data[file_offset:file_offset + 120], section_rva,
@@ -410,10 +412,8 @@ def _refine_with_capstone(
         elif mn in ("mov", "movabs") and "," in insn.operands:
             parts = insn.operands.replace(" ", "").split(",")
             if len(parts) == 2:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     load_imm = int(parts[1], 16)
-                except (ValueError, TypeError):
-                    pass
         elif mn == "lea" and "," in insn.operands:
             # Try to extract rip-relative target from operand string
             try:
@@ -432,10 +432,8 @@ def _refine_with_capstone(
             if insn.branch_target is not None:
                 branch_target = insn.branch_target
             else:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     branch_target = int(insn.operands, 16)
-                except (ValueError, TypeError):
-                    pass
             break  # stop after first branch
 
     if push_count >= (_MIN_PUSH_COUNT_64 if bit_width == 64 else _MIN_PUSH_COUNT_32):
@@ -454,8 +452,8 @@ def _refine_with_capstone(
 
 def _score_candidate(
     push_count: int,
-    bytecode_addr: Optional[int],
-    jmp_target: Optional[int],
+    bytecode_addr: int | None,
+    jmp_target: int | None,
     bit_width: int,
     section_entropy: float = 0.0,
 ) -> float:
@@ -502,7 +500,7 @@ def locate_vm_entries(
     pe_data: bytes,
     *,
     image_base: int = 0x00400000,
-    sections: Optional[Sequence[Dict[str, Any]]] = None,
+    sections: Sequence[dict[str, Any]] | None = None,
     bit_width: int = 64,
     min_confidence: float = 0.40,
     use_capstone: bool = True,
@@ -543,7 +541,7 @@ def locate_vm_entries(
     min_push = _MIN_PUSH_COUNT_64 if bit_width == 64 else _MIN_PUSH_COUNT_32
 
     # ── Build section list ───────────────────────────────────────────
-    sec_infos: List[Tuple[SectionInfo, float]] = []
+    sec_infos: list[tuple[SectionInfo, float]] = []
     if sections:
         for sd in sections:
             si = SectionInfo.from_pe_dict(sd)
@@ -662,7 +660,7 @@ def locate_vm_entries(
 
 def locate_entries_from_pe_result(
     pe_data: bytes,
-    pe_result: Dict[str, Any],
+    pe_result: dict[str, Any],
     *,
     bit_width: int = 64,
     min_confidence: float = 0.40,

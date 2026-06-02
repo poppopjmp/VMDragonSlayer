@@ -36,9 +36,10 @@ from __future__ import annotations
 
 import logging
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class ThemidaVMProfile:
     context_base: str = "edi"
     handler_table_address: int = 0
     opcode_width: int = 1
-    key_transforms: List[Dict[str, Any]] = field(default_factory=list)
+    key_transforms: list[dict[str, Any]] = field(default_factory=list)
     handler_count: int = 0
 
 
@@ -206,7 +207,7 @@ class ThemidaBytecodeDecoder:
 
     def __init__(
         self,
-        key_transforms: Sequence[Dict[str, Any]],
+        key_transforms: Sequence[dict[str, Any]],
         initial_key: int = 0,
         key_width: int = 32,
         opcode_width: int = 1,
@@ -221,7 +222,7 @@ class ThemidaBytecodeDecoder:
     def _mask(bits: int) -> int:
         return (1 << bits) - 1
 
-    def _apply_transform(self, key: int, opcode: int, transform: Dict[str, Any]) -> int:
+    def _apply_transform(self, key: int, opcode: int, transform: dict[str, Any]) -> int:
         """Apply one key-transform step."""
         op = transform.get("op", "xor").lower()
         imm = transform.get("imm", 0)
@@ -256,7 +257,7 @@ class ThemidaBytecodeDecoder:
 
         return key & self._mask_val
 
-    def decrypt(self, data: bytes) -> List[ThemidaDecryptedOpcode]:
+    def decrypt(self, data: bytes) -> list[ThemidaDecryptedOpcode]:
         """Decrypt a Themida bytecode buffer.
 
         Parameters
@@ -269,7 +270,7 @@ class ThemidaBytecodeDecoder:
         List[ThemidaDecryptedOpcode]
             Decrypted opcodes in order.
         """
-        result: List[ThemidaDecryptedOpcode] = []
+        result: list[ThemidaDecryptedOpcode] = []
         key = self._initial_key
         offset = 0
 
@@ -358,7 +359,7 @@ class ThemidaOpcodeTable:
         Encoding format: "absolute", "rva_relative", "base_relative".
     """
 
-    entries: List[ThemidaHandlerEntry] = field(default_factory=list)
+    entries: list[ThemidaHandlerEntry] = field(default_factory=list)
     base_address: int = 0
     entry_size: int = 4
     encoding: str = "absolute"
@@ -367,7 +368,7 @@ class ThemidaOpcodeTable:
     def handler_count(self) -> int:
         return len(self.entries)
 
-    def get_handler(self, opcode: int) -> Optional[ThemidaHandlerEntry]:
+    def get_handler(self, opcode: int) -> ThemidaHandlerEntry | None:
         """Look up a handler by virtual opcode."""
         for entry in self.entries:
             if entry.opcode == opcode:
@@ -409,7 +410,7 @@ def reconstruct_opcode_table(
         Reconstructed opcode table.
     """
     fmt = "<I" if entry_size == 4 else "<Q"
-    entries: List[ThemidaHandlerEntry] = []
+    entries: list[ThemidaHandlerEntry] = []
 
     n_entries = min(len(table_data) // entry_size, max_entries)
 
@@ -492,6 +493,7 @@ def classify_handler_entries(
     """
     try:
         import capstone
+
         from dragonslayer.analysis.handler_semantics import _classify_handler
         from dragonslayer.analysis.trace_ingestion import TraceInstruction
     except ImportError:
@@ -572,20 +574,20 @@ class ThemidaDevirtResult:
     profile: ThemidaVMProfile = field(default_factory=ThemidaVMProfile)
     opcode_table: ThemidaOpcodeTable = field(default_factory=ThemidaOpcodeTable)
     decrypted_bytecode: bytes = b""
-    handler_classifications: Dict[int, str] = field(default_factory=dict)
-    lifted_instructions: List[Dict[str, Any]] = field(default_factory=list)
+    handler_classifications: dict[int, str] = field(default_factory=dict)
+    lifted_instructions: list[dict[str, Any]] = field(default_factory=list)
     success: bool = False
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 def devirtualize_themida(
     bytecode: bytes,
     *,
-    profile: Optional[ThemidaVMProfile] = None,
-    table_data: Optional[bytes] = None,
+    profile: ThemidaVMProfile | None = None,
+    table_data: bytes | None = None,
     image_base: int = 0x400000,
-    entry_mnemonics: Optional[Sequence[str]] = None,
-    binary_data: Optional[bytes] = None,
+    entry_mnemonics: Sequence[str] | None = None,
+    binary_data: bytes | None = None,
 ) -> ThemidaDevirtResult:
     """End-to-end Themida devirtualisation.
 

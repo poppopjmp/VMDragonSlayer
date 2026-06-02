@@ -13,11 +13,10 @@ Dependency: ``pefile``.
 from __future__ import annotations
 
 import logging
-import math
 import os
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -58,7 +57,7 @@ class PEAnalyzer(Plugin):
                 duration=time.monotonic() - t0,
             )
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".exe")
             os.write(fd, file_data)
@@ -85,8 +84,8 @@ class PEAnalyzer(Plugin):
                 os.unlink(tmp_path)
 
     @staticmethod
-    def _analyze(file_path: str) -> Dict[str, Any]:
-        result: Dict[str, Any] = {"valid": False, "sections": [], "imports": {}, "exports": []}
+    def _analyze(file_path: str) -> dict[str, Any]:
+        result: dict[str, Any] = {"valid": False, "sections": [], "imports": {}, "exports": []}
 
         pe = pefile.PE(file_path)
 

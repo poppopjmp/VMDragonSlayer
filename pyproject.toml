@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmdragonslayer"
-version = "2.0.0"
+version = "0.9.1"
 description = "Advanced VM detection and analysis library for binary reverse engineering"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
@@ -231,6 +231,7 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
     "S",   # flake8-bandit (security)
+    "SIM", # flake8-simplify (matches CI --select)
 ]
 ignore = [
     "E501",   # line too long (handled by black)
@@ -241,7 +242,11 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S106", "S608"]  # Allow assert, hardcoded passwords in tests
-"dragonslayer/ml/*" = ["S301", "S302", "S310"]  # Allow pickle usage (with warnings)
+"dragonslayer/ml/*" = ["S301", "S302", "S310", "S311"]  # Pickle (warned) + non-crypto RNG for sampling
+"dragonslayer/api/server.py" = ["B008"]  # FastAPI uses callables (File/Depends) as arg defaults
+# Non-cryptographic random: jitter simulation / synthetic test-data generation only.
+"dragonslayer/analysis/anti_evasion/runtime_hooks.py" = ["S311"]
+"dragonslayer/analysis/bytecode_decrypt.py" = ["S311"]
 
 # MyPy configuration
 [tool.mypy]

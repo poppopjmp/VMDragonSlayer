@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class InstructionCategory:
 
 
 # x86 mnemonic → category mapping
-_MNEMONIC_CATEGORIES: Dict[str, str] = {
+_MNEMONIC_CATEGORIES: dict[str, str] = {
     # Arithmetic
     "add": InstructionCategory.ARITHMETIC,
     "sub": InstructionCategory.ARITHMETIC,
@@ -145,14 +145,14 @@ class LiftedInstruction:
     operands: str
     category: str
     raw_bytes: bytes
-    reads: List[str] = field(default_factory=list)   # registers/memory read
-    writes: List[str] = field(default_factory=list)   # registers/memory written
+    reads: list[str] = field(default_factory=list)   # registers/memory read
+    writes: list[str] = field(default_factory=list)   # registers/memory written
     is_branch: bool = False
-    branch_target: Optional[int] = None
-    registers: Dict[str, int] = field(default_factory=dict)
+    branch_target: int | None = None
+    registers: dict[str, int] = field(default_factory=dict)
     is_tainted: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {
             "address": self.address,
             "size": self.size,
@@ -220,7 +220,7 @@ class InstructionLifter:
         code: bytes,
         base_address: int = 0,
         max_instructions: int = 10000,
-    ) -> List[LiftedInstruction]:
+    ) -> list[LiftedInstruction]:
         """
         Disassemble and lift *code* to IR.
 
@@ -242,7 +242,7 @@ class InstructionLifter:
                 return self._lift_via_unified(code, base_address, max_instructions)
             return self._fallback_lift(code, base_address, max_instructions)
 
-        instructions: List[LiftedInstruction] = []
+        instructions: list[LiftedInstruction] = []
         for insn in self._md.disasm(code, base_address):
             if len(instructions) >= max_instructions:
                 break
@@ -257,12 +257,18 @@ class InstructionLifter:
                 if dest.startswith("[") or "ptr" in dest.lower():
                     category = InstructionCategory.MEMORY_WRITE
 
-            # Extract read/write registers
-            reads: List[str] = []
-            writes: List[str] = []
-            if insn.detail:
+            # Extract read/write registers. Detail mode is enabled on ``_md``,
+            # so the capstone bindings expose ``regs_read``/``regs_write`` (and
+            # ``operands``) directly on the instruction. Newer bindings no longer
+            # surface a ``CsInsn.detail`` attribute, so guard with try/except
+            # rather than probing ``insn.detail``.
+            reads: list[str] = []
+            writes: list[str] = []
+            try:
                 reads = [insn.reg_name(r) for r in insn.regs_read]
                 writes = [insn.reg_name(r) for r in insn.regs_write]
+            except (AttributeError, capstone.CsError):
+                pass
 
             # Branch detection
             is_branch = category in (
@@ -271,10 +277,15 @@ class InstructionLifter:
                 InstructionCategory.CALL,
             )
             branch_target = None
-            if is_branch and insn.detail and insn.detail.x86 and insn.detail.x86.operands:
-                op = insn.detail.x86.operands[0]
-                if op.type == capstone.x86.X86_OP_IMM:
-                    branch_target = op.imm
+            if is_branch:
+                try:
+                    operands = insn.operands
+                except (AttributeError, capstone.CsError):
+                    operands = None
+                if operands:
+                    op = operands[0]
+                    if op.type == capstone.x86.X86_OP_IMM:
+                        branch_target = op.imm
 
             instructions.append(LiftedInstruction(
                 address=insn.address,
@@ -296,7 +307,7 @@ class InstructionLifter:
         code: bytes,
         base_address: int,
         max_instructions: int,
-    ) -> List[LiftedInstruction]:
+    ) -> list[LiftedInstruction]:
         """Delegate to the unified :class:`Disassembler` and convert."""
         from dragonslayer.core.disassembler import to_lifted_instructions as _convert
         raw = self._unified_disasm.disassemble(
@@ -309,21 +320,21 @@ class InstructionLifter:
         code: bytes,
         base_address: int,
         max_instructions: int,
-    ) -> List[LiftedInstruction]:
+    ) -> list[LiftedInstruction]:
         """
         Minimal fallback when capstone is not available.
 
         Produces one pseudo-instruction per byte (useful for entropy / pattern
         analysis but not for real symbolic execution).
         """
-        instructions: List[LiftedInstruction] = []
+        instructions: list[LiftedInstruction] = []
         for i, byte in enumerate(code):
             if len(instructions) >= max_instructions:
                 break
             instructions.append(LiftedInstruction(
                 address=base_address + i,
                 size=1,
-                mnemonic=f"db",
+                mnemonic="db",
                 operands=f"0x{byte:02x}",
                 category=InstructionCategory.UNKNOWN,
                 raw_bytes=bytes([byte]),
@@ -335,7 +346,7 @@ class InstructionLifter:
         code: bytes,
         base_address: int = 0,
         max_instructions: int = 5000,
-    ) -> Tuple[List[LiftedInstruction], Dict[str, Any]]:
+    ) -> tuple[list[LiftedInstruction], dict[str, Any]]:
         """
         Lift a single function and extract metadata.
 
@@ -344,9 +355,9 @@ class InstructionLifter:
         """
         instructions = self.lift(code, base_address, max_instructions)
 
-        category_counts: Dict[str, int] = {}
-        call_targets: List[int] = []
-        branch_targets: List[int] = []
+        category_counts: dict[str, int] = {}
+        call_targets: list[int] = []
+        branch_targets: list[int] = []
 
         for insn in instructions:
             category_counts[insn.category] = category_counts.get(insn.category, 0) + 1

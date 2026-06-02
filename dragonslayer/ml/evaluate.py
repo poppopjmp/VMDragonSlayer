@@ -21,9 +21,10 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .model import BaseModel, PredictionResult
 from .taxonomy import CANONICAL_CATEGORIES, canonicalize
@@ -45,12 +46,12 @@ class GroundTruthEntry:
     id: str
     label: str
     handler_bytes_hex: str = ""
-    symbolic_summary: Optional[Dict[str, Any]] = None
+    symbolic_summary: dict[str, Any] | None = None
     description: str = ""
 
-    def to_features(self) -> Dict[str, Any]:
+    def to_features(self) -> dict[str, Any]:
         """Build a feature dict suitable for :meth:`BaseModel.predict`."""
-        features: Dict[str, Any] = {}
+        features: dict[str, Any] = {}
         if self.symbolic_summary:
             features["symbolic_summary"] = self.symbolic_summary
         if self.handler_bytes_hex:
@@ -59,8 +60,8 @@ class GroundTruthEntry:
 
 
 def load_ground_truth(
-    path: Optional[str] = None,
-) -> List[GroundTruthEntry]:
+    path: str | None = None,
+) -> list[GroundTruthEntry]:
     """Load ground-truth entries from *path* (or the default JSON)."""
     p = Path(path) if path else _DEFAULT_GT_PATH
     if not p.exists():
@@ -115,9 +116,9 @@ class ClassMetrics:
 class EvaluationReport:
     """Full evaluation report."""
 
-    per_class: Dict[str, ClassMetrics] = field(default_factory=dict)
-    confusion: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    predictions: List[Tuple[str, str, float]] = field(default_factory=list)
+    per_class: dict[str, ClassMetrics] = field(default_factory=dict)
+    confusion: dict[str, dict[str, int]] = field(default_factory=dict)
+    predictions: list[tuple[str, str, float]] = field(default_factory=list)
     total: int = 0
     correct: int = 0
 
@@ -168,7 +169,7 @@ class EvaluationReport:
                 )
         return "\n".join(lines)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "accuracy": round(self.accuracy, 4),
             "macro_precision": round(self.macro_precision, 4),
@@ -204,11 +205,11 @@ def evaluate_model(
     macro-averaged F1, and a confusion matrix.
     """
     # Initialise per-class metrics for every canonical category.
-    per_class: Dict[str, ClassMetrics] = {
+    per_class: dict[str, ClassMetrics] = {
         c: ClassMetrics(label=c) for c in CANONICAL_CATEGORIES
     }
-    confusion: Dict[str, Dict[str, int]] = defaultdict(lambda: Counter())  # type: ignore[arg-type]
-    predictions: List[Tuple[str, str, float]] = []
+    confusion: dict[str, dict[str, int]] = defaultdict(lambda: Counter())  # type: ignore[arg-type]
+    predictions: list[tuple[str, str, float]] = []
     correct = 0
 
     for entry in ground_truth:

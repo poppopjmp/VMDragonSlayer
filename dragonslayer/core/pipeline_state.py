@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Dict, List, Optional, Set
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 #: Map from stage name → set of stages that must have completed first.
 #: A stage *may* run without its soft dependencies (data just won't be
 #: there), but **hard** dependencies are enforced.
-STAGE_DEPENDENCIES: Dict[str, Set[str]] = {
+STAGE_DEPENDENCIES: dict[str, set[str]] = {
     # Early stages — no dependencies
     "binary_parse": set(),
     "pattern_analysis": set(),
@@ -78,7 +78,7 @@ STAGE_DEPENDENCIES: Dict[str, Set[str]] = {
 }
 
 
-def validate_stage_order(stages: List[str]) -> List[str]:
+def validate_stage_order(stages: list[str]) -> list[str]:
     """Validate that *stages* respects the dependency DAG.
 
     Parameters
@@ -150,10 +150,10 @@ class PipelineState:
     sha256: str = ""
     """SHA-256 hex digest.  Set by ``run()``."""
 
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     """Caller-provided metadata (filename, tags).  Set by ``run()``."""
 
-    pipeline_stages_completed: List[str] = field(default_factory=list)
+    pipeline_stages_completed: list[str] = field(default_factory=list)
     """Stages that have finished, in execution order.  Updated by ``run()``."""
 
     # ------- binary_parse stage -------------------------------------------
@@ -172,19 +172,19 @@ class PipelineState:
     binary_format: str = ""
     """Format string (``PE``, ``ELF``, ``MachO``).  Producer: ``binary_parse``."""
 
-    sections: List[Dict[str, Any]] = field(default_factory=list)
+    sections: list[dict[str, Any]] = field(default_factory=list)
     """Section headers.  Producer: ``binary_parse``."""
 
     # ------- pattern_analysis stage ----------------------------------------
-    pattern_analysis: Dict[str, Any] = field(default_factory=dict)
+    pattern_analysis: dict[str, Any] = field(default_factory=dict)
     """Full pattern analysis result dict.  Producer: ``pattern_analysis``."""
 
-    pattern_matches: List[Dict[str, Any]] = field(default_factory=list)
+    pattern_matches: list[dict[str, Any]] = field(default_factory=list)
     """Individual match records.  Producer: ``pattern_analysis``.
     Consumers: ``classify``, ``llm_analysis``, ``llm_summary``."""
 
     # ------- vm_discovery stage --------------------------------------------
-    vm_discovery: Dict[str, Any] = field(default_factory=dict)
+    vm_discovery: dict[str, Any] = field(default_factory=dict)
     """Full VM discovery result dict.  Producer: ``vm_discovery``.
     Consumers: ``taint_analysis``, ``symbolic_execution``,
     ``devirtualize``, ``llm_analysis``, ``llm_summary``."""
@@ -196,7 +196,7 @@ class PipelineState:
     """Detection confidence [0.0, 1.0].  Producer: ``vm_discovery``."""
 
     # ------- anti_evasion stage --------------------------------------------
-    anti_evasion: Dict[str, Any] = field(default_factory=dict)
+    anti_evasion: dict[str, Any] = field(default_factory=dict)
     """Anti-evasion report dict.  Producer: ``anti_evasion``."""
 
     evasion_risk: float = 0.0
@@ -207,10 +207,10 @@ class PipelineState:
     Consumer: ``_run_plugin_stage`` (dynamic)."""
 
     # ------- classify stage ------------------------------------------------
-    classification: Dict[str, Any] = field(default_factory=dict)
+    classification: dict[str, Any] = field(default_factory=dict)
     """Pattern classification result.  Producer: ``classify``."""
 
-    dominant_handler_type: Optional[str] = None
+    dominant_handler_type: str | None = None
     """Most common handler type.  Producer: ``classify``."""
 
     vm_complexity: float = 0.0
@@ -221,69 +221,69 @@ class PipelineState:
     #: The stage label keys ("static", "dynamic", "enrichment") are stored there.
 
     # ------- taint_analysis stage ------------------------------------------
-    taint_results: Dict[str, Any] = field(default_factory=dict)
+    taint_results: dict[str, Any] = field(default_factory=dict)
     """Taint analysis result.  Producer: ``taint_analysis``."""
 
     # ------- symbolic_execution stage --------------------------------------
-    symbolic_execution: Dict[str, Any] = field(default_factory=dict)
+    symbolic_execution: dict[str, Any] = field(default_factory=dict)
     """Symbolic execution result.  Producer: ``symbolic_execution``."""
 
-    _triton_path_constraints: List[Any] = field(default_factory=list)
+    _triton_path_constraints: list[Any] = field(default_factory=list)
     """Triton path constraints for seeding Z3.  Internal."""
 
     # ------- dispatcher_analysis stage -------------------------------------
-    dispatcher_analysis: Dict[str, Any] = field(default_factory=dict)
+    dispatcher_analysis: dict[str, Any] = field(default_factory=dict)
     """Dispatcher analysis result.  Producer: ``dispatcher_analysis``."""
 
-    handler_table: List[Dict[str, Any]] = field(default_factory=list)
+    handler_table: list[dict[str, Any]] = field(default_factory=list)
     """Decoded handler table.  Producer: ``dispatcher_analysis``."""
 
     # ------- devirtualize stage --------------------------------------------
     detected_protector: str = ""
     """Identified protector name.  Producer: ``devirtualize``."""
 
-    dispatcher_match: Dict[str, Any] = field(default_factory=dict)
+    dispatcher_match: dict[str, Any] = field(default_factory=dict)
     """Dispatcher match details.  Producer: ``devirtualize``."""
 
-    vmprotect_dispatcher: Dict[str, Any] = field(default_factory=dict)
+    vmprotect_dispatcher: dict[str, Any] = field(default_factory=dict)
     """VMProtect-specific dispatcher data.  Producer: ``devirtualize``."""
 
-    bytecode_decryptor: Dict[str, Any] = field(default_factory=dict)
+    bytecode_decryptor: dict[str, Any] = field(default_factory=dict)
     """Bytecode decryptor config/result.  Producer: ``devirtualize``."""
 
-    decrypted_handler_table: Dict[str, Any] = field(default_factory=dict)
+    decrypted_handler_table: dict[str, Any] = field(default_factory=dict)
     """Decrypted handler table.  Producer: ``devirtualize``."""
 
-    handler_extraction: Dict[str, Any] = field(default_factory=dict)
+    handler_extraction: dict[str, Any] = field(default_factory=dict)
     """Handler extraction result.  Producer: ``devirtualize``."""
 
-    vm_context_layout: Dict[str, Any] = field(default_factory=dict)
+    vm_context_layout: dict[str, Any] = field(default_factory=dict)
     """VM context register layout.  Producer: ``devirtualize``."""
 
-    vm_entry_points: Dict[str, Any] = field(default_factory=dict)
+    vm_entry_points: dict[str, Any] = field(default_factory=dict)
     """VM entry point detection.  Producer: ``devirtualize``."""
 
-    handler_clustering: Dict[str, Any] = field(default_factory=dict)
+    handler_clustering: dict[str, Any] = field(default_factory=dict)
     """Handler clustering result.  Producer: ``devirtualize``."""
 
-    handler_cfg: Dict[str, Any] = field(default_factory=dict)
+    handler_cfg: dict[str, Any] = field(default_factory=dict)
     """Handler CFG result.  Producer: ``devirtualize``."""
 
-    static_handler_cfg: Dict[str, Any] = field(default_factory=dict)
+    static_handler_cfg: dict[str, Any] = field(default_factory=dict)
     """Static handler CFG overlay.  Producer: ``devirtualize``."""
 
-    devirt_boundaries: List[Dict[str, Any]] = field(default_factory=list)
+    devirt_boundaries: list[dict[str, Any]] = field(default_factory=list)
     """Final devirtualised handler boundaries.  Producer: ``devirtualize``."""
 
     # ------- LLM stages ---------------------------------------------------
-    llm_analysis: Dict[str, Any] = field(default_factory=dict)
+    llm_analysis: dict[str, Any] = field(default_factory=dict)
     """LLM analysis result.  Producer: ``llm_analysis``."""
 
-    llm_summary: Dict[str, Any] = field(default_factory=dict)
+    llm_summary: dict[str, Any] = field(default_factory=dict)
     """LLM summary result.  Producer: ``llm_summary``."""
 
     # ------- Overflow for plugins / external data -------------------------
-    _overflow: Dict[str, Any] = field(default_factory=dict)
+    _overflow: dict[str, Any] = field(default_factory=dict)
     """Backward-compatible dict for plugin data, dynamic keys, and
     any data not yet migrated to typed fields."""
 
@@ -343,7 +343,7 @@ class PipelineState:
             return val
         return self._overflow.setdefault(key, default)
 
-    def update(self, mapping: Dict[str, Any]) -> None:
+    def update(self, mapping: dict[str, Any]) -> None:
         """Dict-like ``.update()`` for backward compatibility."""
         for k, v in mapping.items():
             self[k] = v
@@ -365,9 +365,9 @@ class PipelineState:
         keys.extend(self._overflow.keys())
         return keys
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a flat dictionary (for JSON / PipelineResult)."""
-        d: Dict[str, Any] = {}
+        d: dict[str, Any] = {}
         for f in self.__dataclass_fields__:
             if f.startswith("_"):
                 continue

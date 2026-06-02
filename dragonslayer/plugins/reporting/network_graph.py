@@ -14,13 +14,10 @@ No heavy dependencies — uses only the standard library.
 from __future__ import annotations
 
 import logging
-import math
-import os
 import re
 import struct
 import time
-from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -73,15 +70,18 @@ def extract_strings(data: bytes, min_length: int = 4) -> str:
     return "\n".join(strings)
 
 
-def extract_hostnames(text: str) -> List[str]:
+def extract_hostnames(text: str) -> list[str]:
     """Extract valid hostnames/domains from *text*."""
     candidates = _HOSTNAME_RE.findall(text)
     valid: list[str] = []
     for hostname in candidates:
         tld = hostname.rsplit(".", 1)[-1].lower()
-        if tld in VALID_SUFFIXES and len(hostname) > 4:
-            if not hostname.startswith(("0.", "1.")):
-                valid.append(hostname.lower())
+        if (
+            tld in VALID_SUFFIXES
+            and len(hostname) > 4
+            and not hostname.startswith(("0.", "1."))
+        ):
+            valid.append(hostname.lower())
     return sorted(set(valid))
 
 
@@ -112,7 +112,7 @@ class NetworkGraphPlugin(Plugin):
             strings_data = extract_strings(file_data)
             domains = extract_hostnames(strings_data)
 
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "format": fmt,
                 "domains": domains,
                 "domain_count": len(domains),

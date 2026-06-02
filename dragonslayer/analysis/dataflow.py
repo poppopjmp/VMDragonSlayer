@@ -28,11 +28,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from dragonslayer.analysis.handler_semantics import (
     SemanticOpcodeTable,
-    OpcodeTableEntry,
     VMOperation,
 )
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
@@ -91,38 +90,38 @@ class PhiNode:
     """A phi-node at a merge point."""
     target_var: str
     handler_index: int    # the handler where the phi is needed
-    sources: List[str]    # variable names from each predecessor
+    sources: list[str]    # variable names from each predecessor
 
 
 @dataclass
 class DataFlowResult:
     """Result of cross-handler data-flow analysis."""
 
-    definitions: List[VarDef] = field(default_factory=list)
+    definitions: list[VarDef] = field(default_factory=list)
     """All variable definitions across handlers."""
 
-    uses: List[VarUse] = field(default_factory=list)
+    uses: list[VarUse] = field(default_factory=list)
     """All variable uses across handlers."""
 
-    reaching_defs: Dict[str, VarDef] = field(default_factory=dict)
+    reaching_defs: dict[str, VarDef] = field(default_factory=dict)
     """For each variable name used, the VarDef that reaches it."""
 
-    dead_variables: List[str] = field(default_factory=list)
+    dead_variables: list[str] = field(default_factory=list)
     """Variables that were defined but never used."""
 
-    live_ranges: List[LiveRange] = field(default_factory=list)
+    live_ranges: list[LiveRange] = field(default_factory=list)
     """Live range for each defined variable."""
 
-    phi_nodes: List[PhiNode] = field(default_factory=list)
+    phi_nodes: list[PhiNode] = field(default_factory=list)
     """Phi-nodes at control-flow merge points."""
 
-    def_use_edges: List[Tuple[str, str, int, int]] = field(default_factory=list)
+    def_use_edges: list[tuple[str, str, int, int]] = field(default_factory=list)
     """(def_var, use_var, def_handler_idx, use_handler_idx) edges."""
 
     handler_count: int = 0
     """Number of handlers analysed."""
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "handler_count": self.handler_count,
             "total_defs": len(self.definitions),
@@ -152,7 +151,7 @@ _UNARY_OPS = {VMOperation.NOT, VMOperation.NEG}
 _CMP_OPS = {VMOperation.CMP, VMOperation.TEST}
 
 # Operation → (pops, pushes, produces_flags)
-_OP_PROFILE: Dict[str, Tuple[int, int, bool]] = {}
+_OP_PROFILE: dict[str, tuple[int, int, bool]] = {}
 
 for _op in _BINARY_OPS:
     _OP_PROFILE[_op] = (2, 1, False)
@@ -172,7 +171,7 @@ _OP_PROFILE[VMOperation.RET]  = (0, 0, False)
 _OP_PROFILE[VMOperation.NOP]  = (0, 0, False)
 
 # Op → name prefix (mirrors pseudocode._DefUseNamer)
-_OP_PREFIX: Dict[str, str] = {
+_OP_PREFIX: dict[str, str] = {
     VMOperation.ADD: "sum", VMOperation.SUB: "diff",
     VMOperation.MUL: "prod", VMOperation.DIV: "quot",
     VMOperation.AND: "band", VMOperation.OR: "bor",
@@ -193,8 +192,8 @@ class _StackTracker:
     """Abstract stack for tracking variable names across handlers."""
 
     def __init__(self) -> None:
-        self._stack: List[str] = []
-        self._counters: Dict[str, int] = {}
+        self._stack: list[str] = []
+        self._counters: dict[str, int] = {}
 
     def _next_name(self, op: str) -> str:
         prefix = _OP_PREFIX.get(op, "v")
@@ -219,13 +218,13 @@ class _StackTracker:
     def depth(self) -> int:
         return len(self._stack)
 
-    def snapshot(self) -> List[str]:
+    def snapshot(self) -> list[str]:
         return list(self._stack)
 
 
 def compute_data_flow(
     opcode_table: SemanticOpcodeTable,
-    boundaries: List[HandlerBoundary],
+    boundaries: list[HandlerBoundary],
     handler_cfg: Any = None,
 ) -> DataFlowResult:
     """Compute cross-handler data-flow analysis.
@@ -249,9 +248,9 @@ def compute_data_flow(
     tracker = _StackTracker()
 
     # Track where each variable is defined
-    def_map: Dict[str, VarDef] = {}
+    def_map: dict[str, VarDef] = {}
     # Track uses of each variable
-    use_map: Dict[str, List[VarUse]] = {}
+    use_map: dict[str, list[VarUse]] = {}
 
     for i, boundary in enumerate(boundaries):
         entry = opcode_table.lookup_handler(boundary.handler_address)
@@ -267,7 +266,7 @@ def compute_data_flow(
         pops, pushes, produces_flags = profile
 
         # Record uses (pops from stack)
-        consumed: List[str] = []
+        consumed: list[str] = []
         for _ in range(pops):
             name = tracker.pop()
             consumed.append(name)
@@ -297,7 +296,7 @@ def compute_data_flow(
             # Build def→use edges for consumed operands
             for consumed_name in consumed:
                 result.def_use_edges.append((
-                    consumed_name, name, 
+                    consumed_name, name,
                     def_map[consumed_name].handler_index if consumed_name in def_map else -1,
                     i,
                 ))
@@ -348,7 +347,7 @@ def compute_data_flow(
 # Standalone helpers (B51)
 # ---------------------------------------------------------------------------
 
-def compute_live_ranges(result: DataFlowResult) -> List[LiveRange]:
+def compute_live_ranges(result: DataFlowResult) -> list[LiveRange]:
     """Compute live ranges from an existing :class:`DataFlowResult`.
 
     Builds an index of uses per variable name and returns a
@@ -358,13 +357,13 @@ def compute_live_ranges(result: DataFlowResult) -> List[LiveRange]:
     This deliberately mirrors the inline computation inside
     :func:`compute_data_flow` but is available as a reusable export.
     """
-    use_map: Dict[str, int] = {}  # var_name → max handler index
+    use_map: dict[str, int] = {}  # var_name → max handler index
     for u in result.uses:
         cur = use_map.get(u.name, -1)
         if u.handler_index > cur:
             use_map[u.name] = u.handler_index
 
-    ranges: List[LiveRange] = []
+    ranges: list[LiveRange] = []
     for d in result.definitions:
         ranges.append(LiveRange(
             name=d.name,
@@ -378,8 +377,8 @@ def backward_slice(
     result: DataFlowResult,
     target_var: str,
     *,
-    boundary_index: Optional[int] = None,
-) -> "BackwardSliceResult":
+    boundary_index: int | None = None,
+) -> BackwardSliceResult:
     """Backward slice on the fine-grained def-use graph.
 
     Starting from *target_var*, walks ``result.def_use_edges`` in
@@ -403,16 +402,16 @@ def backward_slice(
         and the subgraph edges.
     """
     # Build reverse adjacency: produced_var → [(consumed_var, def_idx, use_idx), ...]
-    rev_adj: Dict[str, List[Tuple[str, int, int]]] = {}
+    rev_adj: dict[str, list[tuple[str, int, int]]] = {}
     for consumed, produced, def_idx, use_idx in result.def_use_edges:
         if boundary_index is not None and use_idx > boundary_index:
             continue
         rev_adj.setdefault(produced, []).append((consumed, def_idx, use_idx))
 
-    visited: Set[str] = set()
-    handler_indices: Set[int] = set()
-    slice_edges: List[Tuple[str, str, int, int]] = []
-    worklist: List[str] = [target_var]
+    visited: set[str] = set()
+    handler_indices: set[int] = set()
+    slice_edges: list[tuple[str, str, int, int]] = []
+    worklist: list[str] = [target_var]
 
     while worklist:
         var = worklist.pop()
@@ -445,16 +444,16 @@ class BackwardSliceResult:
     target: str
     """Variable that was sliced on."""
 
-    contributing_vars: List[str]
+    contributing_vars: list[str]
     """All variable names in the slice (including the target)."""
 
-    handler_indices: List[int]
+    handler_indices: list[int]
     """Handler indices that participate in the slice."""
 
-    edges: List[Tuple[str, str, int, int]]
+    edges: list[tuple[str, str, int, int]]
     """Subset of def-use edges in the slice."""
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "target": self.target,
             "contributing_count": len(self.contributing_vars),
@@ -465,17 +464,17 @@ class BackwardSliceResult:
 
 def _compute_phi_nodes(
     cfg: Any,
-    boundaries: List[HandlerBoundary],
-    def_map: Dict[str, VarDef],
+    boundaries: list[HandlerBoundary],
+    def_map: dict[str, VarDef],
     opcode_table: SemanticOpcodeTable,
-) -> List[PhiNode]:
+) -> list[PhiNode]:
     """Insert phi-nodes at merge points in the handler CFG.
 
     A phi-node is needed at handler H if:
     - H has multiple predecessors P1, P2, ...
     - Different variables could be on the stack at the merge point
     """
-    phi_nodes: List[PhiNode] = []
+    phi_nodes: list[PhiNode] = []
     if not _NX or cfg is None:
         return phi_nodes
 
@@ -486,9 +485,9 @@ def _compute_phi_nodes(
                 continue
 
             # Collect reaching definitions from each predecessor path
-            pred_defs: Dict[int, Set[str]] = {}
+            pred_defs: dict[int, set[str]] = {}
             for p in preds:
-                defs_from_p: Set[str] = set()
+                defs_from_p: set[str] = set()
                 for d in def_map.values():
                     if d.handler_index <= p:
                         defs_from_p.add(d.name)
@@ -518,7 +517,7 @@ def _compute_phi_nodes(
 
 def eliminate_dead_vars(
     pseudocode_text: str,
-    dead_variables: List[str],
+    dead_variables: list[str],
 ) -> str:
     """Remove lines that only define dead variables.
 
@@ -530,7 +529,7 @@ def eliminate_dead_vars(
 
     dead_set = set(dead_variables)
     lines = pseudocode_text.split("\n")
-    result: List[str] = []
+    result: list[str] = []
 
     for line in lines:
         stripped = line.strip()

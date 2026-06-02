@@ -61,116 +61,6 @@ __all__ = [
     "list_formats", "validate_roundtrip",
 ]
 
-from .binary_format import (  # noqa: F401
-    ParsedBinary,
-    Section,
-    BinaryFormat,
-    Architecture,
-    parse_binary,
-    detect_format,
-    LIEF_AVAILABLE,
-)
-
-from .trace_ingestion import (  # noqa: F401
-    ExecutionTrace,
-    TraceInstruction,
-    TraceMemoryAccess,
-    TraceControlFlow,
-    HandlerMarker,
-    parse_trace_text,
-    from_shared_data,
-    from_triton_result,
-    from_angr_result,
-    from_qiling_result,
-)
-
-from .cfg import (  # noqa: F401
-    build_instruction_cfg,
-    build_handler_cfg,
-    extract_basic_blocks,
-    analyse_cfg,
-    find_dominators,
-    BasicBlock,
-    CFGStats,
-    NX_AVAILABLE,
-)
-
-from .bytecode_extract import (  # noqa: F401
-    extract_bytecode,
-    BytecodeStream,
-    OpcodeMap,
-    VMOpcode,
-)
-
-from .handler_semantics import (  # noqa: F401
-    analyse_handler_semantics,
-    HandlerSemantic,
-    OpcodeTableEntry,
-    SemanticOpcodeTable,
-    VMOperation,
-)
-
-from .pseudocode import (  # noqa: F401
-    emit_pseudocode,
-    emit_linear,
-    emit_structured,
-    emit_c_like,
-    emit_cifuentes,
-    emit_region,
-    structure_cfg,
-    StructuredRegion,
-    StructuredBlock,
-    PseudocodeResult,
-)
-
-from .bytecode_cfg import (  # noqa: F401
-    build_handler_cfg as build_handler_cfg_v2,
-    build_static_cfg,
-    walk_trace_bytecode,
-    walk_static_bytecode,
-    detect_natural_loops,
-    build_loop_tree,
-    VMInstruction,
-    HandlerBasicBlock,
-    CFGEdge,
-    HandlerCFG,
-    NaturalLoop,
-    LoopTree,
-)
-
-from .symbolic_depth import (  # noqa: F401
-    extract_symbolic_summaries,
-    run_handler_symbolic_execution,
-    collect_symbolic_summaries,
-)
-
-from .bytecode_decrypt import (  # noqa: F401
-    BytecodeDecryptor,
-    KeyTransform,
-    TransformOp,
-    parse_decode_transforms,
-    detect_initial_key,
-    decrypt_handler_table,
-    make_decryptor_from_dispatcher,
-    DecryptedHandlerTable,
-    HandlerTableEntry,
-)
-
-from .mba_simplifier import (  # noqa: F401
-    simplify_mba,
-    simplify_expr,
-    simplify_batch,
-    simplify_handler_operands,
-    verify_equivalence,
-    MBAResult,
-    MBAStats,
-)
-
-from .devirtualisation_result import (  # noqa: F401
-    DevirtualisationResult,
-)
-
-
 # ---------------------------------------------------------------------------
 # Optional sub-module imports — use a helper to eliminate boilerplate.
 # Each entry is (module_relative_name, [names_to_import]).  If the module
@@ -178,8 +68,108 @@ from .devirtualisation_result import (  # noqa: F401
 # to ``None`` at package level so dependents can test availability with a
 # simple ``if name is None`` guard.
 # ---------------------------------------------------------------------------
-
 import importlib as _importlib
+
+from .binary_format import (  # noqa: F401
+    LIEF_AVAILABLE,
+    Architecture,
+    BinaryFormat,
+    ParsedBinary,
+    Section,
+    detect_format,
+    parse_binary,
+)
+from .bytecode_cfg import (
+    CFGEdge,
+    HandlerBasicBlock,
+    HandlerCFG,
+    LoopTree,
+    NaturalLoop,
+    VMInstruction,
+    build_loop_tree,
+    build_static_cfg,
+    detect_natural_loops,
+    walk_static_bytecode,
+    walk_trace_bytecode,
+)
+from .bytecode_cfg import (  # noqa: F401
+    build_handler_cfg as build_handler_cfg_v2,
+)
+from .bytecode_decrypt import (  # noqa: F401
+    BytecodeDecryptor,
+    DecryptedHandlerTable,
+    HandlerTableEntry,
+    KeyTransform,
+    TransformOp,
+    decrypt_handler_table,
+    detect_initial_key,
+    make_decryptor_from_dispatcher,
+    parse_decode_transforms,
+)
+from .bytecode_extract import (  # noqa: F401
+    BytecodeStream,
+    OpcodeMap,
+    VMOpcode,
+    extract_bytecode,
+)
+from .cfg import (  # noqa: F401
+    NX_AVAILABLE,
+    BasicBlock,
+    CFGStats,
+    analyse_cfg,
+    build_handler_cfg,
+    build_instruction_cfg,
+    extract_basic_blocks,
+    find_dominators,
+)
+from .devirtualisation_result import (  # noqa: F401
+    DevirtualisationResult,
+)
+from .handler_semantics import (  # noqa: F401
+    HandlerSemantic,
+    OpcodeTableEntry,
+    SemanticOpcodeTable,
+    VMOperation,
+    analyse_handler_semantics,
+)
+from .mba_simplifier import (  # noqa: F401
+    MBAResult,
+    MBAStats,
+    simplify_batch,
+    simplify_expr,
+    simplify_handler_operands,
+    simplify_mba,
+    verify_equivalence,
+)
+from .pseudocode import (  # noqa: F401
+    PseudocodeResult,
+    StructuredBlock,
+    StructuredRegion,
+    emit_c_like,
+    emit_cifuentes,
+    emit_linear,
+    emit_pseudocode,
+    emit_region,
+    emit_structured,
+    structure_cfg,
+)
+from .symbolic_depth import (  # noqa: F401
+    collect_symbolic_summaries,
+    extract_symbolic_summaries,
+    run_handler_symbolic_execution,
+)
+from .trace_ingestion import (  # noqa: F401
+    ExecutionTrace,
+    HandlerMarker,
+    TraceControlFlow,
+    TraceInstruction,
+    TraceMemoryAccess,
+    from_angr_result,
+    from_qiling_result,
+    from_shared_data,
+    from_triton_result,
+    parse_trace_text,
+)
 
 
 def _try_import(module: str, names: list[str]) -> None:

@@ -12,13 +12,11 @@ Every model (:class:`VMHandlerModel`, :class:`SymbolicClassifierModel`,
 
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, List
-
 # ---------------------------------------------------------------------------
 # Canonical label set — aligned with vmprotect_handlers.json handler_type
 # ---------------------------------------------------------------------------
 
-CANONICAL_CATEGORIES: List[str] = [
+CANONICAL_CATEGORIES: list[str] = [
     "arithmetic",       # ADD, SUB, MUL, DIV, NEG, INC, DEC
     "bitwise",          # AND, OR, XOR, NOT, SHL, SHR, ROL, ROR
     "memory",           # MOV [mem], LOAD/STORE
@@ -33,14 +31,14 @@ CANONICAL_CATEGORIES: List[str] = [
     "unknown",          # fallback
 ]
 
-CANONICAL_SET: FrozenSet[str] = frozenset(CANONICAL_CATEGORIES)
+CANONICAL_SET: frozenset[str] = frozenset(CANONICAL_CATEGORIES)
 
 
 # ---------------------------------------------------------------------------
 # Legacy → canonical mappings
 # ---------------------------------------------------------------------------
 
-_LEGACY_MAP: Dict[str, str] = {
+_LEGACY_MAP: dict[str, str] = {
     # model.py VMHandlerModel heuristic
     "logic":         "bitwise",
     "load_store":    "memory",

@@ -22,7 +22,6 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -162,11 +161,11 @@ def analyze(
     ctx: click.Context,
     file: str,
     analysis_type: str,
-    output: Optional[str],
+    output: str | None,
     json_output: bool,
 ) -> None:
     """Run a full analysis pipeline on a binary."""
-    from dragonslayer.core.orchestrator import Orchestrator, AnalysisType
+    from dragonslayer.core.orchestrator import AnalysisType, Orchestrator
 
     # Validate analysis type early.
     try:
@@ -177,7 +176,7 @@ def analyze(
             f"{analysis_type!r} is not a valid analysis type.\n"
             f"Valid types: {', '.join(valid)}",
             param_hint="'--type'",
-        )
+        ) from None
 
     try:
         binary_data = Path(file).read_bytes()
@@ -287,7 +286,7 @@ def patterns() -> None:
 @patterns.command("list")
 @click.option("--arch", default=None, help="Filter by architecture.")
 @click.option("--type", "handler_type", default=None, help="Filter by handler type.")
-def patterns_list(arch: Optional[str], handler_type: Optional[str]) -> None:
+def patterns_list(arch: str | None, handler_type: str | None) -> None:
     """List patterns in the database."""
     from dragonslayer.analysis.pattern_analysis.database import PatternDatabase
 
@@ -326,7 +325,7 @@ def export_cmd(
     ctx: click.Context,
     file: str,
     fmt: str,
-    output: Optional[str],
+    output: str | None,
     analysis_type: str,
 ) -> None:
     """Analyze a binary and export results in the specified format.
@@ -334,15 +333,17 @@ def export_cmd(
     Supported formats: json, text (FORMAT.md), csv, ida (IDA annotations),
     ghidra (Ghidra Jython script).
     """
-    from dragonslayer.core.orchestrator import Orchestrator
     from dragonslayer.analysis.trace_export import (
         OutputFormat,
+    )
+    from dragonslayer.analysis.trace_export import (
         export_trace as do_export,
     )
     from dragonslayer.analysis.trace_ingestion import (
         ExecutionTrace,
         HandlerMarker,
     )
+    from dragonslayer.core.orchestrator import Orchestrator
 
     binary_data = Path(file).read_bytes()
     click.echo(f"[*] Analyzing {file} ({len(binary_data):,} bytes) "

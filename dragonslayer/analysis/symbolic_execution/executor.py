@@ -15,20 +15,21 @@ the pipeline and LLM analyzer consume.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import heapq
 import logging
 import re
 import time
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, TypedDict
-
-from .state import SymbolicState
-from .lifter import InstructionLifter, LiftedInstruction, InstructionCategory
-from .solver import Z3Solver, SolverResult
+from typing import Any, TypedDict
 
 from dragonslayer.core.exceptions import AnalysisError, ResourceLimitError
+
+from .lifter import InstructionCategory, InstructionLifter, LiftedInstruction
+from .solver import Z3Solver
+from .state import SymbolicState
+
 # B79: Hoist z3 import to module level to avoid repeated inline imports.
 # The module is optional; all z3-dependent code checks _HAS_Z3 first.
 try:
@@ -62,27 +63,27 @@ class HandlerInfoDict(TypedDict):
     address: int
     category: str
     instruction_count: int
-    instructions: List[Dict[str, Any]]
-    reads: List[str]
-    writes: List[str]
+    instructions: list[dict[str, Any]]
+    reads: list[str]
+    writes: list[str]
     confidence: float
 
 
 class ExecutionResultDict(TypedDict, total=False):
     """Shape returned by :meth:`ExecutionResult.to_dict`."""
     success: bool
-    handlers: List[HandlerInfoDict]
+    handlers: list[HandlerInfoDict]
     paths_explored: int
     instructions_executed: int
-    dispatcher_address: Optional[int]
+    dispatcher_address: int | None
     dispatcher_confidence: float
-    handler_table: Dict[str, str]
-    opaque_predicates: List[Dict[str, Any]]
+    handler_table: dict[str, str]
+    opaque_predicates: list[dict[str, Any]]
     state_snapshot_count: int
-    vmprotect_dispatcher: Optional[Dict[str, Any]]
-    loops_detected: List[Dict[str, Any]]
-    cfg: Optional[Dict[str, Any]]
-    error: Optional[str]
+    vmprotect_dispatcher: dict[str, Any] | None
+    loops_detected: list[dict[str, Any]]
+    cfg: dict[str, Any] | None
+    error: str | None
     speculative_paths_explored: int
 
 
@@ -90,24 +91,24 @@ class HandlerSymbolicSummaryDict(TypedDict, total=False):
     """Shape returned by :meth:`HandlerSymbolicSummary.to_dict`."""
     address: int
     instruction_count: int
-    final_registers: Dict[str, str]
-    simplified_registers: Dict[str, str]
+    final_registers: dict[str, str]
+    simplified_registers: dict[str, str]
     memory_write_count: int
-    memory_writes: List[Dict[str, Any]]
+    memory_writes: list[dict[str, Any]]
     constraint_count: int
-    constraints: List[str]
-    memory_effects: Dict[str, Any]
-    error: Optional[str]
+    constraints: list[str]
+    memory_effects: dict[str, Any]
+    error: str | None
 
 
 class LoopInfoDict(TypedDict):
     """Shape returned by :meth:`LoopInfo.to_dict`."""
     header_address: str
-    back_edge_sources: List[str]
+    back_edge_sources: list[str]
     iteration_count: int
     body_size: int
     widened: bool
-    widened_registers: List[str]
+    widened_registers: list[str]
 
 
 @dataclass
@@ -126,9 +127,9 @@ class HandlerInfo:
     address: int
     category: str
     instruction_count: int
-    instructions: List[Dict[str, Any]] = field(default_factory=list)
-    reads: List[str] = field(default_factory=list)
-    writes: List[str] = field(default_factory=list)
+    instructions: list[dict[str, Any]] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
     confidence: float = 0.0
 
     def to_dict(self) -> HandlerInfoDict:
@@ -163,18 +164,18 @@ class ExecutionResult:
         error: Error message if *success* is ``False``.
     """
     success: bool
-    handlers: List[HandlerInfo] = field(default_factory=list)
+    handlers: list[HandlerInfo] = field(default_factory=list)
     paths_explored: int = 0
     instructions_executed: int = 0
-    dispatcher_address: Optional[int] = None
+    dispatcher_address: int | None = None
     dispatcher_confidence: float = 0.0
-    handler_table: Dict[int, str] = field(default_factory=dict)
-    opaque_predicates: List[Dict[str, Any]] = field(default_factory=list)
-    state_snapshots: List[Dict[str, Any]] = field(default_factory=list)
-    vmprotect_dispatcher: Optional[Dict[str, Any]] = None
-    loops_detected: List[Dict[str, Any]] = field(default_factory=list)
-    cfg: Optional[Dict[str, Any]] = None  # B60: CFG graph structure
-    error: Optional[str] = None
+    handler_table: dict[int, str] = field(default_factory=dict)
+    opaque_predicates: list[dict[str, Any]] = field(default_factory=list)
+    state_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    vmprotect_dispatcher: dict[str, Any] | None = None
+    loops_detected: list[dict[str, Any]] = field(default_factory=list)
+    cfg: dict[str, Any] | None = None  # B60: CFG graph structure
+    error: str | None = None
     speculative_paths_explored: int = 0
 
     def to_dict(self) -> ExecutionResultDict:
@@ -213,13 +214,13 @@ class HandlerSymbolicSummary:
     """
     address: int = 0
     instruction_count: int = 0
-    final_registers: Dict[str, str] = field(default_factory=dict)
-    simplified_registers: Dict[str, str] = field(default_factory=dict)
-    memory_writes: List[Dict[str, Any]] = field(default_factory=list)
-    constraints: List[str] = field(default_factory=list)
-    input_symbols: Dict[str, str] = field(default_factory=dict)
-    memory_effects: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    final_registers: dict[str, str] = field(default_factory=dict)
+    simplified_registers: dict[str, str] = field(default_factory=dict)
+    memory_writes: list[dict[str, Any]] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    input_symbols: dict[str, str] = field(default_factory=dict)
+    memory_effects: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
     def to_dict(self) -> HandlerSymbolicSummaryDict:
         return {
@@ -253,11 +254,11 @@ class LoopInfo:
         widened_registers: Registers that were widened to ``⊤``.
     """
     header_address: int
-    back_edge_sources: List[int] = field(default_factory=list)
+    back_edge_sources: list[int] = field(default_factory=list)
     iteration_count: int = 0
-    body_addresses: Set[int] = field(default_factory=set)
+    body_addresses: set[int] = field(default_factory=set)
     widened: bool = False
-    widened_registers: List[str] = field(default_factory=list)
+    widened_registers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> LoopInfoDict:
         return {
@@ -307,13 +308,13 @@ class SymbolicExecutor:
             memory_limit_mb=memory_limit_mb,
         )
         # Path constraints gathered during _explore_paths for opaque detection.
-        self._collected_path_constraints: List[Any] = []
+        self._collected_path_constraints: list[Any] = []
         # Loop analysis results gathered during exploration.
-        self._detected_loops: Dict[int, LoopInfo] = {}
+        self._detected_loops: dict[int, LoopInfo] = {}
         # B54: monotonic counter for heapq tie-breaking
         self._state_seq: int = 0
         # B70: Dispatcher result cache — keyed by (code_hash, entry_point).
-        self._dispatcher_cache: Dict[tuple, tuple[Optional[int], float]] = {}
+        self._dispatcher_cache: dict[tuple, tuple[int | None, float]] = {}
         # B85: Per-analysis metrics (optional).
         self._metrics: Any = None
 
@@ -327,7 +328,7 @@ class SymbolicExecutor:
         self._metrics = value
 
     @classmethod
-    def from_config(cls, config: Any = None) -> "SymbolicExecutor":
+    def from_config(cls, config: Any = None) -> SymbolicExecutor:
         """Create an executor from the global or provided config (B53).
 
         Reads ``symbolic_execution.*`` section for solver_timeout_ms,
@@ -354,7 +355,7 @@ class SymbolicExecutor:
         self,
         code: bytes,
         entry_point: int = 0,
-        seed_constraints: Optional[List[Any]] = None,
+        seed_constraints: list[Any] | None = None,
     ) -> ExecutionResult:
         """
         Analyse *code* starting from *entry_point*.
@@ -384,7 +385,7 @@ class SymbolicExecutor:
             if not instructions:
                 return ExecutionResult(success=False, error="No instructions lifted")
 
-            insn_map: Dict[int, LiftedInstruction] = {i.address: i for i in instructions}
+            insn_map: dict[int, LiftedInstruction] = {i.address: i for i in instructions}
 
             # Step 2: Find basic blocks
             if _m:
@@ -488,11 +489,11 @@ class SymbolicExecutor:
 
     @staticmethod
     def _find_basic_blocks(
-        instructions: List[LiftedInstruction],
-    ) -> List[List[LiftedInstruction]]:
+        instructions: list[LiftedInstruction],
+    ) -> list[list[LiftedInstruction]]:
         """Split instructions into basic blocks (sequences ending at branches)."""
-        blocks: List[List[LiftedInstruction]] = []
-        current: List[LiftedInstruction] = []
+        blocks: list[list[LiftedInstruction]] = []
+        current: list[LiftedInstruction] = []
 
         # Collect branch targets to mark block starts
         targets = set()
@@ -518,9 +519,9 @@ class SymbolicExecutor:
 
     @staticmethod
     def _build_cfg(
-        blocks: List[List[LiftedInstruction]],
+        blocks: list[list[LiftedInstruction]],
         entry_point: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build an explicit control-flow graph from basic blocks.
 
         Returns a serialisable dict with:
@@ -542,8 +543,8 @@ class SymbolicExecutor:
                     "block_count": 0, "edge_count": 0, "back_edge_count": 0}
 
         # Index blocks by start address
-        block_by_addr: Dict[int, List[LiftedInstruction]] = {}
-        block_addrs: List[int] = []
+        block_by_addr: dict[int, list[LiftedInstruction]] = {}
+        block_addrs: list[int] = []
         for blk in blocks:
             addr = blk[0].address
             block_by_addr[addr] = blk
@@ -642,7 +643,7 @@ class SymbolicExecutor:
         # Use dominator tree for proper back-edge detection.
         import networkx as nx
 
-        dominators: Dict[int, int] = {}
+        dominators: dict[int, int] = {}
         back_edges: list[dict] = []
 
         G = nx.DiGraph()
@@ -655,12 +656,12 @@ class SymbolicExecutor:
         entry = entry_point if entry_point in G else (block_addrs[0] if block_addrs else None)
         if entry is not None and entry in G:
             idom = nx.immediate_dominators(G, entry)
-            dominators = {k: v for k, v in idom.items()}
+            dominators = dict(idom.items())
 
             # B66: Dominator-based back-edge detection — an edge (u→v) is
             # a back edge iff v dominates u in the dominator tree.
-            dom_set: Dict[int, set[int]] = {n: set() for n in G.nodes}
-            for node, parent in idom.items():
+            dom_set: dict[int, set[int]] = {n: set() for n in G.nodes}
+            for node, _parent in idom.items():
                 # Walk up the dominator tree to build full dominator sets
                 cur = node
                 while cur != idom.get(cur, cur):
@@ -694,9 +695,9 @@ class SymbolicExecutor:
 
     @staticmethod
     def _detect_switch_tables(
-        blocks: List[List["LiftedInstruction"]],
+        blocks: list[list[LiftedInstruction]],
         block_addrs: set[int],
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Detect switch/jump table patterns in basic blocks.
 
         Recognises the common x86 pattern::
@@ -708,7 +709,7 @@ class SymbolicExecutor:
 
         Returns a list of ``{address, bound, targets_estimate}`` dicts.
         """
-        tables: List[Dict[str, Any]] = []
+        tables: list[dict[str, Any]] = []
         for blk in blocks:
             if len(blk) < 2:
                 continue
@@ -727,10 +728,8 @@ class SymbolicExecutor:
                     if len(parts) == 2:
                         raw = parts[1].strip()
                         # Strip hex prefix
-                        try:
+                        with contextlib.suppress(ValueError, TypeError):
                             bound = int(raw, 0)
-                        except (ValueError, TypeError):
-                            pass
                     break
             if bound is not None:
                 tables.append({
@@ -744,9 +743,9 @@ class SymbolicExecutor:
 
     @staticmethod
     def _detect_exception_edges(
-        blocks: List[List["LiftedInstruction"]],
+        blocks: list[list[LiftedInstruction]],
         block_addrs: set[int],
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Detect potential exception handler registrations (SEH / VEH).
 
         Looks for Windows SEH push patterns::
@@ -759,44 +758,43 @@ class SymbolicExecutor:
         import re as _re
         _SEH_PUSH_RE = _re.compile(r"fs:\[0", _re.IGNORECASE)
 
-        exc_edges: List[Dict[str, Any]] = []
+        exc_edges: list[dict[str, Any]] = []
         for blk in blocks:
             for i, insn in enumerate(blk):
-                mn = (insn.mnemonic or "").lower()
+                (insn.mnemonic or "").lower()
                 ops = insn.operands or ""
                 # Look for fs:[0] access (SEH chain head)
-                if _SEH_PUSH_RE.search(ops):
-                    # Previous instruction should be 'push handler_addr'
-                    if i > 0:
-                        prev = blk[i - 1]
-                        prev_mn = (prev.mnemonic or "").lower()
-                        if prev_mn == "push" and prev.branch_target is not None:
+                # Previous instruction should be 'push handler_addr'
+                if _SEH_PUSH_RE.search(ops) and i > 0:
+                    prev = blk[i - 1]
+                    prev_mn = (prev.mnemonic or "").lower()
+                    if prev_mn == "push" and prev.branch_target is not None:
+                        exc_edges.append({
+                            "source": insn.address,
+                            "handler": prev.branch_target,
+                            "type": "seh",
+                        })
+                    elif prev_mn == "push":
+                        # Try extracting address from operand
+                        prev_ops = (prev.operands or "").strip()
+                        try:
+                            handler_addr = int(prev_ops, 0)
                             exc_edges.append({
                                 "source": insn.address,
-                                "handler": prev.branch_target,
+                                "handler": handler_addr,
                                 "type": "seh",
                             })
-                        elif prev_mn == "push":
-                            # Try extracting address from operand
-                            prev_ops = (prev.operands or "").strip()
-                            try:
-                                handler_addr = int(prev_ops, 0)
-                                exc_edges.append({
-                                    "source": insn.address,
-                                    "handler": handler_addr,
-                                    "type": "seh",
-                                })
-                            except (ValueError, TypeError):
-                                pass
+                        except (ValueError, TypeError):
+                            pass
         return exc_edges
 
     # -- B71: C++ exception / invoke edge detection --------------------------
 
     @staticmethod
     def _detect_cxx_exception_edges(
-        blocks: List[List["LiftedInstruction"]],
+        blocks: list[list[LiftedInstruction]],
         block_addrs: set[int],
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Detect C++ exception handling patterns (invoke / landing-pad style).
 
         Looks for:
@@ -808,7 +806,7 @@ class SymbolicExecutor:
 
         Returns ``[{source, handler, type: "cxx_eh"}]``.
         """
-        cxx_edges: List[Dict[str, Any]] = []
+        cxx_edges: list[dict[str, Any]] = []
         _EH_CALLEES = frozenset({
             "__cxa_throw", "__cxa_begin_catch", "__cxa_end_catch",
             "_unwind_resume", "__gxx_personality_v0",
@@ -822,17 +820,16 @@ class SymbolicExecutor:
                 # Detect call to known C++ EH runtime functions
                 if mn == "call":
                     callee = ops.strip().split()[-1] if ops.strip() else ""
-                    if callee in _EH_CALLEES:
-                        # The next instruction, if a branch, is the landing pad
-                        if i + 1 < len(blk):
-                            nxt = blk[i + 1]
-                            nxt_mn = (nxt.mnemonic or "").lower()
-                            if nxt_mn.startswith("j") and nxt.branch_target is not None:
-                                cxx_edges.append({
-                                    "source": insn.address,
-                                    "handler": nxt.branch_target,
-                                    "type": "cxx_eh",
-                                })
+                    # The next instruction, if a branch, is the landing pad
+                    if callee in _EH_CALLEES and i + 1 < len(blk):
+                        nxt = blk[i + 1]
+                        nxt_mn = (nxt.mnemonic or "").lower()
+                        if nxt_mn.startswith("j") and nxt.branch_target is not None:
+                            cxx_edges.append({
+                                "source": insn.address,
+                                "handler": nxt.branch_target,
+                                "type": "cxx_eh",
+                            })
                     # Also detect invoke-style: call + unconditional jmp (normal)
                     # + fall-through to landing pad
                     if i + 2 < len(blk):
@@ -851,11 +848,11 @@ class SymbolicExecutor:
 
     @staticmethod
     def _resolve_indirect_targets(
-        insn: "LiftedInstruction",
+        insn: LiftedInstruction,
         block_addrs: set[int],
         *,
         max_targets: int = 64,
-    ) -> List[int]:
+    ) -> list[int]:
         """Attempt to resolve an indirect branch's possible targets.
 
         Uses the instruction's *registers* snapshot (populated from
@@ -868,7 +865,7 @@ class SymbolicExecutor:
         """
         import re as _re
 
-        targets: List[int] = []
+        targets: list[int] = []
         if not insn.registers:
             return targets
 
@@ -886,13 +883,12 @@ class SymbolicExecutor:
 
         # Fallback: direct register target (e.g. "jmp rax")
         for reg, val in insn.registers.items():
-            if reg.lower() == ops and isinstance(val, int):
-                if val in block_addrs:
-                    targets.append(val)
+            if reg.lower() == ops and isinstance(val, int) and val in block_addrs:
+                targets.append(val)
         return targets[:max_targets]
 
     @staticmethod
-    def _eval_addr_expr(expr: str, regs: Dict[str, Any]) -> Optional[int]:
+    def _eval_addr_expr(expr: str, regs: dict[str, Any]) -> int | None:
         """Evaluate a simple x86 address expression using register values.
 
         Supports: ``base``, ``base+disp``, ``base+index*scale``,
@@ -958,8 +954,8 @@ class SymbolicExecutor:
 
     @staticmethod
     def _find_dispatcher(
-        instructions: List[LiftedInstruction],
-    ) -> tuple[Optional[int], float]:
+        instructions: list[LiftedInstruction],
+    ) -> tuple[int | None, float]:
         """
         Find the likely VM dispatcher address and a confidence score.
 
@@ -972,7 +968,7 @@ class SymbolicExecutor:
         the best score to the sum of all scores (normalised), multiplied by a
         cap based on total evidence strength.
         """
-        indirect_jumps: List[int] = []
+        indirect_jumps: list[int] = []
         for insn in instructions:
             if insn.category == InstructionCategory.BRANCH_UNCOND and insn.branch_target is None:
                 indirect_jumps.append(insn.address)
@@ -984,10 +980,10 @@ class SymbolicExecutor:
             return indirect_jumps[0], 0.5  # single candidate → moderate confidence
 
         # Build a set of indirect-jump addresses for fast lookup
-        ij_set = set(indirect_jumps)
+        set(indirect_jumps)
 
         # Collect all branch targets in the instruction stream
-        branch_targets: Dict[int, int] = {}  # target_addr -> count
+        branch_targets: dict[int, int] = {}  # target_addr -> count
         for insn in instructions:
             cat = insn.category
             if cat in (InstructionCategory.BRANCH_UNCOND, InstructionCategory.BRANCH_COND):
@@ -997,7 +993,7 @@ class SymbolicExecutor:
 
         # Score each indirect jump by the number of back-edges that land in
         # the same basic-block neighbourhood (within ±64 bytes of the jump).
-        scores: Dict[int, int] = {}
+        scores: dict[int, int] = {}
         for ij_addr in indirect_jumps:
             score = 0
             for tgt, cnt in branch_targets.items():
@@ -1029,10 +1025,10 @@ class SymbolicExecutor:
 
     def _find_vmprotect_dispatcher(
         self,
-        instructions: List[LiftedInstruction],
+        instructions: list[LiftedInstruction],
         code: bytes,
         entry_point: int,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Run VMProtect-specific dispatcher pattern matching.
 
         Uses :func:`~dragonslayer.analysis.vm_discovery.dispatcher.find_vmprotect_dispatcher`
@@ -1057,9 +1053,9 @@ class SymbolicExecutor:
 
     def _classify_handlers(
         self,
-        blocks: List[List[LiftedInstruction]],
-        insn_map: Dict[int, LiftedInstruction],
-    ) -> List[HandlerInfo]:
+        blocks: list[list[LiftedInstruction]],
+        insn_map: dict[int, LiftedInstruction],
+    ) -> list[HandlerInfo]:
         """Classify basic blocks into handler categories.
 
         When a VMProtect dispatcher has been identified, blocks that
@@ -1067,10 +1063,10 @@ class SymbolicExecutor:
         blocks that end with a jump back to the dispatcher are tagged as
         handler candidates with higher confidence.
         """
-        handlers: List[HandlerInfo] = []
+        handlers: list[HandlerInfo] = []
 
         # Determine dispatcher address range for overlap detection
-        dispatcher_range: Optional[range] = None
+        dispatcher_range: range | None = None
         vmp_disp = getattr(self, "_vmprotect_dispatcher", None)
         if vmp_disp is not None:
             lo = vmp_disp.entry_address
@@ -1082,7 +1078,7 @@ class SymbolicExecutor:
                 continue
 
             # Count instruction categories in this block
-            cat_counts: Dict[str, int] = {}
+            cat_counts: dict[str, int] = {}
             all_reads: set = set()
             all_writes: set = set()
 
@@ -1104,7 +1100,6 @@ class SymbolicExecutor:
 
             # ── VMProtect-aware adjustments ──
             block_start = block[0].address
-            block_end = block[-1].address
 
             # Mark blocks overlapping the dispatcher loop
             if dispatcher_range is not None and block_start in dispatcher_range:
@@ -1135,10 +1130,10 @@ class SymbolicExecutor:
 
     def _detect_opaque_predicates(
         self,
-        instructions: List[LiftedInstruction],
+        instructions: list[LiftedInstruction],
         *,
-        path_constraints: Optional[List[Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        path_constraints: list[Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Scan for potential opaque predicates.
 
         An opaque predicate is a conditional branch whose condition is
@@ -1169,11 +1164,11 @@ class SymbolicExecutor:
             return []
 
 
-        opaque: List[Dict[str, Any]] = []
+        opaque: list[dict[str, Any]] = []
         path_constraints = path_constraints or []
 
         # Index path constraints by branch address for fast lookup.
-        pc_by_addr: Dict[int, List[Dict[str, Any]]] = {}
+        pc_by_addr: dict[int, list[dict[str, Any]]] = {}
         for pc in path_constraints:
             addr = pc.get("address")
             if addr is not None:
@@ -1207,7 +1202,7 @@ class SymbolicExecutor:
         flagged = {e["address"] for e in opaque}
 
         # Phase 2: Linear scan for syntactic cmp/test + jcc pairs.
-        prev_insn: Optional[LiftedInstruction] = None
+        prev_insn: LiftedInstruction | None = None
         for insn in instructions:
             if insn.address in flagged:
                 prev_insn = insn
@@ -1275,7 +1270,7 @@ class SymbolicExecutor:
         self,
         _z3: Any,
         branch_mn: str,
-        cmp_ops: List[str],
+        cmp_ops: list[str],
         cmp_mn: str,
     ) -> Any:
         """Build a z3 condition from a cmp/test + jcc pair.
@@ -1341,9 +1336,9 @@ class SymbolicExecutor:
     @staticmethod
     def _detect_arithmetic_opaques(
         _z3: Any,
-        instructions: List[LiftedInstruction],
+        instructions: list[LiftedInstruction],
         already_flagged: set,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Detect arithmetic opaque predicates.
 
         Patterns:
@@ -1351,7 +1346,7 @@ class SymbolicExecutor:
         - ``x * x >= 0``             (unsigned square is non-negative)
         - ``x | (x - 1) >= x - 1``   (always true)
         """
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         x = _z3.BitVec("arith_x", 64)
 
         # Pre-built tautologies to check against instruction patterns.
@@ -1399,16 +1394,16 @@ class SymbolicExecutor:
     @staticmethod
     def _detect_mba_opaques(
         _z3: Any,
-        instructions: List[LiftedInstruction],
+        instructions: list[LiftedInstruction],
         already_flagged: set,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Detect mixed-boolean-arithmetic (MBA) opaque predicates (B45).
 
         Scans for instruction sequences that combine XOR/AND/OR/NOT
         followed by a conditional branch.  Builds symbolic models for
         two-variable tautologies such as ``(x & y) | (x & ~y) == x``.
         """
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         x = _z3.BitVec("mba_x", 64)
         y = _z3.BitVec("mba_y", 64)
 
@@ -1450,9 +1445,9 @@ class SymbolicExecutor:
 
     def _explore_paths(
         self,
-        insn_map: Dict[int, LiftedInstruction],
+        insn_map: dict[int, LiftedInstruction],
         entry_point: int,
-    ) -> tuple[int, int, List[Dict[str, Any]]]:
+    ) -> tuple[int, int, list[dict[str, Any]]]:
         """
         Coverage-guided path exploration with symbolic state updates.
 
@@ -1489,18 +1484,17 @@ class SymbolicExecutor:
         # Inject Triton seed constraints into the initial state so the
         # Z3 solver can prune infeasible paths from the start.
         for sc in getattr(self, "_seed_constraints", []):
-            try:
+            # non-z3 expressions are silently skipped
+            with contextlib.suppress(ValueError, TypeError, AttributeError):
                 initial_state.add_constraint(sc)
-            except (ValueError, TypeError, AttributeError):
-                pass  # non-z3 expressions are silently skipped
 
         # B54: Priority-based worklist (heapq — min-heap on state.priority)
-        worklist: List[SymbolicState] = [initial_state]
+        worklist: list[SymbolicState] = [initial_state]
         heapq.heapify(worklist)
 
         paths = 0
         total_insns = 0
-        snapshots: List[Dict[str, Any]] = []
+        snapshots: list[dict[str, Any]] = []
 
         while worklist and paths < self.max_paths:
             state = heapq.heappop(worklist)
@@ -1711,7 +1705,7 @@ class SymbolicExecutor:
         state: SymbolicState,
         insn: LiftedInstruction,
         branch_constraint: Any,
-        insn_map: Dict[int, LiftedInstruction],
+        insn_map: dict[int, LiftedInstruction],
         max_window: int = 6,
     ) -> bool:
         """Attempt veritesting: inline both sides if they merge quickly.
@@ -1774,15 +1768,15 @@ class SymbolicExecutor:
 
     def _trace_straight_line(
         self,
-        insn_map: Dict[int, LiftedInstruction],
+        insn_map: dict[int, LiftedInstruction],
         start_pc: int,
         max_len: int,
-    ) -> List[LiftedInstruction]:
+    ) -> list[LiftedInstruction]:
         """Collect up to *max_len* straight-line instructions from *start_pc*.
 
         Returns empty list if a branch is encountered (veritesting bail-out).
         """
-        trace: List[LiftedInstruction] = []
+        trace: list[LiftedInstruction] = []
         pc = start_pc
         for _ in range(max_len):
             insn = insn_map.get(pc)
@@ -1823,7 +1817,7 @@ class SymbolicExecutor:
         if info is None:
             return
 
-        widened_regs: List[str] = []
+        widened_regs: list[str] = []
         bw = self.bit_width
         try:
             if Z3Solver.available():
@@ -1856,7 +1850,7 @@ class SymbolicExecutor:
         )
 
     @property
-    def detected_loops(self) -> Dict[int, LoopInfo]:
+    def detected_loops(self) -> dict[int, LoopInfo]:
         """Return loop headers detected during the most recent analysis."""
         return dict(self._detected_loops)
 
@@ -2764,46 +2758,42 @@ class SymbolicExecutor:
     def _mul(a: Any, b: Any, bw: int) -> Any:
         a_sym = hasattr(a, "sort")
         b_sym = hasattr(b, "sort")
-        if a_sym or b_sym:
-            if Z3Solver.available():
-                if not a_sym:
-                    a = _z3.BitVecVal(a, bw)
-                if not b_sym:
-                    b = _z3.BitVecVal(b, bw)
-                return a * b
+        if (a_sym or b_sym) and Z3Solver.available():
+            if not a_sym:
+                a = _z3.BitVecVal(a, bw)
+            if not b_sym:
+                b = _z3.BitVecVal(b, bw)
+            return a * b
         return (a if isinstance(a, int) else 0) * (b if isinstance(b, int) else 0)
 
     @staticmethod
     def _add(a: Any, b: Any, bw: int) -> Any:
         a_sym = hasattr(a, "sort")
         b_sym = hasattr(b, "sort")
-        if a_sym or b_sym:
-            if Z3Solver.available():
-                if not a_sym:
-                    a = _z3.BitVecVal(a, bw)
-                if not b_sym:
-                    b = _z3.BitVecVal(b, bw)
-                return a + b
+        if (a_sym or b_sym) and Z3Solver.available():
+            if not a_sym:
+                a = _z3.BitVecVal(a, bw)
+            if not b_sym:
+                b = _z3.BitVecVal(b, bw)
+            return a + b
         return (a if isinstance(a, int) else 0) + (b if isinstance(b, int) else 0)
 
     @staticmethod
     def _sub(a: Any, b: Any, bw: int) -> Any:
         a_sym = hasattr(a, "sort")
         b_sym = hasattr(b, "sort")
-        if a_sym or b_sym:
-            if Z3Solver.available():
-                if not a_sym:
-                    a = _z3.BitVecVal(a, bw)
-                if not b_sym:
-                    b = _z3.BitVecVal(b, bw)
-                return a - b
+        if (a_sym or b_sym) and Z3Solver.available():
+            if not a_sym:
+                a = _z3.BitVecVal(a, bw)
+            if not b_sym:
+                b = _z3.BitVecVal(b, bw)
+            return a - b
         return (a if isinstance(a, int) else 0) - (b if isinstance(b, int) else 0)
 
     @staticmethod
     def _negate(v: Any, bw: int) -> Any:
-        if hasattr(v, "sort"):
-            if Z3Solver.available():
-                return -v
+        if hasattr(v, "sort") and Z3Solver.available():
+            return -v
         return -(v if isinstance(v, int) else 0)
 
     # -- Operand-size inference -----------------------------------------------
@@ -2992,7 +2982,7 @@ class SymbolicExecutor:
         )
 
         # Make input registers symbolic so we can track data-flow.
-        sym_regs: Dict[str, _z3.BitVecRef] = {}
+        sym_regs: dict[str, _z3.BitVecRef] = {}
 
         # Initialise the stack pointer to a concrete address so that
         # push / pop can actually read / write concrete memory locations.
@@ -3018,8 +3008,8 @@ class SymbolicExecutor:
             state.set_register(rname, sym)
             sym_regs[rname] = sym
 
-        insn_map = {i.address: i for i in instructions}
-        mem_writes: List[Dict[str, Any]] = []
+        {i.address: i for i in instructions}
+        mem_writes: list[dict[str, Any]] = []
         stepped = 0
 
         for insn in instructions:
@@ -3044,8 +3034,8 @@ class SymbolicExecutor:
                 break
 
         # Collect final symbolic values per register.
-        final_regs: Dict[str, str] = {}
-        simplified_regs: Dict[str, str] = {}
+        final_regs: dict[str, str] = {}
+        simplified_regs: dict[str, str] = {}
         for rname in state.registers:
             val = state.get_register(rname)
             final_regs[rname] = str(val)
@@ -3079,7 +3069,7 @@ class SymbolicExecutor:
 
     def execute_handler_from_trace(
         self,
-        trace_instructions: List[Dict[str, Any]],
+        trace_instructions: list[dict[str, Any]],
         handler_address: int = 0,
     ) -> HandlerSymbolicSummary:
         """Run handler-local symbolic execution from trace instruction dicts.
@@ -3217,7 +3207,7 @@ class SymbolicExecutor:
         state: SymbolicState,
         insn: LiftedInstruction,
         max_targets: int = 256,
-    ) -> List[int]:
+    ) -> list[int]:
         """Resolve an indirect jump/call to concrete target addresses via Z3.
 
         For VMProtect-style dispatch (``jmp [table + rax*8]``), the

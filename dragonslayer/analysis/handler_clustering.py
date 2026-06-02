@@ -36,7 +36,7 @@ import logging
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ _OP_NOP = "vm_nop"
 _OP_UNKNOWN = "vm_unknown"
 
 # Commutative operations – operand order doesn't affect behaviour.
-_COMMUTATIVE: FrozenSet[str] = frozenset({
+_COMMUTATIVE: frozenset[str] = frozenset({
     _OP_ADD, _OP_MUL, _OP_AND, _OP_OR, _OP_XOR, _OP_CMP, _OP_TEST,
 })
 
@@ -84,7 +84,7 @@ _INIT_RE = re.compile(r"\binit_(\w+)\b")
 
 # All x86 GP register names (64/32/16/8) used to detect register
 # references in symbolic expressions.
-_ALL_REGS: FrozenSet[str] = frozenset({
+_ALL_REGS: frozenset[str] = frozenset({
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
@@ -97,7 +97,7 @@ _ALL_REGS: FrozenSet[str] = frozenset({
 })
 
 # Mapping from sub-register to canonical 64-bit name for width detection.
-_REG_WIDTH: Dict[str, int] = {}
+_REG_WIDTH: dict[str, int] = {}
 for _r in ("rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
            "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"):
     _REG_WIDTH[_r] = 8
@@ -118,7 +118,7 @@ for _r in ("al", "bl", "cl", "dl", "sil", "dil", "spl", "bpl",
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Each tuple: (regex over *slot*-replaced expression, VMOperation, confidence)
-_NORM_PATTERNS: List[Tuple[str, str, float]] = [
+_NORM_PATTERNS: list[tuple[str, str, float]] = [
     # Arithmetic - binary
     (r"^slot_\d+\s*\+\s*slot_\d+$", _OP_ADD, 0.95),
     (r"slot_\d+\s*\+\s*slot_\d+", _OP_ADD, 0.90),
@@ -171,10 +171,10 @@ class NormalizedEffect:
     input_slots: int = 0            # distinct input values consumed
     output_slots: int = 0           # distinct output values produced
     canonical_expression: str = ""  # e.g. "slot_0 + slot_1"
-    side_effects: FrozenSet[str] = field(default_factory=frozenset)
+    side_effects: frozenset[str] = field(default_factory=frozenset)
     confidence: float = 0.0
     # Bookkeeping: slot → original register name
-    slot_map: Dict[int, str] = field(default_factory=dict)
+    slot_map: dict[int, str] = field(default_factory=dict)
 
     def signature(self) -> str:
         """Return a hashable clustering key."""
@@ -187,13 +187,13 @@ class SemanticCluster:
     cluster_id: int
     operation: str
     operand_width: int
-    members: List[int] = field(default_factory=list)       # handler addresses
-    normalized_effect: Optional[NormalizedEffect] = None
+    members: list[int] = field(default_factory=list)       # handler addresses
+    normalized_effect: NormalizedEffect | None = None
     confidence: float = 0.0
     # per-member operand binding: handler_addr → {slot_idx: native_register}
-    operand_bindings: Dict[int, Dict[int, str]] = field(default_factory=dict)
+    operand_bindings: dict[int, dict[int, str]] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the semantic cluster to a JSON-compatible dict."""
         return {
             "cluster_id": self.cluster_id,
@@ -212,11 +212,11 @@ class SemanticCluster:
 @dataclass
 class ClusteringResult:
     """Output of :func:`cluster_handlers_by_semantics`."""
-    clusters: List[SemanticCluster] = field(default_factory=list)
-    unclustered: List[int] = field(default_factory=list)  # handler addrs
-    operation_counts: Dict[str, int] = field(default_factory=dict)
+    clusters: list[SemanticCluster] = field(default_factory=list)
+    unclustered: list[int] = field(default_factory=list)  # handler addrs
+    operation_counts: dict[str, int] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the clustering result to a JSON-compatible dict."""
         return {
             "cluster_count": len(self.clusters),
@@ -225,7 +225,7 @@ class ClusteringResult:
             "clusters": [c.to_dict() for c in self.clusters],
         }
 
-    def find_cluster(self, handler_address: int) -> Optional[SemanticCluster]:
+    def find_cluster(self, handler_address: int) -> SemanticCluster | None:
         """Return the cluster containing *handler_address*, or ``None``."""
         for c in self.clusters:
             if handler_address in c.members:
@@ -237,7 +237,7 @@ class ClusteringResult:
 # Core normalization
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _extract_summary_fields(summary: Any) -> Optional[Dict[str, Any]]:
+def _extract_summary_fields(summary: Any) -> dict[str, Any] | None:
     """Accept both dataclass and dict forms of HandlerSymbolicSummary."""
     if hasattr(summary, "to_dict"):
         return summary.to_dict()
@@ -246,9 +246,9 @@ def _extract_summary_fields(summary: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _detect_width_from_regs(reg_names: List[str]) -> int:
+def _detect_width_from_regs(reg_names: list[str]) -> int:
     """Infer operand width from the concrete register names used."""
-    widths: List[int] = []
+    widths: list[int] = []
     for r in reg_names:
         w = _REG_WIDTH.get(r.lower(), 0)
         if w:
@@ -298,7 +298,7 @@ def normalize_symbolic_effect(
     mem_writes = s.get("memory_writes") or []
 
     # 1. Find interesting (non-identity) outputs.
-    interesting: Dict[str, str] = {}
+    interesting: dict[str, str] = {}
     for rname, expr_str in regs.items():
         init_sym = input_syms.get(rname, "")
         if expr_str and expr_str != init_sym and expr_str != "0":
@@ -315,16 +315,16 @@ def normalize_symbolic_effect(
 
     init_refs = _INIT_RE.findall(combined)
     # Deduplicate while preserving order
-    seen: Set[str] = set()
-    ordered_regs: List[str] = []
+    seen: set[str] = set()
+    ordered_regs: list[str] = []
     for r in init_refs:
         if r not in seen:
             seen.add(r)
             ordered_regs.append(r)
 
     # 3. Build slot mapping: register_name → slot_N
-    slot_map: Dict[str, int] = {}
-    reverse_map: Dict[int, str] = {}
+    slot_map: dict[str, int] = {}
+    reverse_map: dict[int, str] = {}
     for idx, r in enumerate(ordered_regs):
         slot_map[r] = idx
         reverse_map[idx] = r
@@ -338,8 +338,8 @@ def normalize_symbolic_effect(
             return m.group(0)
         return _INIT_RE.sub(_sub, expr)
 
-    canonical_parts: List[str] = []
-    for rname, expr_str in interesting.items():
+    canonical_parts: list[str] = []
+    for expr_str in interesting.values():
         canonical_parts.append(_replace_inits(expr_str))
 
     canonical = " ; ".join(canonical_parts)
@@ -351,7 +351,7 @@ def normalize_symbolic_effect(
         for mw in mem_writes
     )
 
-    side_effects: Set[str] = set()
+    side_effects: set[str] = set()
     if has_mem_write:
         side_effects.add("mem_write")
     if has_stack_write:
@@ -371,10 +371,9 @@ def normalize_symbolic_effect(
     else:
         # Pattern-match against _NORM_PATTERNS
         for pattern, op, conf in _NORM_PATTERNS:
-            if re.search(pattern, canonical):
-                if conf > confidence:
-                    operation = op
-                    confidence = conf
+            if re.search(pattern, canonical) and conf > confidence:
+                operation = op
+                confidence = conf
 
     # 5. Commutative normalization
     if operation in _COMMUTATIVE:
@@ -405,7 +404,7 @@ def _normalize_commutative(expr: str) -> str:
     Handles multiple sub-expressions separated by `` ; ``.
     """
     parts = expr.split(" ; ")
-    normalized: List[str] = []
+    normalized: list[str] = []
     for part in parts:
         part = part.strip()
         # Match binary ops: <lhs> <op> <rhs>
@@ -443,7 +442,7 @@ def are_semantically_equivalent(
     b: NormalizedEffect,
     *,
     strict_width: bool = True,
-) -> Tuple[bool, float]:
+) -> tuple[bool, float]:
     """Decide whether two normalized effects represent the same VM operation.
 
     Returns ``(is_equivalent, confidence)`` where confidence is the
@@ -495,7 +494,7 @@ def are_semantically_equivalent(
 def extract_operand_binding(
     summary: Any,
     normalized: NormalizedEffect,
-) -> Dict[int, str]:
+) -> dict[int, str]:
     """Determine which native register maps to which abstract slot.
 
     Returns ``{slot_index: register_name}`` so downstream pseudocode
@@ -509,8 +508,8 @@ def extract_operand_binding(
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cluster_handlers_by_semantics(
-    semantics: List[Any],
-    symbolic_summaries: Optional[Dict[int, Any]] = None,
+    semantics: list[Any],
+    symbolic_summaries: dict[int, Any] | None = None,
 ) -> ClusteringResult:
     """Group handlers into clusters of semantically-equivalent operations.
 
@@ -540,14 +539,14 @@ def cluster_handlers_by_semantics(
         symbolic_summaries = {}
 
     # Step 1: Normalize symbolic effects for every handler that has one.
-    effects: Dict[int, NormalizedEffect] = {}
+    effects: dict[int, NormalizedEffect] = {}
     for addr, summary in symbolic_summaries.items():
         ne = normalize_symbolic_effect(summary, handler_address=addr)
         if ne.operation != _OP_UNKNOWN:
             effects[addr] = ne
 
     # Step 2: Build handler info from semantics list.
-    handler_info: Dict[int, Dict[str, Any]] = {}
+    handler_info: dict[int, dict[str, Any]] = {}
     for sem in semantics:
         if isinstance(sem, dict):
             addr = sem.get("handler_address", 0)
@@ -563,9 +562,9 @@ def cluster_handlers_by_semantics(
 
     # Step 3: Group by signature.
     # Handlers WITH symbolic normalization → precise grouping.
-    sig_groups: Dict[str, List[int]] = defaultdict(list)
-    sig_effects: Dict[str, NormalizedEffect] = {}
-    sym_clustered: Set[int] = set()
+    sig_groups: dict[str, list[int]] = defaultdict(list)
+    sig_effects: dict[str, NormalizedEffect] = {}
+    sym_clustered: set[int] = set()
 
     for addr, ne in effects.items():
         sig = ne.signature()
@@ -574,7 +573,7 @@ def cluster_handlers_by_semantics(
         sym_clustered.add(addr)
 
     # Handlers WITHOUT symbolic normalization → fallback grouping.
-    fallback_groups: Dict[Tuple[str, int], List[int]] = defaultdict(list)
+    fallback_groups: dict[tuple[str, int], list[int]] = defaultdict(list)
     for addr, info in handler_info.items():
         if addr in sym_clustered:
             continue
@@ -591,7 +590,7 @@ def cluster_handlers_by_semantics(
     merged_sig_groups = _merge_compatible_groups(sig_groups, sig_effects)
 
     # Step 5: Build SemanticCluster objects.
-    clusters: List[SemanticCluster] = []
+    clusters: list[SemanticCluster] = []
     cluster_id = 0
 
     for sig, addrs in sorted(merged_sig_groups.items()):
@@ -600,7 +599,7 @@ def cluster_handlers_by_semantics(
         width = ne.operand_width if ne else 0
         conf = ne.confidence if ne else 0.0
 
-        bindings: Dict[int, Dict[int, str]] = {}
+        bindings: dict[int, dict[int, str]] = {}
         for addr in addrs:
             if addr in effects:
                 bindings[addr] = extract_operand_binding(None, effects[addr])
@@ -634,8 +633,8 @@ def cluster_handlers_by_semantics(
         cluster_id += 1
 
     # Unclustered: handlers with unknown operation and no symbolic summary
-    unclustered: List[int] = []
-    all_clustered: Set[int] = set()
+    unclustered: list[int] = []
+    all_clustered: set[int] = set()
     for c in clusters:
         all_clustered.update(c.members)
     for addr in handler_info:
@@ -643,7 +642,7 @@ def cluster_handlers_by_semantics(
             unclustered.append(addr)
 
     # Operation counts
-    op_counts: Dict[str, int] = Counter()
+    op_counts: dict[str, int] = Counter()
     for c in clusters:
         op_counts[c.operation] += len(c.members)
 
@@ -655,9 +654,9 @@ def cluster_handlers_by_semantics(
 
 
 def _merge_compatible_groups(
-    sig_groups: Dict[str, List[int]],
-    sig_effects: Dict[str, NormalizedEffect],
-) -> Dict[str, List[int]]:
+    sig_groups: dict[str, list[int]],
+    sig_effects: dict[str, NormalizedEffect],
+) -> dict[str, list[int]]:
     """Attempt to merge signature groups that are semantically equivalent
     but ended up with different canonical expressions (e.g. due to
     minor z3 formatting differences).
@@ -668,11 +667,11 @@ def _merge_compatible_groups(
         return dict(sig_groups)
 
     # Group signatures by (operation, width)
-    by_key: Dict[Tuple[str, int], List[str]] = defaultdict(list)
+    by_key: dict[tuple[str, int], list[str]] = defaultdict(list)
     for sig, ne in sig_effects.items():
         by_key[(ne.operation, ne.operand_width)].append(sig)
 
-    merged: Dict[str, List[int]] = {}
+    merged: dict[str, list[int]] = {}
     for (_op, _width), sigs in by_key.items():
         if len(sigs) <= 1:
             for sig in sigs:
@@ -680,15 +679,15 @@ def _merge_compatible_groups(
             continue
 
         # Pairwise equivalence → union-find merge
-        parent: Dict[str, str] = {s: s for s in sigs}
+        parent: dict[str, str] = {s: s for s in sigs}
 
-        def find(x: str) -> str:
+        def find(x: str, parent: dict[str, str] = parent) -> str:
             while parent[x] != x:
                 parent[x] = parent[parent[x]]
                 x = parent[x]
             return x
 
-        def union(x: str, y: str) -> None:
+        def union(x: str, y: str, parent: dict[str, str] = parent) -> None:
             rx, ry = find(x), find(y)
             if rx != ry:
                 parent[ry] = rx
@@ -702,7 +701,7 @@ def _merge_compatible_groups(
                     union(sigs[i], sigs[j])
 
         # Collect groups
-        roots: Dict[str, List[int]] = defaultdict(list)
+        roots: dict[str, list[int]] = defaultdict(list)
         for sig in sigs:
             root = find(sig)
             roots[root].extend(sig_groups[sig])

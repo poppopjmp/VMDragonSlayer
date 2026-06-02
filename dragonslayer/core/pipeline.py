@@ -31,13 +31,13 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import shutil as _shutil
 import tempfile
 import time
-from dataclasses import dataclass, field, asdict
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypedDict
-
-import shutil as _shutil
+from typing import Any, TypedDict
 
 from .exceptions import VMDragonSlayerError
 from .pipeline_state import PipelineState, validate_stage_order
@@ -81,7 +81,7 @@ class PipelineConfig:
         Per-stage timeout in seconds.
     """
 
-    stages: List[str] = field(default_factory=lambda: [
+    stages: list[str] = field(default_factory=lambda: [
         "pattern_analysis",
         "vm_discovery",
         "anti_evasion",
@@ -98,11 +98,11 @@ class PipelineConfig:
         "llm_summary",
     ])
     storage_backend: str = "memory"
-    storage_options: Dict[str, Any] = field(default_factory=dict)
+    storage_options: dict[str, Any] = field(default_factory=dict)
     llm_enabled: bool = True
     max_workers: int = 4
     timeout: float = 600
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +114,8 @@ class StageResultDict(TypedDict):
 
     stage: str
     success: bool
-    data: Dict[str, Any]
-    error: Optional[str]
+    data: dict[str, Any]
+    error: str | None
     duration: float
     plugins_run: int
     plugins_succeeded: int
@@ -125,11 +125,11 @@ class PipelineResultDict(TypedDict):
     """Serialised shape of :meth:`PipelineResult.to_dict`."""
 
     success: bool
-    stages: List[StageResultDict]
-    shared_data: Dict[str, Any]
-    llm_insights: Dict[str, Any]
+    stages: list[StageResultDict]
+    shared_data: dict[str, Any]
+    llm_insights: dict[str, Any]
     total_duration: float
-    errors: List[str]
+    errors: list[str]
 
 
 @dataclass
@@ -147,8 +147,8 @@ class StageResult:
     """
     stage: str
     success: bool
-    data: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    data: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
     duration: float = 0.0
     plugins_run: int = 0
     plugins_succeeded: int = 0
@@ -170,11 +170,11 @@ class PipelineResult:
         errors: Collected error messages from any failed stages.
     """
     success: bool
-    stages: List[StageResult] = field(default_factory=list)
-    shared_data: Dict[str, Any] = field(default_factory=dict)
-    llm_insights: Dict[str, Any] = field(default_factory=dict)
+    stages: list[StageResult] = field(default_factory=list)
+    shared_data: dict[str, Any] = field(default_factory=dict)
+    llm_insights: dict[str, Any] = field(default_factory=dict)
     total_duration: float = 0.0
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> PipelineResultDict:
         d = asdict(self)
@@ -189,7 +189,7 @@ class PipelineResult:
 def _detect_inner_vm_entries(
     opcode_table: Any,
     handler_cfg: Any,
-    shared_data: Dict[str, Any],
+    shared_data: dict[str, Any],
 ) -> list[int]:
     """Scan opcode table / handler CFG for inner VM entry points.
 
@@ -266,7 +266,7 @@ class AnalysisPipeline:
     analysis uses extracted entry points, enrichment uses function hashes).
     """
 
-    def __init__(self, config: Optional[Any] = None) -> None:
+    def __init__(self, config: Any | None = None) -> None:
         try:
             from ..core.config import get_config
             self._cfg = config or get_config()
@@ -280,7 +280,7 @@ class AnalysisPipeline:
         binary_data: bytes,
         pipeline_config: PipelineConfig | None = None,
         *,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> PipelineResult:
         """
         Execute the full analysis pipeline on *binary_data*.
@@ -299,7 +299,7 @@ class AnalysisPipeline:
         PipelineResult
             Combined output from all stages.
         """
-        from ..plugins import PluginContext, Stage, get_all_plugins
+        from ..plugins import PluginContext, Stage
         from ..plugins._storage import create_storage
 
         t0 = time.monotonic()
@@ -333,7 +333,7 @@ class AnalysisPipeline:
         file_path = metadata.get("filename", "")
 
         # --- stage dispatch map -------------------------------------------
-        stage_handlers: Dict[str, Callable] = {
+        stage_handlers: dict[str, Callable] = {
             "binary_parse": lambda: self._run_binary_parse(binary_data, ctx),
             "pattern_analysis": lambda: self._run_pattern_analysis(binary_data, ctx),
             "vm_discovery": lambda: self._run_vm_discovery(binary_data, ctx),
@@ -352,9 +352,9 @@ class AnalysisPipeline:
         }
 
         # --- execute stages sequentially -----------------------------------
-        stage_results: List[StageResult] = []
-        errors: List[str] = []
-        llm_insights: Dict[str, Any] = {}
+        stage_results: list[StageResult] = []
+        errors: list[str] = []
+        llm_insights: dict[str, Any] = {}
 
         try:
           # Shared pool for per-stage timeout enforcement — avoids creating
@@ -430,7 +430,7 @@ class AnalysisPipeline:
     def _run_stage(
         self,
         stage_name: str,
-        fn: Callable[[], Dict[str, Any]],
+        fn: Callable[[], dict[str, Any]],
         ctx: Any | None = None,
     ) -> StageResult:
         """Execute *fn* and wrap its return value in a :class:`StageResult`.
@@ -579,8 +579,8 @@ class AnalysisPipeline:
     ) -> StageResult:
         """Run VM discovery heuristics and store results in shared_data."""
         def _do() -> dict:
-            from ..analysis.vm_discovery.detector import VMDetector
             from ..analysis.vm_discovery.database import VMSignatureDatabase
+            from ..analysis.vm_discovery.detector import VMDetector
 
             detector = VMDetector()
             result = detector.detect(binary_data)
@@ -654,7 +654,7 @@ class AnalysisPipeline:
                         len(hook_set.hooks),
                     )
 
-            plugin_results: Dict[str, Any] = {}
+            plugin_results: dict[str, Any] = {}
             successes = 0
             total_confidence = 0.0
 
@@ -726,7 +726,9 @@ class AnalysisPipeline:
         stages can install hooks into Qiling / angr / Triton.
         """
         def _do() -> dict:
-            from ..analysis.anti_evasion.environment_normalizer import EnvironmentNormalizer
+            from ..analysis.anti_evasion.environment_normalizer import (
+                EnvironmentNormalizer,
+            )
 
             normalizer = EnvironmentNormalizer()
             report = normalizer.analyze(binary_data)
@@ -797,10 +799,10 @@ class AnalysisPipeline:
         Otherwise falls back to the generic :class:`TaintAnalyzer`.
         """
         def _do():
-            from ..analysis.taint_tracking.analyzer import TaintAnalyzer
-            from ..analysis.taint_tracking.vm_taint_tracker import VMTaintTracker
-            from ..analysis.taint_tracking.dtt_executor import DTTExecutor
             from ..analysis.symbolic_execution.lifter import InstructionLifter
+            from ..analysis.taint_tracking.analyzer import TaintAnalyzer
+            from ..analysis.taint_tracking.dtt_executor import DTTExecutor
+            from ..analysis.taint_tracking.vm_taint_tracker import VMTaintTracker
             from ..analysis.trace_ingestion import from_shared_data
 
             # Determine entry point from vm_discovery
@@ -1097,24 +1099,24 @@ class AnalysisPipeline:
         Results (including pseudocode) are stored in
         ``ctx.shared_data["devirtualize"]``.
         """
-        def _do_devirt() -> Dict[str, Any]:
+        def _do_devirt() -> dict[str, Any]:
+            from ..analysis.devirtualisation_result import DevirtualisationResult
             from .devirt_stages import (
                 DevirtWorkspace,
-                step_ingest_trace,
+                step_analyze_semantics,
+                step_assemble_result,
+                step_build_cfgs,
                 step_build_hook_set,
-                step_locate_vm_entries,
-                step_identify_dispatcher,
                 step_decrypt_bytecode,
-                step_segment_handlers,
+                step_detect_nested_vms,
+                step_emit_pseudocode,
                 step_extract_handlers,
                 step_identify_context,
-                step_analyze_semantics,
-                step_build_cfgs,
-                step_emit_pseudocode,
-                step_detect_nested_vms,
-                step_assemble_result,
+                step_identify_dispatcher,
+                step_ingest_trace,
+                step_locate_vm_entries,
+                step_segment_handlers,
             )
-            from ..analysis.devirtualisation_result import DevirtualisationResult
 
             ws = DevirtWorkspace(
                 binary_data=binary_data,
@@ -1192,7 +1194,7 @@ class AnalysisPipeline:
                     data={"skipped": True, "reason": "LLM not available"},
                 )
 
-            insights: Dict[str, Any] = {}
+            insights: dict[str, Any] = {}
 
             # 1. Classify matched patterns
             pattern_matches = ctx.shared_data.get("pattern_matches", [])
@@ -1362,7 +1364,7 @@ def create_quick_scan_pipeline(**kwargs: Any) -> tuple[AnalysisPipeline, Pipelin
 # ---------------------------------------------------------------------------
 
 
-def _summarise_stage(stage_data: Dict[str, Any]) -> Dict[str, Any]:
+def _summarise_stage(stage_data: dict[str, Any]) -> dict[str, Any]:
     """Extract a compact summary from a stage's results dict."""
     if not stage_data:
         return {}

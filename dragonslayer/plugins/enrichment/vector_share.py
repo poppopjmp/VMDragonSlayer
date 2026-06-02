@@ -21,7 +21,7 @@ import hashlib
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -54,14 +54,14 @@ def _is_generic_name(name: str) -> bool:
     return name.startswith(("sub_", "FUN_", "fcn.", "func_"))
 
 
-def _generate_vector(mnemonics: List[str]) -> "np.ndarray":
+def _generate_vector(mnemonics: list[str]) -> np.ndarray:
     """Feature-hashing (hashing trick) on mnemonic 3-grams → L2-normalised vector."""
     vec = np.zeros(VECTOR_SIZE, dtype=np.float32)
     if len(mnemonics) < 3:
         return vec
     for i in range(len(mnemonics) - 2):
         ngram = "".join(mnemonics[i : i + 3])
-        h = int(hashlib.md5(ngram.encode()).hexdigest(), 16)
+        h = int(hashlib.md5(ngram.encode(), usedforsecurity=False).hexdigest(), 16)
         idx = h % VECTOR_SIZE
         vec[idx] += 1.0
     norm = np.linalg.norm(vec)
@@ -70,13 +70,11 @@ def _generate_vector(mnemonics: List[str]) -> "np.ndarray":
     return vec
 
 
-def _is_thunk(mnemonics: List[str], block_count: int) -> bool:
+def _is_thunk(mnemonics: list[str], block_count: int) -> bool:
     """Return True for trivial thunk/trampoline functions."""
     if len(mnemonics) < 4:
         return True
-    if block_count == 1 and mnemonics and mnemonics[-1].startswith("jmp"):
-        return True
-    return False
+    return bool(block_count == 1 and mnemonics and mnemonics[-1].startswith("jmp"))
 
 
 # ── Ollama integration ────────────────────────────────────────────────────
@@ -87,7 +85,7 @@ def _query_ollama(
     ollama_url: str,
     model: str,
     extra_context: str = "",
-) -> Optional[str]:
+) -> str | None:
     """Ask an Ollama LLM to name a function from its assembly."""
     system_prompt = (
         "You are a reverse engineering assistant. "
@@ -154,7 +152,7 @@ class VectorSharePlugin(Plugin):
 
     # ------------------------------------------------------------------ #
 
-    def _process(self, ctx: PluginContext) -> Dict[str, Any]:
+    def _process(self, ctx: PluginContext) -> dict[str, Any]:
         enable_ai = ctx.config.get("vector_share.enable_ai", False)
         ollama_url = ctx.config.get(
             "ollama.url",
@@ -178,7 +176,7 @@ class VectorSharePlugin(Plugin):
 
         for func in functions:
             name = func.get("name", "")
-            mnemonics: List[str] = func.get("mnemonics", [])
+            mnemonics: list[str] = func.get("mnemonics", [])
 
             # Flatten Counter-style mnemonics dicts to lists
             if isinstance(mnemonics, dict):
@@ -193,11 +191,11 @@ class VectorSharePlugin(Plugin):
             vec = _generate_vector(mnemonics)
 
             # Index occurrence for similarity tracking
-            vec_id = hashlib.md5(vec.tobytes()).hexdigest()
+            vec_id = hashlib.md5(vec.tobytes(), usedforsecurity=False).hexdigest()
             if ctx.storage:
                 ctx.storage.store(
                     "vectorshare_occurrences",
-                    hashlib.md5(f"{ctx.sample_hash}{vec_id}".encode()).hexdigest(),
+                    hashlib.md5(f"{ctx.sample_hash}{vec_id}".encode(), usedforsecurity=False).hexdigest(),
                     {"source_binary": ctx.sample_hash, "function_id": vec_id},
                 )
 
@@ -244,9 +242,9 @@ class VectorSharePlugin(Plugin):
 
     # ------------------------------------------------------------------ #
 
-    def _gather_functions(self, ctx: PluginContext) -> List[Dict[str, Any]]:
+    def _gather_functions(self, ctx: PluginContext) -> list[dict[str, Any]]:
         """Collect function lists from all upstream plugins."""
-        funcs: List[Dict[str, Any]] = []
+        funcs: list[dict[str, Any]] = []
         for source in ("angr", "triton", "blackfyre", "binexport"):
             src_data = ctx.shared_data.get(source, {})
             if isinstance(src_data, dict):
@@ -256,7 +254,7 @@ class VectorSharePlugin(Plugin):
                     funcs.append(entry)
         return funcs
 
-    def _recover_from_db(self, vec: "np.ndarray", ctx: PluginContext) -> Optional[str]:
+    def _recover_from_db(self, vec: np.ndarray, ctx: PluginContext) -> str | None:
         """
         Cosine similarity look-up in the vectorshare_kb index.
 
@@ -279,7 +277,7 @@ class VectorSharePlugin(Plugin):
         # Brute-force fallback for memory / local backends
         all_entries = ctx.storage.query("vectorshare_kb", {"match": {}}, size=500)
         best_score = 0.0
-        best_name: Optional[str] = None
+        best_name: str | None = None
 
         for entry in all_entries:
             stored_vec_list = entry.get("vector")

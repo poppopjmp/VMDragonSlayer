@@ -38,11 +38,9 @@ Usage::
 from __future__ import annotations
 
 import logging
-import struct
-import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +73,15 @@ class HookDescriptor:
     # For instruction hooks: the opcode bytes to intercept
     opcode_bytes: bytes = b""
     # Fixed return value for API hooks (None = use callback)
-    return_value: Optional[int] = None
+    return_value: int | None = None
     # For register-result hooks (e.g. CPUID): register → value
-    register_results: Dict[str, int] = field(default_factory=dict)
+    register_results: dict[str, int] = field(default_factory=dict)
     # Priority: lower = installed first
     priority: int = 50
     # Metadata for engine-specific behaviour
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the hook descriptor to a JSON-compatible dict."""
         return {
             "name": self.name,
@@ -97,10 +95,10 @@ class HookDescriptor:
 @dataclass
 class HookSet:
     """A collection of hook descriptors to install."""
-    hooks: List[HookDescriptor] = field(default_factory=list)
-    categories: Set[HookCategory] = field(default_factory=set)
+    hooks: list[HookDescriptor] = field(default_factory=list)
+    categories: set[HookCategory] = field(default_factory=set)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the hook set to a JSON-compatible dict."""
         return {
             "hook_count": len(self.hooks),
@@ -108,7 +106,7 @@ class HookSet:
             "hooks": [h.to_dict() for h in self.hooks],
         }
 
-    def by_category(self, cat: HookCategory) -> List[HookDescriptor]:
+    def by_category(self, cat: HookCategory) -> list[HookDescriptor]:
         """Return hooks belonging to the given :class:`HookCategory`."""
         return [h for h in self.hooks if h.category == cat]
 
@@ -116,16 +114,16 @@ class HookSet:
 @dataclass
 class HookInstallResult:
     """Result of applying hooks to an engine."""
-    installed: List[str] = field(default_factory=list)
-    skipped: List[str] = field(default_factory=list)
-    errors: Dict[str, str] = field(default_factory=dict)
+    installed: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    errors: dict[str, str] = field(default_factory=dict)
 
     @property
     def success_count(self) -> int:
         """Number of hooks successfully installed."""
         return len(self.installed)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the installation result to a JSON-compatible dict."""
         return {
             "installed_count": len(self.installed),
@@ -305,7 +303,7 @@ _GET_MODULE_HANDLE_HOOK = HookDescriptor(
 
 
 # All known hook descriptors in priority order.
-_ALL_HOOKS: List[HookDescriptor] = sorted([
+_ALL_HOOKS: list[HookDescriptor] = sorted([
     _RDTSC_HOOK, _RDTSCP_HOOK, _GET_TICK_COUNT_HOOK, _QPC_HOOK,
     _CPUID_HOOK,
     _IS_DEBUGGER_PRESENT_HOOK, _CHECK_REMOTE_DEBUGGER_HOOK,
@@ -320,9 +318,9 @@ _ALL_HOOKS: List[HookDescriptor] = sorted([
 # ═══════════════════════════════════════════════════════════════════════════
 
 def build_hook_set(
-    categories: Optional[Set[str]] = None,
+    categories: set[str] | None = None,
     *,
-    exclude_names: Optional[Set[str]] = None,
+    exclude_names: set[str] | None = None,
 ) -> HookSet:
     """Build a :class:`HookSet` from the registered hook descriptors.
 
@@ -382,7 +380,7 @@ def build_hook_set_from_report(
         return HookSet()
 
     # Map report categories → hook categories
-    _CAT_MAP: Dict[str, Set[HookCategory]] = {
+    _CAT_MAP: dict[str, set[HookCategory]] = {
         "timing_check": {HookCategory.TIMING},
         "anti_debug": {HookCategory.DEBUG},
         "environment_check": {HookCategory.CPUID, HookCategory.ENV},
@@ -391,7 +389,7 @@ def build_hook_set_from_report(
         "self_modifying": {HookCategory.ENV},
     }
 
-    needed_cats: Set[HookCategory] = set()
+    needed_cats: set[HookCategory] = set()
     for ind in indicators:
         cat_str = ind.get("category", "") if isinstance(ind, dict) else getattr(ind, "category", "")
         if hasattr(cat_str, "value"):
@@ -421,7 +419,7 @@ class TimingState:
     def __init__(
         self,
         initial: int = 0x1_0000_0000,
-        delta_range: Tuple[int, int] = (80, 300),
+        delta_range: tuple[int, int] = (80, 300),
     ) -> None:
         self._tsc = initial
         self._delta_min, self._delta_max = delta_range
@@ -434,7 +432,7 @@ class TimingState:
         self._tsc += random.randint(self._delta_min, self._delta_max)
         return self._tsc
 
-    def split_edx_eax(self, tsc: int) -> Tuple[int, int]:
+    def split_edx_eax(self, tsc: int) -> tuple[int, int]:
         """Split a 64-bit TSC into (edx, eax) for RDTSC result."""
         eax = tsc & 0xFFFFFFFF
         edx = (tsc >> 32) & 0xFFFFFFFF

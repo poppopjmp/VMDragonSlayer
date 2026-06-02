@@ -42,7 +42,7 @@ import logging
 import os
 import re
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def _ensure_litellm():
 # uses 10 canonical categories from ml.model.HANDLER_CATEGORIES.  This map
 # collapses the LLM's labels into the canonical set.
 
-_LLM_TO_CANONICAL: Dict[str, str] = {
+_LLM_TO_CANONICAL: dict[str, str] = {
     # identity mappings
     "arithmetic": "arithmetic",
     "nop": "nop",
@@ -365,12 +365,12 @@ class LLMAnalyzer:
         system: str,
         user: str,
         response_format: str = "json",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Send a chat completion and parse the response as JSON."""
         if not self.available:
             return {"error": "LLM not available", "raw": ""}
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
@@ -413,7 +413,7 @@ class LLMAnalyzer:
         self,
         handler_data: str,
         context: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Classify a VM bytecode handler's semantics.
 
@@ -435,7 +435,7 @@ class LLMAnalyzer:
         self,
         structure: str,
         indicators: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Suggest deobfuscation strategies for an obfuscated structure.
 
@@ -455,7 +455,7 @@ class LLMAnalyzer:
         offset: int,
         handler_type: str = "",
         architecture: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Explain a matched byte pattern in context.
 
@@ -476,7 +476,7 @@ class LLMAnalyzer:
         instructions: str,
         taint_info: str = "",
         constraints: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Reconstruct pseudocode from lifted IR / instruction traces.
 
@@ -491,8 +491,8 @@ class LLMAnalyzer:
 
     def summarise_analysis(
         self,
-        results: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        results: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Summarise multi-stage analysis results into an actionable report.
 
@@ -511,7 +511,7 @@ class LLMAnalyzer:
         self,
         question: str,
         context: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Free-form question about a binary / analysis results.
 

@@ -27,7 +27,7 @@ import os
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +41,17 @@ class StorageBackend(ABC):
     """Minimal key-value + search interface used by all plugins."""
 
     @abstractmethod
-    def store(self, index: str, doc_id: str, document: Dict[str, Any]) -> bool:
+    def store(self, index: str, doc_id: str, document: dict[str, Any]) -> bool:
         """Persist *document* under *index*/*doc_id*.  Return success flag."""
         ...
 
     @abstractmethod
-    def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, index: str, doc_id: str) -> dict[str, Any] | None:
         """Retrieve a single document, or ``None`` if not found."""
         ...
 
     @abstractmethod
-    def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
+    def query(self, index: str, query: dict[str, Any], size: int = 10) -> list[dict[str, Any]]:
         """
         Execute a search-like query and return up to *size* hits.
 
@@ -67,17 +67,17 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
-    def ensure_index(self, index: str, mapping: Optional[Dict[str, Any]] = None) -> None:
+    def ensure_index(self, index: str, mapping: dict[str, Any] | None = None) -> None:
         """Create the index/collection if it doesn't exist."""
         ...
 
     # Convenience -----------------------------------------------------------
 
-    def store_bulk(self, index: str, documents: List[Dict[str, Any]], id_field: str = "id") -> int:
+    def store_bulk(self, index: str, documents: list[dict[str, Any]], id_field: str = "id") -> int:
         """Store multiple docs.  Return count of successes."""
         ok = 0
         for doc in documents:
-            doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode()).hexdigest())
+            doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode(), usedforsecurity=False).hexdigest())
             if self.store(index, str(doc_id), doc):
                 ok += 1
         return ok
@@ -92,15 +92,15 @@ class MemoryBackend(StorageBackend):
     """Thread-safe in-memory storage for tests and lightweight use."""
 
     def __init__(self) -> None:
-        self._data: Dict[str, Dict[str, Dict[str, Any]]] = {}  # index -> doc_id -> doc
+        self._data: dict[str, dict[str, dict[str, Any]]] = {}  # index -> doc_id -> doc
         self._lock = threading.Lock()
 
-    def store(self, index: str, doc_id: str, document: Dict[str, Any]) -> bool:
+    def store(self, index: str, doc_id: str, document: dict[str, Any]) -> bool:
         with self._lock:
             self._data.setdefault(index, {})[doc_id] = document
         return True
 
-    def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, index: str, doc_id: str) -> dict[str, Any] | None:
         with self._lock:
             return self._data.get(index, {}).get(doc_id)
 
@@ -112,12 +112,12 @@ class MemoryBackend(StorageBackend):
                 return True
             return False
 
-    def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
+    def query(self, index: str, query: dict[str, Any], size: int = 10) -> list[dict[str, Any]]:
         with self._lock:
             bucket = self._data.get(index, {})
             # Simple match filter
             match = query.get("match", {})
-            hits: list[Dict[str, Any]] = []
+            hits: list[dict[str, Any]] = []
             for doc in bucket.values():
                 ok = True
                 for k, v in match.items():
@@ -130,7 +130,7 @@ class MemoryBackend(StorageBackend):
                         break
             return hits
 
-    def ensure_index(self, index: str, mapping: Optional[Dict[str, Any]] = None) -> None:
+    def ensure_index(self, index: str, mapping: dict[str, Any] | None = None) -> None:
         with self._lock:
             self._data.setdefault(index, {})
 
@@ -158,14 +158,14 @@ class LocalFileBackend(StorageBackend):
     def __init__(self, base_dir: str | Path = ".vmds_storage") -> None:
         self._base = Path(base_dir)
         self._base.mkdir(parents=True, exist_ok=True)
-        self._cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._cache: dict[str, dict[str, dict[str, Any]]] = {}
         self._lock = threading.Lock()
 
     def _index_path(self, index: str) -> Path:
         safe_name = index.replace("/", "_").replace("\\", "_")
         return self._base / f"{safe_name}.json"
 
-    def _load(self, index: str) -> Dict[str, Dict[str, Any]]:
+    def _load(self, index: str) -> dict[str, dict[str, Any]]:
         if index in self._cache:
             return self._cache[index]
         p = self._index_path(index)
@@ -182,26 +182,26 @@ class LocalFileBackend(StorageBackend):
         p = self._index_path(index)
         p.write_text(json.dumps(self._cache.get(index, {}), indent=2), encoding="utf-8")
 
-    def store(self, index: str, doc_id: str, document: Dict[str, Any]) -> bool:
+    def store(self, index: str, doc_id: str, document: dict[str, Any]) -> bool:
         with self._lock:
             bucket = self._load(index)
             bucket[doc_id] = document
             self._flush(index)
         return True
 
-    def store_bulk(self, index: str, documents: List[Dict[str, Any]], id_field: str = "id") -> int:
+    def store_bulk(self, index: str, documents: list[dict[str, Any]], id_field: str = "id") -> int:
         """Override to batch-flush: write the file only once after all inserts."""
         with self._lock:
             bucket = self._load(index)
             ok = 0
             for doc in documents:
-                doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode()).hexdigest())
+                doc_id = doc.get(id_field, hashlib.md5(json.dumps(doc, sort_keys=True).encode(), usedforsecurity=False).hexdigest())
                 bucket[str(doc_id)] = doc
                 ok += 1
             self._flush(index)
         return ok
 
-    def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, index: str, doc_id: str) -> dict[str, Any] | None:
         with self._lock:
             return self._load(index).get(doc_id)
 
@@ -214,11 +214,11 @@ class LocalFileBackend(StorageBackend):
                 return True
         return False
 
-    def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
+    def query(self, index: str, query: dict[str, Any], size: int = 10) -> list[dict[str, Any]]:
         with self._lock:
             bucket = self._load(index)
             match = query.get("match", {})
-            hits: list[Dict[str, Any]] = []
+            hits: list[dict[str, Any]] = []
             for doc in bucket.values():
                 ok = True
                 for k, v in match.items():
@@ -231,7 +231,7 @@ class LocalFileBackend(StorageBackend):
                         break
         return hits
 
-    def ensure_index(self, index: str, mapping: Optional[Dict[str, Any]] = None) -> None:
+    def ensure_index(self, index: str, mapping: dict[str, Any] | None = None) -> None:
         with self._lock:
             self._load(index)  # creates file if needed
 
@@ -244,7 +244,7 @@ class LocalFileBackend(StorageBackend):
 class ElasticsearchBackend(StorageBackend):
     """Thin wrapper around ``elasticsearch.Elasticsearch``."""
 
-    def __init__(self, hosts: str | List[str] = "http://localhost:9200") -> None:
+    def __init__(self, hosts: str | list[str] = "http://localhost:9200") -> None:
         try:
             from elasticsearch import Elasticsearch
             self._es = Elasticsearch(hosts if isinstance(hosts, list) else [hosts])
@@ -252,9 +252,9 @@ class ElasticsearchBackend(StorageBackend):
             raise ImportError(
                 "Install 'elasticsearch' to use ElasticsearchBackend: "
                 "pip install elasticsearch"
-            )
+            ) from None
 
-    def store(self, index: str, doc_id: str, document: Dict[str, Any]) -> bool:
+    def store(self, index: str, doc_id: str, document: dict[str, Any]) -> bool:
         try:
             self._es.index(index=index, id=doc_id, body=document)
             return True
@@ -262,7 +262,7 @@ class ElasticsearchBackend(StorageBackend):
             logger.warning("ES store failed: %s", exc)
             return False
 
-    def get(self, index: str, doc_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, index: str, doc_id: str) -> dict[str, Any] | None:
         try:
             res = self._es.get(index=index, id=doc_id)
             return res["_source"]
@@ -276,7 +276,7 @@ class ElasticsearchBackend(StorageBackend):
         except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError):
             return False
 
-    def query(self, index: str, query: Dict[str, Any], size: int = 10) -> List[Dict[str, Any]]:
+    def query(self, index: str, query: dict[str, Any], size: int = 10) -> list[dict[str, Any]]:
         try:
             body = {"size": size, "query": query}
             res = self._es.search(index=index, body=body)
@@ -285,7 +285,7 @@ class ElasticsearchBackend(StorageBackend):
             logger.warning("ES query failed: %s", exc)
             return []
 
-    def ensure_index(self, index: str, mapping: Optional[Dict[str, Any]] = None) -> None:
+    def ensure_index(self, index: str, mapping: dict[str, Any] | None = None) -> None:
         try:
             if not self._es.indices.exists(index=index):
                 body = {"mappings": mapping} if mapping else {}
@@ -299,7 +299,7 @@ class ElasticsearchBackend(StorageBackend):
         vector: list[float],
         field: str = "vector",
         size: int = 1,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Run a cosine-similarity script_score query (used by vector_share)."""
         body = {
             "size": size,

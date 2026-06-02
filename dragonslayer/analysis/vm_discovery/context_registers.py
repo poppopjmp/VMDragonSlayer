@@ -39,8 +39,9 @@ import logging
 import re
 import statistics
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class VMContextRegister:
     confidence: float = 0.0
     evidence: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the context register to a JSON-compatible dict."""
         return {
             "register": self.register,
@@ -70,49 +71,49 @@ class VMContextRegister:
 @dataclass
 class VMContextLayout:
     """Full VM context register assignment."""
-    registers: List[VMContextRegister] = field(default_factory=list)
+    registers: list[VMContextRegister] = field(default_factory=list)
     vip_register: str = ""
     bit_width: int = 64
 
     @property
-    def vsp(self) -> Optional[str]:
+    def vsp(self) -> str | None:
         """Name of the register assigned the virtual stack pointer role, or ``None``."""
         return self._get_role("vSP")
 
     @property
-    def table_base(self) -> Optional[str]:
+    def table_base(self) -> str | None:
         """Name of the register holding the handler table base address, or ``None``."""
         return self._get_role("vHandlerTbl")
 
     @property
-    def key_register(self) -> Optional[str]:
+    def key_register(self) -> str | None:
         """Name of the rolling key / decode-transform register, or ``None``."""
         return self._get_role("vKey")
 
     @property
-    def context_base(self) -> Optional[str]:
+    def context_base(self) -> str | None:
         """Name of the register pointing to the VM context structure, or ``None``."""
         return self._get_role("vContext")
 
     @property
-    def scratch_registers(self) -> List[str]:
+    def scratch_registers(self) -> list[str]:
         """List of register names assigned the scratch role."""
         return [r.register for r in self.registers if r.role == "scratch"]
 
-    def _get_role(self, role: str) -> Optional[str]:
+    def _get_role(self, role: str) -> str | None:
         for r in self.registers:
             if r.role == role:
                 return r.register
         return None
 
-    def get_register_role(self, reg_name: str) -> Optional[str]:
+    def get_register_role(self, reg_name: str) -> str | None:
         """Return the VM role string for *reg_name*, or ``None`` if unassigned."""
         for r in self.registers:
             if r.register == reg_name:
                 return r.role
         return None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the full VM context layout to a JSON-compatible dict."""
         return {
             "vip_register": self.vip_register,
@@ -155,13 +156,13 @@ _REG_FAMILIES = [
     {"r15", "r15d", "r15w", "r15b"},
 ]
 
-_REG_ALIAS_MAP: Dict[str, Set[str]] = {}
+_REG_ALIAS_MAP: dict[str, set[str]] = {}
 for _family in _REG_FAMILIES:
     for _name in _family:
         _REG_ALIAS_MAP[_name] = _family
 
 
-def _reg_aliases(reg: str) -> Set[str]:
+def _reg_aliases(reg: str) -> set[str]:
     """Return all aliases for a register name."""
     return _REG_ALIAS_MAP.get(reg.lower(), {reg.lower()})
 
@@ -195,7 +196,7 @@ def identify_vm_context(
     reg_series = _collect_register_series(trace_records, gp_regs)
 
     # Already-assigned roles
-    assigned: Dict[str, VMContextRegister] = {}
+    assigned: dict[str, VMContextRegister] = {}
 
     # 1. vIP is given (or skip)
     if vip_register:
@@ -284,10 +285,10 @@ def identify_vm_context(
 
 def _collect_register_series(
     trace_records: Sequence[Any],
-    gp_regs: Set[str],
-) -> Dict[str, List[int]]:
+    gp_regs: set[str],
+) -> dict[str, list[int]]:
     """Collect time-series of register values from trace records."""
-    series: Dict[str, List[int]] = defaultdict(list)
+    series: dict[str, list[int]] = defaultdict(list)
     for rec in trace_records:
         regs = _get_registers(rec)
         for reg in gp_regs:
@@ -304,10 +305,10 @@ def _collect_register_series(
 def score_vsp_candidates(
     trace_records: Sequence[Any],
     boundaries: Sequence[Any],
-    reg_series: Dict[str, List[int]],
-    candidates: Set[str],
+    reg_series: dict[str, list[int]],
+    candidates: set[str],
     vip_register: str = "",
-) -> List[Tuple[str, float, str]]:
+) -> list[tuple[str, float, str]]:
     """Score registers as vSP candidates.
 
     vSP characteristics:
@@ -316,7 +317,7 @@ def score_vsp_candidates(
     - Changes anti-correlate with vIP (different handler groups)
     - Delta magnitudes are small and consistent (pointer-width aligned)
     """
-    results: List[Tuple[str, float, str]] = []
+    results: list[tuple[str, float, str]] = []
 
     for reg in candidates:
         vals = reg_series.get(reg, [])
@@ -324,7 +325,7 @@ def score_vsp_candidates(
             continue
 
         score = 0.0
-        evidence_parts: List[str] = []
+        evidence_parts: list[str] = []
 
         # Compute deltas
         deltas = [vals[i + 1] - vals[i] for i in range(len(vals) - 1)]
@@ -392,11 +393,11 @@ def score_vsp_candidates(
 
 def score_table_base_candidates(
     trace_records: Sequence[Any],
-    dispatcher_set: Set[int],
+    dispatcher_set: set[int],
     boundaries: Sequence[Any],
-    reg_series: Dict[str, List[int]],
-    candidates: Set[str],
-) -> List[Tuple[str, float, str]]:
+    reg_series: dict[str, list[int]],
+    candidates: set[str],
+) -> list[tuple[str, float, str]]:
     """Score registers as handler table base candidates.
 
     The table base register is:
@@ -404,7 +405,7 @@ def score_table_base_candidates(
     - Present in the dispatch instruction's operand ([base + idx * scale])
     - Read at every dispatcher visit, never written by handlers
     """
-    results: List[Tuple[str, float, str]] = []
+    results: list[tuple[str, float, str]] = []
 
     for reg in candidates:
         vals = reg_series.get(reg, [])
@@ -412,11 +413,11 @@ def score_table_base_candidates(
             continue
 
         score = 0.0
-        evidence_parts: List[str] = []
+        evidence_parts: list[str] = []
 
         # 1. Constancy: how many unique values?
         unique_vals = set(vals)
-        constancy = 1.0 / len(unique_vals) if unique_vals else 0.0
+        1.0 / len(unique_vals) if unique_vals else 0.0
         if len(unique_vals) == 1:
             score += 0.35
             evidence_parts.append("constant")
@@ -464,11 +465,11 @@ def score_table_base_candidates(
 
 def score_key_candidates(
     trace_records: Sequence[Any],
-    dispatcher_set: Set[int],
+    dispatcher_set: set[int],
     decode_transforms: Sequence[str],
-    reg_series: Dict[str, List[int]],
-    candidates: Set[str],
-) -> List[Tuple[str, float, str]]:
+    reg_series: dict[str, list[int]],
+    candidates: set[str],
+) -> list[tuple[str, float, str]]:
     """Score registers as rolling key register candidates.
 
     The key register:
@@ -476,7 +477,7 @@ def score_key_candidates(
     - Mutates every dispatcher iteration (but has a pattern)
     - Is different from vIP, vSP, table base
     """
-    results: List[Tuple[str, float, str]] = []
+    results: list[tuple[str, float, str]] = []
 
     # Extract register names mentioned in decode transforms
     transform_regs = _extract_regs_from_transforms(decode_transforms)
@@ -487,7 +488,7 @@ def score_key_candidates(
             continue
 
         score = 0.0
-        evidence_parts: List[str] = []
+        evidence_parts: list[str] = []
 
         # 1. Mentioned in decode transforms (alias-aware)
         aliases = _reg_aliases(reg)
@@ -534,9 +535,9 @@ def score_key_candidates(
 def score_context_base_candidates(
     trace_records: Sequence[Any],
     boundaries: Sequence[Any],
-    reg_series: Dict[str, List[int]],
-    candidates: Set[str],
-) -> List[Tuple[str, float, str]]:
+    reg_series: dict[str, list[int]],
+    candidates: set[str],
+) -> list[tuple[str, float, str]]:
     """Score registers as VM context base pointer candidates.
 
     The context base:
@@ -545,7 +546,7 @@ def score_context_base_candidates(
     - Used as memory base for loads/stores of virtual registers
     - Distinct from vSP (which changes push/pop-style)
     """
-    results: List[Tuple[str, float, str]] = []
+    results: list[tuple[str, float, str]] = []
 
     for reg in candidates:
         vals = reg_series.get(reg, [])
@@ -553,7 +554,7 @@ def score_context_base_candidates(
             continue
 
         score = 0.0
-        evidence_parts: List[str] = []
+        evidence_parts: list[str] = []
 
         unique_vals = set(vals)
 
@@ -603,8 +604,8 @@ def score_context_base_candidates(
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _apply_symbolic_evidence(
-    assigned: Dict[str, VMContextRegister],
-    available: Set[str],
+    assigned: dict[str, VMContextRegister],
+    available: set[str],
     symbolic_summaries: Sequence[Any],
 ) -> None:
     """Refine role assignments using symbolic handler summaries.
@@ -619,7 +620,6 @@ def _apply_symbolic_evidence(
 
     unchanged_counts: Counter = Counter()
     self_delta_counts: Counter = Counter()
-    bidirectional_regs: Set[str] = set()
 
     for summary in symbolic_summaries:
         final_regs = _get_final_registers(summary)
@@ -649,15 +649,18 @@ def _apply_symbolic_evidence(
             continue
 
         ratio_unchanged = unchanged_counts.get(reg, 0) / total
-        if ratio_unchanged > 0.8 and reg not in assigned:
-            # Boost table base or context base
-            if not any(r.role == "vHandlerTbl" for r in assigned.values()):
-                assigned[reg] = VMContextRegister(
-                    register=reg, role="vHandlerTbl",
-                    confidence=ratio_unchanged * 0.8,
-                    evidence=f"symbolic: unchanged in {ratio_unchanged:.0%} of handlers",
-                )
-                available.discard(reg)
+        # Boost table base or context base
+        if (
+            ratio_unchanged > 0.8
+            and reg not in assigned
+            and not any(r.role == "vHandlerTbl" for r in assigned.values())
+        ):
+            assigned[reg] = VMContextRegister(
+                register=reg, role="vHandlerTbl",
+                confidence=ratio_unchanged * 0.8,
+                evidence=f"symbolic: unchanged in {ratio_unchanged:.0%} of handlers",
+            )
+            available.discard(reg)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -671,7 +674,7 @@ def _count_memory_base_usage(
 ) -> int:
     """Count how many boundaries use *reg* as a memory base."""
     count = 0
-    boundary_ranges: List[Tuple[int, int]] = []
+    boundary_ranges: list[tuple[int, int]] = []
     for b in boundaries:
         s = _get_val(b, "trace_start", 0)
         e = _get_val(b, "trace_end", 0)
@@ -691,7 +694,7 @@ def _count_memory_base_usage(
 
 def _count_scaled_index_usage(
     trace_records: Sequence[Any],
-    dispatcher_set: Set[int],
+    dispatcher_set: set[int],
     reg: str,
 ) -> int:
     """Count occurrences of *reg* in scaled-index memory operands near dispatcher."""
@@ -716,7 +719,7 @@ def _count_handler_writes(
 ) -> int:
     """Count how many times *reg* appears as a write destination in handlers."""
     count = 0
-    boundary_ranges: List[Tuple[int, int]] = []
+    boundary_ranges: list[tuple[int, int]] = []
     for b in boundaries:
         s = _get_val(b, "trace_start", 0)
         e = _get_val(b, "trace_end", 0)
@@ -738,7 +741,7 @@ def _count_handler_writes(
 
 def _count_xor_involvement(
     trace_records: Sequence[Any],
-    dispatcher_set: Set[int],
+    dispatcher_set: set[int],
     reg: str,
 ) -> int:
     """Count XOR/ADD/ROL instructions involving *reg* near dispatcher."""
@@ -776,13 +779,13 @@ def _count_displaced_accesses(
     reg: str,
 ) -> int:
     """Count memory accesses using *reg* with varying displacements."""
-    displacements: Set[str] = set()
+    displacements: set[str] = set()
     disp_pattern = re.compile(
         r'\[' + re.escape(reg) + r'\s*([+\-]\s*(?:0x)?[0-9a-fA-F]+)\]',
         re.IGNORECASE,
     )
 
-    boundary_ranges: List[Tuple[int, int]] = []
+    boundary_ranges: list[tuple[int, int]] = []
     for b in boundaries:
         s = _get_val(b, "trace_start", 0)
         e = _get_val(b, "trace_end", 0)
@@ -801,9 +804,9 @@ def _count_displaced_accesses(
 
 def _extract_regs_from_transforms(
     decode_transforms: Sequence[str],
-) -> Set[str]:
+) -> set[str]:
     """Extract register names mentioned in decode transform strings."""
-    regs: Set[str] = set()
+    regs: set[str] = set()
     all_gp = _GP_REGS_64 | _GP_REGS_32
     for t in decode_transforms:
         words = re.findall(r'\b([a-zA-Z][a-zA-Z0-9]*)\b', t.lower())
@@ -817,7 +820,7 @@ def _extract_regs_from_transforms(
 # Accessor helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _get_registers(rec: Any) -> Dict[str, int]:
+def _get_registers(rec: Any) -> dict[str, int]:
     if isinstance(rec, dict):
         return rec.get("registers", {})
     return getattr(rec, "registers", {})
@@ -835,7 +838,7 @@ def _get_val(obj: Any, attr: str, default: Any = None) -> Any:
     return getattr(obj, attr, default)
 
 
-def _get_final_registers(summary: Any) -> Dict[str, str]:
+def _get_final_registers(summary: Any) -> dict[str, str]:
     if isinstance(summary, dict):
         return summary.get("final_registers", {})
     return getattr(summary, "final_registers", {})

@@ -3,46 +3,32 @@ Pattern Analysis Module
 
 """
 
-from .database import (
-    Pattern,
-    PatternDatabase,
-    Architecture,
-    HandlerType
-)
-
-from .recognizer import (
-    Match,
-    PatternRecognizer,
-    SequenceRecognizer
-)
-
 from .classifier import (
-    PatternClassifier,
-    ClassificationResult,
     ClassificationReport,
-    strip_junk,
-    normalize_operands,
+    ClassificationResult,
+    PatternClassifier,
     _is_junk_instruction,
     _match_instruction_sequence_gap,
+    normalize_operands,
+    strip_junk,
 )
-
-from .yara_engine import (
-    YaraEngine,
-    YaraMatch,
-    YARA_AVAILABLE,
-)
-
+from .database import Architecture, HandlerType, Pattern, PatternDatabase
 from .matcher import (
+    MatchContext,
     PatternMatcher,
     RankedMatch,
-    MatchContext,
     find_signature_collisions,
 )
-
+from .recognizer import Match, PatternRecognizer, SequenceRecognizer
 from .version_fingerprint import (
-    VMProtectVersionFingerprinter,
-    VMProtectVersion,
     VersionFingerprint,
+    VMProtectVersion,
+    VMProtectVersionFingerprinter,
+)
+from .yara_engine import (
+    YARA_AVAILABLE,
+    YaraEngine,
+    YaraMatch,
 )
 
 __all__ = [
@@ -51,7 +37,7 @@ __all__ = [
     'PatternDatabase',
     'Architecture',
     'HandlerType',
-    
+
     # Recognition
     'Match',
     'PatternRecognizer',
@@ -69,6 +55,8 @@ __all__ = [
     'ClassificationReport',
     'strip_junk',
     'normalize_operands',
+    '_is_junk_instruction',
+    '_match_instruction_sequence_gap',
 
     # Version Fingerprinting
     'VMProtectVersionFingerprinter',

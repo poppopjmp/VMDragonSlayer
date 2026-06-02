@@ -45,12 +45,13 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import struct
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, TypedDict
+from typing import Any, Protocol, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class TraceRecord(TypedDict, total=False):
     disassembly: str
     mnemonic: str
     operands: str
-    registers: Dict[str, int]
+    registers: dict[str, int]
     raw_bytes: bytes
 
 
@@ -158,9 +159,9 @@ _subsample_warned: bool = False
 
 
 def _subsample_trace(
-    trace: List[Dict[str, Any]],
+    trace: list[dict[str, Any]],
     max_len: int = 0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return *trace* or a uniformly-spaced subsample of *max_len* entries.
 
     When *max_len* is 0 (default), the limit is read from config
@@ -223,9 +224,7 @@ def _is_indirect_operand(operands: str) -> bool:
         return False
     if operands.startswith("0x"):
         return False
-    if operands.lstrip("-").isdigit():
-        return False
-    return True
+    return not operands.lstrip("-").isdigit()
 
 
 @dataclass
@@ -239,24 +238,24 @@ class _TraceFeatures:
     addr_freq: Counter = field(default_factory=Counter)
     """Address → visit count."""
 
-    pushad_addrs: Set[int] = field(default_factory=set)
+    pushad_addrs: set[int] = field(default_factory=set)
     """Addresses of ``pushad`` / ``pusha`` / ``pushfd`` instructions."""
 
-    lodsb_addrs: Set[int] = field(default_factory=set)
+    lodsb_addrs: set[int] = field(default_factory=set)
     """Addresses of lodsb / lodsw / lodsd instructions."""
 
-    xlat_addrs: Set[int] = field(default_factory=set)
+    xlat_addrs: set[int] = field(default_factory=set)
     """Addresses of xlat instructions."""
 
-    indirect_calls: List[Dict[str, Any]] = field(default_factory=list)
+    indirect_calls: list[dict[str, Any]] = field(default_factory=list)
     """Trace records with indirect ``call [...]`` instructions."""
 
-    indirect_jumps: List[Dict[str, Any]] = field(default_factory=list)
+    indirect_jumps: list[dict[str, Any]] = field(default_factory=list)
     """Trace records with indirect ``jmp`` instructions."""
 
 
 def _compute_trace_features(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
 ) -> _TraceFeatures:
     """Single-pass extraction of all features needed by the finders.
 
@@ -332,9 +331,9 @@ _TABLE_LOOKUP_RE = re.compile(
 )
 
 # Register alias map: maps any sub-register to all its aliases
-_REG_ALIASES: Dict[str, Set[str]] = {}
+_REG_ALIASES: dict[str, set[str]] = {}
 
-def _build_alias_map() -> Dict[str, Set[str]]:
+def _build_alias_map() -> dict[str, set[str]]:
     """Build a map from any register name to all aliases of the same physical reg."""
     families = [
         {"rax", "eax", "ax", "al", "ah"},
@@ -354,7 +353,7 @@ def _build_alias_map() -> Dict[str, Set[str]]:
         {"r14", "r14d", "r14w", "r14b"},
         {"r15", "r15d", "r15w", "r15b"},
     ]
-    m: Dict[str, Set[str]] = {}
+    m: dict[str, set[str]] = {}
     for family in families:
         for name in family:
             m[name] = family
@@ -396,7 +395,7 @@ class DispatcherScoringConfig:
     confidence_floor: float = 0.30       # minimum confidence for acceptance
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DispatcherScoringConfig":
+    def from_dict(cls, d: dict[str, Any]) -> DispatcherScoringConfig:
         """Create from dictionary, ignoring unknown keys."""
         valid = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in d.items() if k in valid})
@@ -476,14 +475,14 @@ class VMProtectDispatcherMatch:
     table_base: int = 0
     table_scale: int = 8
     vip_delta: int = 1
-    handler_addresses: List[int] = field(default_factory=list)
+    handler_addresses: list[int] = field(default_factory=list)
     confidence: float = 0.0
     vm_entry_address: int = 0
-    context_registers: Dict[str, str] = field(default_factory=dict)
-    decode_transforms: List[str] = field(default_factory=list)
+    context_registers: dict[str, str] = field(default_factory=dict)
+    decode_transforms: list[str] = field(default_factory=list)
     dispatch_style: str = "jmp"  # "jmp" | "push_ret" | "call" | "computed_goto"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "entry_address": self.entry_address,
             "indirect_jump_address": self.indirect_jump_address,
@@ -508,10 +507,10 @@ def find_vmprotect_dispatcher(
     instructions: list,
     *,
     bit_width: int = 64,
-    binary_data: Optional[bytes] = None,
+    binary_data: bytes | None = None,
     base_address: int = 0,
-    scoring_config: Optional[DispatcherScoringConfig] = None,
-) -> Optional[VMProtectDispatcherMatch]:
+    scoring_config: DispatcherScoringConfig | None = None,
+) -> VMProtectDispatcherMatch | None:
     """Identify the VMProtect dispatcher loop in a lifted instruction stream.
 
     Pattern-matches the canonical VMProtect fetch→decode→advance→dispatch
@@ -559,7 +558,7 @@ def find_vmprotect_dispatcher(
 
     # Phase 2: Score each (fetch, dispatch) pair for coherence
     best_score = 0.0
-    best_info: Optional[VMProtectDispatcherMatch] = None
+    best_info: VMProtectDispatcherMatch | None = None
     _scfg = scoring_config or _DEFAULT_SCORING_CONFIG
 
     for dispatch in dispatches:
@@ -596,11 +595,11 @@ def find_vmprotect_dispatcher(
 
 
 def find_dispatcher_in_trace(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     *,
     bit_width: int = 64,
-    scoring_config: Optional[DispatcherScoringConfig] = None,
-) -> Optional[VMProtectDispatcherMatch]:
+    scoring_config: DispatcherScoringConfig | None = None,
+) -> VMProtectDispatcherMatch | None:
     """Identify the dispatcher from an execution trace (list of dicts).
 
     Each trace record should have ``address`` (int) and ``disassembly`` (str).
@@ -619,7 +618,7 @@ def find_dispatcher_in_trace(
             addr_freq[addr] += 1
 
     # Find indirect jumps in the trace
-    indirect_jumps: List[Dict[str, Any]] = []
+    indirect_jumps: list[dict[str, Any]] = []
     for rec in trace_records:
         disasm = rec.get("disassembly", "").lower().strip()
         mnem = disasm.split(None, 1)[0] if disasm else ""
@@ -661,7 +660,7 @@ def find_dispatcher_in_trace(
         return None
 
     best_score = 0.0
-    best_info: Optional[VMProtectDispatcherMatch] = None
+    best_info: VMProtectDispatcherMatch | None = None
     _scfg = scoring_config or _DEFAULT_SCORING_CONFIG
 
     for disp in dispatches_list:
@@ -693,8 +692,8 @@ def find_dispatcher_in_trace(
 # -- Phase 1: Candidate extraction ------------------------------------------
 
 def _find_fetch_candidates(
-    instructions: list, gp_regs: set, gp_all: Optional[set] = None,
-) -> List[_FetchCandidate]:
+    instructions: list, gp_regs: set, gp_all: set | None = None,
+) -> list[_FetchCandidate]:
     """Find movzx/movsx/mov instructions that fetch from [reg].
 
     VMProtect opcode fetch pattern::
@@ -706,7 +705,7 @@ def _find_fetch_candidates(
     """
     if gp_all is None:
         gp_all = gp_regs
-    candidates: List[_FetchCandidate] = []
+    candidates: list[_FetchCandidate] = []
     for idx, insn in enumerate(instructions):
         mnem = _get_mnemonic(insn).lower()
         if mnem not in _FETCH_MNEMONICS:
@@ -747,9 +746,9 @@ def _find_fetch_candidates(
     return candidates
 
 
-def _find_advance_candidates(instructions: list, gp_regs: set) -> List[_AdvanceCandidate]:
+def _find_advance_candidates(instructions: list, gp_regs: set) -> list[_AdvanceCandidate]:
     """Find instructions that advance/decrement a GP register (vIP advance)."""
-    candidates: List[_AdvanceCandidate] = []
+    candidates: list[_AdvanceCandidate] = []
     for idx, insn in enumerate(instructions):
         mnem = _get_mnemonic(insn).lower()
         if mnem not in _ADVANCE_MNEMONICS:
@@ -786,7 +785,7 @@ def _find_advance_candidates(instructions: list, gp_regs: set) -> List[_AdvanceC
     return candidates
 
 
-def _find_dispatch_candidates(instructions: list, gp_regs: set) -> List[_DispatchCandidate]:
+def _find_dispatch_candidates(instructions: list, gp_regs: set) -> list[_DispatchCandidate]:
     """Find indirect control-flow transfers that could be the dispatch instruction.
 
     Recognises four dispatch styles used by VMProtect and similar VMs:
@@ -801,7 +800,7 @@ def _find_dispatch_candidates(instructions: list, gp_regs: set) -> List[_Dispatc
        or ``mov [rsp], reg; ret`` that load a handler address onto the
        stack and then use ``ret`` to transfer control.
     """
-    candidates: List[_DispatchCandidate] = []
+    candidates: list[_DispatchCandidate] = []
     for idx, insn in enumerate(instructions):
         mnem = _get_mnemonic(insn).lower()
 
@@ -915,9 +914,9 @@ def _find_dispatch_candidates(instructions: list, gp_regs: set) -> List[_Dispatc
     return candidates
 
 
-def _find_decode_candidates(instructions: list, gp_regs: set) -> List[_DecodeCandidate]:
+def _find_decode_candidates(instructions: list, gp_regs: set) -> list[_DecodeCandidate]:
     """Find opcode decode/obfuscation transforms between fetch and dispatch."""
-    candidates: List[_DecodeCandidate] = []
+    candidates: list[_DecodeCandidate] = []
     for idx, insn in enumerate(instructions):
         mnem = _get_mnemonic(insn).lower()
         if mnem not in _DECODE_MNEMONICS:
@@ -940,15 +939,15 @@ def _find_decode_candidates(instructions: list, gp_regs: set) -> List[_DecodeCan
 def _score_dispatcher_candidate(
     fetch: _FetchCandidate,
     dispatch: _DispatchCandidate,
-    advances: List[_AdvanceCandidate],
-    decodes: List[_DecodeCandidate],
+    advances: list[_AdvanceCandidate],
+    decodes: list[_DecodeCandidate],
     instructions: list,
     gp_regs: set,
     bit_width: int,
-    binary_data: Optional[bytes],
+    binary_data: bytes | None,
     base_address: int,
-    scoring: Optional[DispatcherScoringConfig] = None,
-) -> Tuple[float, Optional[VMProtectDispatcherMatch]]:
+    scoring: DispatcherScoringConfig | None = None,
+) -> tuple[float, VMProtectDispatcherMatch | None]:
     """Score how well a (fetch, dispatch) pair matches VMProtect's dispatcher."""
     cfg = scoring or _DEFAULT_SCORING_CONFIG
     score = 0.0
@@ -965,7 +964,7 @@ def _score_dispatcher_candidate(
         score += cfg.distance_far
 
     # 3. vIP advance matches fetch register
-    matching_advance: Optional[_AdvanceCandidate] = None
+    matching_advance: _AdvanceCandidate | None = None
     for adv in advances:
         if adv.reg == fetch.vip_reg and fetch.insn_index < adv.insn_index <= dispatch.insn_index + 2:
             matching_advance = adv
@@ -1000,18 +999,14 @@ def _score_dispatcher_candidate(
         tbl_match = _TABLE_LOOKUP_RE.search(dispatch_expr)
         if tbl_match:
             score += cfg.table_full
-            try:
+            with contextlib.suppress(ValueError):
                 table_scale = int(tbl_match.group(3))
-            except ValueError:
-                pass
         elif _SCALE_RE.search(dispatch_expr):
             score += cfg.table_scale_only
             scale_match = _SCALE_RE.search(dispatch_expr)
             if scale_match:
-                try:
+                with contextlib.suppress(ValueError):
                     table_scale = int(scale_match.group(2))
-                except ValueError:
-                    pass
         else:
             score += cfg.table_memory_other
     else:
@@ -1032,7 +1027,7 @@ def _score_dispatcher_candidate(
                             break
 
     # 6. Decode transforms between fetch and dispatch
-    decode_detail: List[str] = []
+    decode_detail: list[str] = []
     for dec in decodes:
         if (dec.operand_reg == fetch_reg
                 and fetch.insn_index < dec.insn_index < dispatch.insn_index):
@@ -1061,7 +1056,7 @@ def _score_dispatcher_candidate(
     # Build result
     confidence = min(score, 1.0)
     vip_delta = matching_advance.delta if matching_advance else fetch.width
-    ctx_regs: Dict[str, str] = {fetch.vip_reg: "vIP"}
+    ctx_regs: dict[str, str] = {fetch.vip_reg: "vIP"}
 
     # Obfuscated dispatch styles get a small bonus — they signal that
     # the binary deliberately avoids plain ``jmp`` patterns, which is
@@ -1098,14 +1093,14 @@ def _extract_handler_table_binary(
     scale: int,
     bit_width: int,
     max_entries: int = 256,
-) -> List[int]:
+) -> list[int]:
     """Read handler addresses from the binary's handler table."""
     offset = table_base - base_address
     if offset < 0 or offset >= len(binary_data):
         return []
     entry_size = scale if scale in (4, 8) else (8 if bit_width == 64 else 4)
     fmt = "<Q" if entry_size == 8 else "<I"
-    handlers: List[int] = []
+    handlers: list[int] = []
     binary_end = base_address + len(binary_data)
     for i in range(max_entries):
         pos = offset + i * entry_size
@@ -1124,10 +1119,10 @@ def _extract_handler_table_binary(
 # -- Trace-based helpers -----------------------------------------------------
 
 def _extract_block_around(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     target_addr: int,
     window: int = 12,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Extract trace records forming the basic block around *target_addr*."""
     indices = [i for i, r in enumerate(trace_records) if r.get("address") == target_addr]
     if not indices:
@@ -1137,11 +1132,11 @@ def _extract_block_around(
 
 
 def _extract_handlers_from_trace_visits(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     dispatch_addr: int,
-) -> List[int]:
+) -> list[int]:
     """Extract handler entry addresses by finding the instruction after dispatch."""
-    handler_addrs: Set[int] = set()
+    handler_addrs: set[int] = set()
     for i, rec in enumerate(trace_records):
         if rec.get("address") == dispatch_addr and i + 1 < len(trace_records):
             next_addr = trace_records[i + 1].get("address", 0)
@@ -1151,11 +1146,11 @@ def _extract_handlers_from_trace_visits(
 
 
 def _identify_vip_from_trace_registers(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     dispatch_addr: int,
-) -> Optional[str]:
+) -> str | None:
     """Identify vIP register by checking which register changes monotonically."""
-    visit_regs: List[Dict[str, int]] = []
+    visit_regs: list[dict[str, int]] = []
     for rec in trace_records:
         if rec.get("address") == dispatch_addr:
             regs = rec.get("registers", {})
@@ -1165,7 +1160,7 @@ def _identify_vip_from_trace_registers(
         return None
     best_reg = None
     best_score = 0.0
-    all_regs: Set[str] = set()
+    all_regs: set[str] = set()
     for vr in visit_regs:
         all_regs.update(vr.keys())
     for reg in all_regs:
@@ -1186,7 +1181,7 @@ def _identify_vip_from_trace_registers(
     return best_reg
 
 
-def _trace_to_pseudo_instructions(trace_records: List[Dict[str, Any]]) -> list:
+def _trace_to_pseudo_instructions(trace_records: list[dict[str, Any]]) -> list:
     """Convert trace record dicts to lightweight pseudo-instruction objects."""
     return [_PseudoInstruction(
         address=rec.get("address", 0),
@@ -1217,7 +1212,7 @@ def _get_mnemonic(insn: Any) -> str:
     return ""
 
 
-def _get_operands(insn: Any) -> List[str]:
+def _get_operands(insn: Any) -> list[str]:
     raw = _get_operands_raw(insn)
     return [o.strip() for o in raw.split(",")] if raw else []
 
@@ -1259,7 +1254,7 @@ def _infer_fetch_width(src: str, dst: str) -> int:
     return 1
 
 
-def _parse_immediate(s: str) -> Optional[int]:
+def _parse_immediate(s: str) -> int | None:
     s = s.strip()
     try:
         if s.startswith("0x") or s.startswith("-0x"):
@@ -1271,7 +1266,7 @@ def _parse_immediate(s: str) -> Optional[int]:
     return None
 
 
-def _parse_lea_delta(inner: str, reg: str) -> Optional[int]:
+def _parse_lea_delta(inner: str, reg: str) -> int | None:
     inner = inner.strip().lower()
     reg = reg.strip().lower()
     m = re.match(rf"^{re.escape(reg)}\s*([+\-])\s*(0x[0-9a-f]+|\d+)$", inner)
@@ -1297,9 +1292,9 @@ class DispatcherInfo:
     handler_count: int = 0
     loop_detected: bool = False
     confidence: float = 0.0
-    table_entries: List[int] = field(default_factory=list)
+    table_entries: list[int] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "address": self.address,
             "pattern": self.pattern,
@@ -1319,10 +1314,10 @@ class HandlerEntry:
     category: str = "unknown"        # Handler semantic category
     size: int = 0                    # Approximate handler size in bytes
     returns_to_dispatcher: bool = False
-    reads: List[str] = field(default_factory=list)
-    writes: List[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "opcode": self.opcode,
             "handler_address": self.handler_address,
@@ -1338,14 +1333,14 @@ class HandlerEntry:
 class DispatchTableResult:
     """Complete dispatcher analysis result."""
     success: bool
-    dispatchers: List[DispatcherInfo] = field(default_factory=list)
-    handler_table: List[HandlerEntry] = field(default_factory=list)
+    dispatchers: list[DispatcherInfo] = field(default_factory=list)
+    handler_table: list[HandlerEntry] = field(default_factory=list)
     total_handlers: int = 0
-    opcode_range: Optional[tuple] = None
+    opcode_range: tuple | None = None
     protector: str = "unknown"
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "success": self.success,
             "dispatchers": [d.to_dict() for d in self.dispatchers],
@@ -1380,7 +1375,7 @@ class DispatcherAnalyzer:
         self,
         binary_data: bytes,
         *,
-        shared_data: Optional[Dict[str, Any]] = None,
+        shared_data: dict[str, Any] | None = None,
     ) -> DispatchTableResult:
         """
         Analyse binary data with cross-stage context to identify
@@ -1401,7 +1396,7 @@ class DispatcherAnalyzer:
             raw_dispatchers = vm_info.get("dispatchers", [])
             protector = vm_info.get("protector", "unknown")
 
-            dispatcher_infos: List[DispatcherInfo] = []
+            dispatcher_infos: list[DispatcherInfo] = []
             for d in raw_dispatchers:
                 if isinstance(d, dict):
                     dispatcher_infos.append(DispatcherInfo(
@@ -1430,11 +1425,11 @@ class DispatcherAnalyzer:
             # 3. Merge with symbolic execution handler data
             sym_info = shared.get("symbolic_execution", {})
             sym_handlers = sym_info.get("handlers", [])
-            sym_handler_table = sym_info.get("handler_table", {})
+            sym_info.get("handler_table", {})
 
             # 4. Build handler table
-            handler_table: List[HandlerEntry] = []
-            seen_addrs: Set[int] = set()
+            handler_table: list[HandlerEntry] = []
+            seen_addrs: set[int] = set()
 
             # From symbolic execution classified handlers
             for i, h in enumerate(sym_handlers):
@@ -1465,7 +1460,7 @@ class DispatcherAnalyzer:
                         ))
 
             # From push/ret sequences — add targets as handler entry points
-            for pr_addr, pr_target in push_ret_entries:
+            for _pr_addr, pr_target in push_ret_entries:
                 if pr_target not in seen_addrs:
                     seen_addrs.add(pr_target)
                     handler_table.append(HandlerEntry(
@@ -1529,14 +1524,14 @@ class DispatcherAnalyzer:
             return "register"
         return "computed"
 
-    def _find_jump_tables(self, data: bytes) -> List[DispatcherInfo]:
+    def _find_jump_tables(self, data: bytes) -> list[DispatcherInfo]:
         """
         Scan for indirect jump instructions followed by potential jump tables.
 
         A jump table is typically: jmp [reg*4+base], where base points to
         an array of code addresses.
         """
-        results: List[DispatcherInfo] = []
+        results: list[DispatcherInfo] = []
 
         for pattern, length, name in self.VMPROTECT_DISPATCH_SIGS:
             start = 0
@@ -1580,7 +1575,7 @@ class DispatcherAnalyzer:
         *,
         image_base: int = 0,
         max_sequences: int = 512,
-    ) -> List[tuple]:
+    ) -> list[tuple]:
         """Scan for ``push imm32; ret`` (``\\x68 <4B> \\xC3``) obfuscated jumps.
 
         VMProtect (and similar protectors) replace direct ``jmp addr`` with a
@@ -1601,7 +1596,7 @@ class DispatcherAnalyzer:
         list[tuple[int, int]]
             ``(file_offset_of_push, pushed_address)`` pairs.
         """
-        results: List[tuple] = []
+        results: list[tuple] = []
         data_len = len(data)
         # Pattern: 0x68 <imm32 LE> 0xC3
         needle = b"\x68"
@@ -1643,7 +1638,7 @@ class DispatcherAnalyzer:
         table_offset: int,
         max_entries: int = 256,
         entry_size: int = 4,
-    ) -> List[int]:
+    ) -> list[int]:
         """
         Extract potential jump table entries starting at table_offset.
 
@@ -1652,7 +1647,7 @@ class DispatcherAnalyzer:
         entry_size : int
             4 for 32-bit, 8 for 64-bit binaries.
         """
-        entries: List[int] = []
+        entries: list[int] = []
         data_len = len(data)
         fmt = "<I" if entry_size == 4 else "<Q"
         max_addr = 0x7FFFFFFF if entry_size == 4 else 0x7FFFFFFFFFFF
@@ -1715,17 +1710,17 @@ class GenericDispatcherMatch:
     vip_register: str = ""
     fetch_register: str = ""
     fetch_width: int = 1
-    handler_addresses: List[int] = field(default_factory=list)
+    handler_addresses: list[int] = field(default_factory=list)
     confidence: float = 0.0
     dispatch_style: str = "jmp"
-    decode_transforms: List[str] = field(default_factory=list)
+    decode_transforms: list[str] = field(default_factory=list)
     table_base: int = 0
     table_scale: int = 8
     nesting_depth: int = 0
-    inner_entries: List[int] = field(default_factory=list)
-    extra: Dict[str, Any] = field(default_factory=dict)
+    inner_entries: list[int] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-compatible dict.
 
         Returns:
@@ -1753,7 +1748,7 @@ class GenericDispatcherMatch:
     @classmethod
     def from_vmprotect_match(
         cls, match: VMProtectDispatcherMatch
-    ) -> "GenericDispatcherMatch":
+    ) -> GenericDispatcherMatch:
         """Wrap a VMProtect-specific match into the generic shape."""
         return cls(
             protector="vmprotect",
@@ -1790,11 +1785,11 @@ _CV_LODSB_XLAT = re.compile(
 
 
 def find_themida_dispatcher(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     *,
     bit_width: int = 64,
-    _features: Optional[_TraceFeatures] = None,
-) -> Optional[GenericDispatcherMatch]:
+    _features: _TraceFeatures | None = None,
+) -> GenericDispatcherMatch | None:
     """Identify a Themida/WinLicense dispatcher in a trace.
 
     Themida VMs use ``pushad`` / ``pushfd`` prologues followed by a
@@ -1859,11 +1854,11 @@ def find_themida_dispatcher(
 
 
 def find_cv_dispatcher(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     *,
     bit_width: int = 64,
-    _features: Optional[_TraceFeatures] = None,
-) -> Optional[GenericDispatcherMatch]:
+    _features: _TraceFeatures | None = None,
+) -> GenericDispatcherMatch | None:
     """Identify a Code Virtualizer dispatcher in a trace.
 
     Code Virtualizer uses ``LODSB`` (or ``LODSW``/``LODSD``) to fetch
@@ -1923,12 +1918,12 @@ def find_cv_dispatcher(
 
 
 def find_generic_dispatcher(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     *,
     bit_width: int = 64,
     min_visit_frequency: int = 5,
-    _features: Optional[_TraceFeatures] = None,
-) -> Optional[GenericDispatcherMatch]:
+    _features: _TraceFeatures | None = None,
+) -> GenericDispatcherMatch | None:
     """Identify a VM dispatcher using protector-agnostic trace heuristics.
 
     Works on **any** traced VM by finding the hottest indirect branch and
@@ -2013,15 +2008,15 @@ class DispatcherFinderProtocol(Protocol):
 
     def __call__(
         self,
-        trace_records: List[Dict[str, Any]],
+        trace_records: list[dict[str, Any]],
         *,
         bit_width: int = 64,
-        _features: Optional[_TraceFeatures] = None,
-    ) -> Optional[GenericDispatcherMatch]: ...  # pragma: no cover
+        _features: _TraceFeatures | None = None,
+    ) -> GenericDispatcherMatch | None: ...  # pragma: no cover
 
 
 # Internal list: (name, callable, priority).  Lower priority runs first.
-_DISPATCHER_FINDERS: List[Tuple[str, DispatcherFinderProtocol, int]] = []
+_DISPATCHER_FINDERS: list[tuple[str, DispatcherFinderProtocol, int]] = []
 
 
 def register_dispatcher_finder(
@@ -2060,11 +2055,11 @@ _EARLY_EXIT_CONFIDENCE = 0.9
 
 
 def find_dispatcher(
-    trace_records: List[Dict[str, Any]],
+    trace_records: list[dict[str, Any]],
     *,
     bit_width: int = 64,
-    protector_hint: Optional[str] = None,
-) -> Optional[GenericDispatcherMatch]:
+    protector_hint: str | None = None,
+) -> GenericDispatcherMatch | None:
     """Identify the VM dispatcher using all available strategies.
 
     Tries protector-specific finders first (VMProtect, Themida, Code
@@ -2097,10 +2092,10 @@ def find_dispatcher(
     # Single-pass feature extraction shared by all finders (B101)
     features = _compute_trace_features(trace_records)
 
-    candidates: List[GenericDispatcherMatch] = []
+    candidates: list[GenericDispatcherMatch] = []
     exit_threshold = _get_early_exit_confidence()
 
-    def _accept(match: Optional[GenericDispatcherMatch]) -> bool:
+    def _accept(match: GenericDispatcherMatch | None) -> bool:
         """Append *match* and return True if early-exit threshold met."""
         if match is not None:
             candidates.append(match)
@@ -2171,9 +2166,9 @@ def find_dispatcher(
 
 
 def _pick_best(
-    candidates: List[GenericDispatcherMatch],
-    protector_hint: Optional[str],
-) -> Optional[GenericDispatcherMatch]:
+    candidates: list[GenericDispatcherMatch],
+    protector_hint: str | None,
+) -> GenericDispatcherMatch | None:
     """Return highest-confidence match, optionally favouring *hint*."""
     if not candidates:
         return None

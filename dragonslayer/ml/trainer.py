@@ -14,18 +14,19 @@ when the library is available, or just validate heuristic labels.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Sequence
-
 import logging
+import random as _random
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
-from .model import BaseModel, PredictionResult, VMHandlerModel, HANDLER_CATEGORIES
+from .model import BaseModel, VMHandlerModel
 from .pipeline import (
-    FeatureVector,
-    extract_handler_features,
-    extract_extended_features,
     EXTENDED_FEATURE_NAMES,
     HANDLER_FEATURE_NAMES,
+    FeatureVector,
+    extract_extended_features,
+    extract_handler_features,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Module-level constant mapping canonical category → representative VM
 # operation.  Used by synthetic-data generators so every sample carries an
 # ``operation`` field that matches ``_HANDLER_TEMPLATES`` keys.
-_CAT_TO_OP: Dict[str, str] = {
+_CAT_TO_OP: dict[str, str] = {
     "arithmetic": "vm_add",
     "bitwise": "vm_xor",
     "stack": "vm_push",
@@ -48,18 +49,26 @@ _CAT_TO_OP: Dict[str, str] = {
 _HAS_SKLEARN = False
 _HAS_GB = False
 try:
-    from sklearn.ensemble import RandomForestClassifier  # type: ignore[import-untyped]
-    from sklearn.ensemble import GradientBoostingClassifier  # type: ignore[import-untyped]
-    from sklearn.model_selection import cross_val_score  # type: ignore[import-untyped]
-    from sklearn.metrics import classification_report as _sklearn_report  # type: ignore[import-untyped]
     import numpy as np  # type: ignore[import-untyped]
+    from sklearn.ensemble import (
+        GradientBoostingClassifier,  # type: ignore[import-untyped]
+        RandomForestClassifier,  # type: ignore[import-untyped]
+    )
+    from sklearn.metrics import (
+        classification_report as _sklearn_report,  # type: ignore[import-untyped]
+    )
+    from sklearn.model_selection import cross_val_score  # type: ignore[import-untyped]
     _HAS_SKLEARN = True
     _HAS_GB = True
 except ImportError:
     try:
-        from sklearn.ensemble import RandomForestClassifier  # type: ignore[import-untyped]
-        from sklearn.model_selection import cross_val_score  # type: ignore[import-untyped]
         import numpy as np  # type: ignore[import-untyped]
+        from sklearn.ensemble import (
+            RandomForestClassifier,  # type: ignore[import-untyped]
+        )
+        from sklearn.model_selection import (
+            cross_val_score,  # type: ignore[import-untyped]
+        )
         _HAS_SKLEARN = True
     except ImportError:
         pass
@@ -72,7 +81,7 @@ class TrainingResult:
     epochs: int = 0
     final_loss: float = 0.0
     accuracy: float = 0.0
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     model_path: str = ""
 
 
@@ -82,7 +91,7 @@ class TrainingResult:
 
 # Map handler semantic operations (VMOperation values from handler_semantics)
 # to classifier categories.
-_OP_TO_LABEL: Dict[str, str] = {
+_OP_TO_LABEL: dict[str, str] = {
     "vm_add": "arithmetic",
     "vm_sub": "arithmetic",
     "vm_mul": "arithmetic",
@@ -128,7 +137,7 @@ _OP_TO_LABEL: Dict[str, str] = {
 }
 
 
-def label_from_heuristics(handler: Dict[str, Any]) -> str:
+def label_from_heuristics(handler: dict[str, Any]) -> str:
     """Derive a classification label from handler semantic data.
 
     Checks ``operation``, ``semantic.operation`` or ``category`` keys.
@@ -158,7 +167,7 @@ def label_from_heuristics(handler: Dict[str, Any]) -> str:
 
 
 def prepare_training_data(
-    handlers: List[Dict[str, Any]],
+    handlers: list[dict[str, Any]],
     label_key: str = "",
 ) -> tuple[list[FeatureVector], list[str]]:
     """Convert handler dicts into ``(features, labels)`` for training.
@@ -270,8 +279,9 @@ class ModelTrainer:
         # enough data for meaningful cross-validation.
         if len(y) >= 20:
             try:
-                from sklearn.calibration import CalibratedClassifierCV
                 from collections import Counter as _Counter
+
+                from sklearn.calibration import CalibratedClassifierCV
                 min_class = min(_Counter(y).values(), default=0)
                 cal_cv = min(3, min_class) if min_class >= 2 else 2
                 if cal_cv >= 2:
@@ -286,6 +296,7 @@ class ModelTrainer:
         accuracy = 0.0
         if len(y) >= 10:
             from collections import Counter as _Counter2
+
             from sklearn.model_selection import StratifiedKFold
             min_class_count = min(_Counter2(y).values(), default=0)
             n_splits = min(5, min_class_count) if min_class_count >= 2 else 2
@@ -299,7 +310,7 @@ class ModelTrainer:
             accuracy = float((clf.predict(X) == y).mean())
 
         # Per-class metrics
-        per_class: Dict[str, Any] = {}
+        per_class: dict[str, Any] = {}
         try:
             y_pred = clf.predict(X)
             report = _sklearn_report(y, y_pred, output_dict=True, zero_division=0)
@@ -336,7 +347,7 @@ class ModelTrainer:
         model = self._model
         correct = 0
         total = len(labels)
-        for fv, true_label in zip(features, labels):
+        for fv, true_label in zip(features, labels, strict=False):
             pred = model.predict({"values": fv.values, "names": fv.feature_names})
             if pred.label == true_label:
                 correct += 1
@@ -352,11 +363,11 @@ class ModelTrainer:
         self,
         features: Sequence[FeatureVector],
         labels: Sequence[str],
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Evaluate model accuracy on a held-out set."""
         correct = 0
         total = len(labels)
-        for fv, true_label in zip(features, labels):
+        for fv, true_label in zip(features, labels, strict=False):
             pred = self._model.predict({"values": fv.values, "names": fv.feature_names})
             if pred.label == true_label:
                 correct += 1
@@ -369,7 +380,7 @@ class ModelTrainer:
         features: Sequence[FeatureVector],
         labels: Sequence[str],
         *,
-        param_grid: Dict[str, list] | None = None,
+        param_grid: dict[str, list] | None = None,
         cv: int = 3,
         n_iter: int = 10,
     ) -> TrainingResult:
@@ -439,7 +450,7 @@ class ModelTrainer:
         )
 
     @property
-    def feature_importances(self) -> List[tuple[str, float]]:
+    def feature_importances(self) -> list[tuple[str, float]]:
         """Return sorted feature importances from the trained model.
 
         Returns list of ``(feature_name, importance)`` descending.
@@ -448,7 +459,7 @@ class ModelTrainer:
         return feature_importance(self._model)
 
 
-def _count_grid(grid: Dict[str, list]) -> int:
+def _count_grid(grid: dict[str, list]) -> int:
     """Count total combinations in a parameter grid."""
     n = 1
     for v in grid.values():
@@ -460,13 +471,11 @@ def _count_grid(grid: Dict[str, list]) -> int:
 # Synthetic training data generator
 # ═══════════════════════════════════════════════════════════════════════════
 
-import random as _random
-
 # Realistic VMProtect handler instruction templates keyed by category.
 # Each value is a list of "handler body templates" — lists of (mnemonic, operands)
 # tuples that mimic real VM handler bodies.
 
-_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
+_HANDLER_TEMPLATES: dict[str, list[list[tuple[str, str]]]] = {
     "arithmetic": [
         [
             ("mov", "rax, [rbp]"),
@@ -772,7 +781,7 @@ def generate_synthetic_handlers(
     *,
     seed: int = 42,
     jitter: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Generate synthetic VM handler dicts for training.
 
     For each handler category, produces *n_per_category* handler dicts
@@ -783,12 +792,12 @@ def generate_synthetic_handlers(
     ``category``, ``operation``, ``operand_width``, ``block_count``.
     """
     rng = _random.Random(seed)
-    handlers: List[Dict[str, Any]] = []
+    handlers: list[dict[str, Any]] = []
 
     for cat, templates in _HANDLER_TEMPLATES.items():
         for _ in range(n_per_category):
             tmpl = rng.choice(templates)
-            body: List[tuple[str, str]] = list(tmpl)
+            body: list[tuple[str, str]] = list(tmpl)
 
             if jitter:
                 # Possibly insert 0-2 nop instructions at random positions
@@ -798,8 +807,8 @@ def generate_synthetic_handlers(
                     body.insert(pos, ("nop", ""))
 
             # Build instruction dicts
-            instructions: List[Dict[str, str]] = []
-            mnemonics: List[str] = []
+            instructions: list[dict[str, str]] = []
+            mnemonics: list[str] = []
             for mnem, ops in body:
                 instructions.append({"mnemonic": mnem, "operands": ops})
                 mnemonics.append(mnem.lower())
@@ -820,7 +829,7 @@ def generate_synthetic_handlers(
 
 
 def prepare_extended_training_data(
-    handlers: List[Dict[str, Any]],
+    handlers: list[dict[str, Any]],
     label_key: str = "",
 ) -> tuple[list[FeatureVector], list[str]]:
     """Like :func:`prepare_training_data` but uses extended features."""
@@ -841,7 +850,7 @@ def feature_importance(
     model: VMHandlerModel,
     feature_names: Sequence[str] | None = None,
     top_n: int = 15,
-) -> List[tuple[str, float]]:
+) -> list[tuple[str, float]]:
     """Return top-N feature importances from a trained sklearn model.
 
     Returns list of ``(feature_name, importance)`` tuples sorted
@@ -867,7 +876,7 @@ def feature_importance(
     if len(names) != len(importances):
         names = [f"f{i}" for i in range(len(importances))]
 
-    ranked = sorted(zip(names, importances), key=lambda x: x[1], reverse=True)
+    ranked = sorted(zip(names, importances, strict=False), key=lambda x: x[1], reverse=True)
     return ranked[:top_n]
 
 
@@ -879,7 +888,7 @@ def train_full_pipeline(
     n_estimators: int = 100,
     algorithm: str = "auto",
     save_path: str | None = None,
-) -> tuple[VMHandlerModel, TrainingResult, List[tuple[str, float]]]:
+) -> tuple[VMHandlerModel, TrainingResult, list[tuple[str, float]]]:
     """End-to-end: generate data, extract features, train, report.
 
     Parameters
@@ -920,7 +929,7 @@ def train_full_pipeline(
 # registers stored at [edi+offset].  ESI is the virtual IP.
 # Handlers are shorter than VMProtect and use pushad/popad context save.
 
-_THEMIDA_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
+_THEMIDA_HANDLER_TEMPLATES: dict[str, list[list[tuple[str, str]]]] = {
     "arithmetic": [
         # ADD two virtual registers via EDI context
         [
@@ -1130,7 +1139,7 @@ _THEMIDA_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
 # bytecode decryption, and ESI as the virtual IP.  CV handlers are
 # typically CISC-style with longer instruction sequences.
 
-_CV_HANDLER_TEMPLATES: Dict[str, List[List[tuple[str, str]]]] = {
+_CV_HANDLER_TEMPLATES: dict[str, list[list[tuple[str, str]]]] = {
     "arithmetic": [
         # CV ADD: LODSB fetch + XLAT decrypt + context-based add
         [
@@ -1322,7 +1331,7 @@ PROTECTOR_VMPROTECT = "vmprotect"
 PROTECTOR_THEMIDA = "themida"
 PROTECTOR_CV = "code_virtualizer"
 
-_PROTECTOR_TEMPLATE_MAP: Dict[str, Dict[str, List[List[tuple[str, str]]]]] = {
+_PROTECTOR_TEMPLATE_MAP: dict[str, dict[str, list[list[tuple[str, str]]]]] = {
     PROTECTOR_VMPROTECT: _HANDLER_TEMPLATES,
     PROTECTOR_THEMIDA: _THEMIDA_HANDLER_TEMPLATES,
     PROTECTOR_CV: _CV_HANDLER_TEMPLATES,
@@ -1330,13 +1339,13 @@ _PROTECTOR_TEMPLATE_MAP: Dict[str, Dict[str, List[List[tuple[str, str]]]]] = {
 
 
 def _apply_jitter(
-    body: List[tuple[str, str]],
+    body: list[tuple[str, str]],
     rng: _random.Random,
     *,
     nop_probability: float = 0.5,
     max_nops: int = 2,
     reg_rename: bool = True,
-) -> List[tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """Apply realistic jitter transformations to a handler template.
 
     Jitter includes:
@@ -1390,7 +1399,7 @@ def generate_multi_protector_data(
     seed: int = 42,
     protectors: Sequence[str] | None = None,
     jitter: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Generate synthetic handler data for multiple protectors.
 
     Each generated handler dict includes a ``protector`` key indicating
@@ -1417,7 +1426,7 @@ def generate_multi_protector_data(
     if protectors is None:
         protectors = list(_PROTECTOR_TEMPLATE_MAP.keys())
 
-    handlers: List[Dict[str, Any]] = []
+    handlers: list[dict[str, Any]] = []
 
     for protector in protectors:
         templates = _PROTECTOR_TEMPLATE_MAP.get(protector)
@@ -1430,14 +1439,11 @@ def generate_multi_protector_data(
                 tmpl = rng.choice(cat_templates)
                 body = list(tmpl)
 
-                if jitter:
-                    body = _apply_jitter(body, rng)
-                else:
-                    body = list(body)
+                body = _apply_jitter(body, rng) if jitter else list(body)
 
                 # Build instruction dicts
-                instructions: List[Dict[str, str]] = []
-                mnemonics: List[str] = []
+                instructions: list[dict[str, str]] = []
+                mnemonics: list[str] = []
                 for mnem, ops in body:
                     instructions.append({"mnemonic": mnem, "operands": ops})
                     mnemonics.append(mnem.lower())
@@ -1465,7 +1471,7 @@ def train_and_save_model(
     seed: int = 42,
     algorithm: str = "auto",
     n_estimators: int = 200,
-) -> tuple[VMHandlerModel, TrainingResult, List[tuple[str, float]]]:
+) -> tuple[VMHandlerModel, TrainingResult, list[tuple[str, float]]]:
     """End-to-end: generate multi-protector data, train, and save.
 
     Unlike :func:`train_full_pipeline`, this function generates data

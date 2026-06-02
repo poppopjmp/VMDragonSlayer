@@ -13,13 +13,14 @@ Heavy dependencies: ``triton``, ``lief``, ``capstone``.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
 import tempfile
 import time
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -27,20 +28,16 @@ logger = logging.getLogger(__name__)
 
 _HAS_TRITON = False
 try:
+    import capstone  # type: ignore[import-untyped]  # noqa: F401  (availability probe)
     import lief  # type: ignore[import-untyped]
     from triton import (  # type: ignore[import-untyped]
         ARCH,
-        CPUSIZE,
-        MODE,
         AST_REPRESENTATION,
+        CALLBACK,
+        OPERAND,
         Instruction,
         TritonContext,
-        REG,
-        CALLBACK,
-        OPCODE,
-        OPERAND,
     )
-    import capstone  # type: ignore[import-untyped]
 
     _HAS_TRITON = True
 except (ImportError, OSError):
@@ -67,7 +64,7 @@ class TritonAnalyzer(Plugin):
     ) -> PluginResult:
         t0 = time.monotonic()
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".bin")
             os.write(fd, file_data)
@@ -93,7 +90,7 @@ class TritonAnalyzer(Plugin):
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    def _analyze(self, file_path: str, ctx: PluginContext) -> Dict[str, Any]:
+    def _analyze(self, file_path: str, ctx: PluginContext) -> dict[str, Any]:
         binary = lief.parse(file_path)
         if binary is None:
             raise ValueError(f"lief could not parse {file_path}")
@@ -152,7 +149,7 @@ class TritonAnalyzer(Plugin):
                 pass
 
         # Guidance intervals from shared context
-        guidance: List[Dict[str, int]] = []
+        guidance: list[dict[str, int]] = []
         qiling_data = ctx.shared_data.get("qiling", {})
         if isinstance(qiling_data, dict):
             for blk in qiling_data.get("executed_blocks", []):
@@ -198,7 +195,7 @@ class TritonAnalyzer(Plugin):
             ]
 
         # ---- Memory-access hooks ------------------------------------------
-        mem_accesses: List[Dict[str, Any]] = []
+        mem_accesses: list[dict[str, Any]] = []
 
         def _on_mem_read(ctx_unused: Any, mem: Any) -> None:
             addr = mem.getAddress()
@@ -259,14 +256,13 @@ class TritonAnalyzer(Plugin):
         MAX_INSNS = 5_000
         insn_count = 0
         ast_counter: Counter[str] = Counter()
-        functions_data: List[Dict[str, Any]] = []
-        executed_addrs: List[int] = []
-        taint_flow: List[Dict[str, Any]] = []
-        path_constraints: List[str] = []
+        functions_data: list[dict[str, Any]] = []
+        executed_addrs: list[int] = []
+        taint_flow: list[dict[str, Any]] = []
+        path_constraints: list[str] = []
 
         # Per-instruction trace — the critical enrichment for devirt pipeline
-        instruction_trace: List[Dict[str, Any]] = []
-        mem_access_idx = 0  # track which mem_accesses belong to each insn
+        instruction_trace: list[dict[str, Any]] = []
 
         for start_addr in exec_addrs:
             pc = start_addr
@@ -291,17 +287,15 @@ class TritonAnalyzer(Plugin):
                 executed_addrs.append(pc)
 
                 # --- Per-instruction register snapshot ----------------------
-                reg_snapshot: Dict[str, int] = {}
+                reg_snapshot: dict[str, int] = {}
                 for reg in snapshot_regs:
-                    try:
+                    with contextlib.suppress(ValueError, TypeError, RuntimeError):
                         reg_snapshot[reg.getName()] = int(
                             tc.getConcreteRegisterValue(reg)
                         )
-                    except (ValueError, TypeError, RuntimeError):
-                        pass
 
                 # --- Per-instruction memory accesses ------------------------
-                insn_mem: List[Dict[str, Any]] = mem_accesses[mem_before:]
+                insn_mem: list[dict[str, Any]] = mem_accesses[mem_before:]
 
                 # --- Build enriched trace record ----------------------------
                 insn_size = inst.getSize()
@@ -310,7 +304,7 @@ class TritonAnalyzer(Plugin):
                 except (ValueError, TypeError, AttributeError, RuntimeError):
                     raw = b""
 
-                trace_record: Dict[str, Any] = {
+                trace_record: dict[str, Any] = {
                     "address": pc,
                     "size": insn_size,
                     "raw_bytes": raw.hex(),
@@ -330,7 +324,7 @@ class TritonAnalyzer(Plugin):
                 # --- Taint tracking: record taint propagation ---------------
                 if taint_regs and inst.isTainted():
                     trace_record["is_tainted"] = True
-                    taint_entry: Dict[str, Any] = {
+                    taint_entry: dict[str, Any] = {
                         "address": pc,
                         "disasm": inst.getDisassembly(),
                     }
@@ -338,8 +332,8 @@ class TritonAnalyzer(Plugin):
                         # Distinguish reads (source operands) vs writes (dest)
                         # In x86, destination is typically the first operand
                         operands = inst.getOperands()
-                        tainted_read: List[str] = []
-                        tainted_write: List[str] = []
+                        tainted_read: list[str] = []
+                        tainted_write: list[str] = []
                         for i, op in enumerate(operands):
                             if op.getType() != OPERAND.REG:
                                 continue
@@ -398,7 +392,8 @@ class TritonAnalyzer(Plugin):
 
             if local_insns > 0:
                 func_hash = hashlib.md5(
-                    f"{start_addr}:{sorted(local_counter.items())}".encode()
+                    f"{start_addr}:{sorted(local_counter.items())}".encode(),
+                    usedforsecurity=False,
                 ).hexdigest()
                 functions_data.append({
                     "address": start_addr,

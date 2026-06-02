@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any
+
 
 # Late import to avoid circular dependency
 def _get_taint_tag():
@@ -56,21 +57,21 @@ class HandlerTaintSummary:
         Registers unconditionally overwritten (kill set for reaching-defs).
     """
     handler_id: int = 0
-    defs: Set[str] = field(default_factory=set)
-    uses: Set[str] = field(default_factory=set)
-    memory_defs: Set[str] = field(default_factory=set)
-    memory_uses: Set[str] = field(default_factory=set)
-    taint_in: Set[str] = field(default_factory=set)
-    taint_out: Set[str] = field(default_factory=set)
-    kill: Set[str] = field(default_factory=set)
+    defs: set[str] = field(default_factory=set)
+    uses: set[str] = field(default_factory=set)
+    memory_defs: set[str] = field(default_factory=set)
+    memory_uses: set[str] = field(default_factory=set)
+    taint_in: set[str] = field(default_factory=set)
+    taint_out: set[str] = field(default_factory=set)
+    kill: set[str] = field(default_factory=set)
 
     # B55: Tag-aware fields — map register → TaintTag (IntFlag)
-    tag_in: Dict[str, Any] = field(default_factory=dict)
-    tag_out: Dict[str, Any] = field(default_factory=dict)
+    tag_in: dict[str, Any] = field(default_factory=dict)
+    tag_out: dict[str, Any] = field(default_factory=dict)
     # Transfer function: input_reg → set of output_regs it influences
-    transfer: Dict[str, Set[str]] = field(default_factory=dict)
+    transfer: dict[str, set[str]] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the handler taint summary to a JSON-compatible dict."""
         return {
             "handler_id": self.handler_id,
@@ -97,7 +98,7 @@ class InterHandlerFlowEdge:
     register: str
     via_memory: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the flow edge to a JSON-compatible dict."""
         return {
             "source": self.source,
@@ -110,12 +111,12 @@ class InterHandlerFlowEdge:
 @dataclass
 class InterHandlerFlowResult:
     """Complete inter-handler data-flow analysis result."""
-    summaries: List[HandlerTaintSummary] = field(default_factory=list)
-    edges: List[InterHandlerFlowEdge] = field(default_factory=list)
+    summaries: list[HandlerTaintSummary] = field(default_factory=list)
+    edges: list[InterHandlerFlowEdge] = field(default_factory=list)
     iterations: int = 0
     converged: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the inter-handler flow result to a JSON-compatible dict."""
         return {
             "summary_count": len(self.summaries),
@@ -136,7 +137,7 @@ _CANONICAL_GP = {
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 }
 
-_SUBREG_TO_CANONICAL: Dict[str, str] = {}
+_SUBREG_TO_CANONICAL: dict[str, str] = {}
 
 
 def _build_subreg_map() -> None:
@@ -183,8 +184,8 @@ def canonicalize_reg(name: str) -> str:
 def build_handler_summary(
     handler_id: int,
     *,
-    symbolic_summary: Optional[Dict[str, Any]] = None,
-    instructions: Optional[list] = None,
+    symbolic_summary: dict[str, Any] | None = None,
+    instructions: list | None = None,
 ) -> HandlerTaintSummary:
     """Build a :class:`HandlerTaintSummary` from a symbolic summary or
     raw instruction list.
@@ -219,15 +220,15 @@ def build_handler_summary(
 
 def _extract_from_symbolic(
     out: HandlerTaintSummary,
-    sym: Dict[str, Any],
+    sym: dict[str, Any],
 ) -> None:
     """Extract defs/uses from a HandlerSymbolicSummary dict."""
     # Final registers that differ from their initial symbol → defs
-    for reg, expr_str in sym.get("final_registers", {}).items():
+    for reg, _expr_str in sym.get("final_registers", {}).items():
         canon = canonicalize_reg(reg)
         if canon in _CANONICAL_GP:
             out.defs.add(canon)
-    for reg, expr_str in sym.get("simplified_registers", {}).items():
+    for reg, _expr_str in sym.get("simplified_registers", {}).items():
         canon = canonicalize_reg(reg)
         if canon in _CANONICAL_GP:
             out.defs.add(canon)
@@ -257,7 +258,7 @@ def _extract_from_instructions(
     instructions: list,
 ) -> None:
     """Extract defs/uses from raw instruction dicts (fallback path)."""
-    local_defs: Set[str] = set()
+    local_defs: set[str] = set()
     for insn in instructions:
         reads = insn.get("reads", [])
         writes = insn.get("writes", [])
@@ -299,9 +300,9 @@ class InterHandlerDataFlow:
 
     def propagate(
         self,
-        summaries: List[HandlerTaintSummary],
+        summaries: list[HandlerTaintSummary],
         *,
-        initial_taint: Optional[Set[str]] = None,
+        initial_taint: set[str] | None = None,
     ) -> InterHandlerFlowResult:
         """Run fixed-point taint propagation across the handler chain.
 
@@ -365,10 +366,10 @@ class InterHandlerDataFlow:
 
     @staticmethod
     def _build_edges(
-        summaries: List[HandlerTaintSummary],
-    ) -> List[InterHandlerFlowEdge]:
+        summaries: list[HandlerTaintSummary],
+    ) -> list[InterHandlerFlowEdge]:
         """Build inter-handler flow edges from propagation results."""
-        edges: List[InterHandlerFlowEdge] = []
+        edges: list[InterHandlerFlowEdge] = []
         for i in range(len(summaries) - 1):
             src = summaries[i]
             dst = summaries[i + 1]
@@ -394,9 +395,9 @@ class InterHandlerDataFlow:
 
     def compute_taint_slice(
         self,
-        summaries: List[HandlerTaintSummary],
+        summaries: list[HandlerTaintSummary],
         target_reg: str,
-    ) -> List[int]:
+    ) -> list[int]:
         """Backward slice: find all handler IDs that contribute to *target_reg*.
 
         Walks the summary chain backwards from the last handler to the
@@ -415,8 +416,8 @@ class InterHandlerDataFlow:
             Handler IDs (in reverse order) that contribute to *target_reg*.
         """
         target = canonicalize_reg(target_reg)
-        needed: Set[str] = {target}
-        contributing: List[int] = []
+        needed: set[str] = {target}
+        contributing: list[int] = []
 
         for s in reversed(summaries):
             if s.defs & needed:
@@ -428,11 +429,11 @@ class InterHandlerDataFlow:
 
     def backward_propagate(
         self,
-        summaries: List[HandlerTaintSummary],
+        summaries: list[HandlerTaintSummary],
         *,
         target_reg: str,
-        target_tag: Optional[Any] = None,
-    ) -> Dict[str, Any]:
+        target_tag: Any | None = None,
+    ) -> dict[str, Any]:
         """Backward tag-aware taint propagation (B55).
 
         Starting from *target_reg* (optionally limited to *target_tag*)
@@ -462,9 +463,9 @@ class InterHandlerDataFlow:
             target_tag = TaintTag.COMPUTED | TaintTag.INPUT
 
         # demand: registers whose taint we need to explain
-        demand: Dict[str, Any] = {target: target_tag}
-        contributing: List[int] = []
-        demand_chain: List[tuple] = []
+        demand: dict[str, Any] = {target: target_tag}
+        contributing: list[int] = []
+        demand_chain: list[tuple] = []
 
         for s in reversed(summaries):
             produced = s.defs & set(demand.keys())
@@ -472,9 +473,9 @@ class InterHandlerDataFlow:
                 continue
 
             contributing.append(s.handler_id)
-            snapshot: Dict[str, Any] = {}
+            snapshot: dict[str, Any] = {}
 
-            new_demand: Dict[str, Any] = {}
+            new_demand: dict[str, Any] = {}
             for d_reg in produced:
                 d_tag = demand.pop(d_reg)
                 # This handler defines d_reg; its inputs (uses) caused it
@@ -501,9 +502,9 @@ class InterHandlerDataFlow:
 
     def get_live_registers(
         self,
-        summaries: List[HandlerTaintSummary],
+        summaries: list[HandlerTaintSummary],
         handler_idx: int,
-    ) -> Set[str]:
+    ) -> set[str]:
         """Return the set of registers live at the entry of handler *handler_idx*.
 
         A register is live at handler *i* if it is used by handler *i*
@@ -514,8 +515,8 @@ class InterHandlerDataFlow:
 
         # Backward pass to compute liveness.
         n = len(summaries)
-        live_out: List[Set[str]] = [set() for _ in range(n)]
-        live_in: List[Set[str]] = [set() for _ in range(n)]
+        live_out: list[set[str]] = [set() for _ in range(n)]
+        live_in: list[set[str]] = [set() for _ in range(n)]
 
         for i in range(n - 1, -1, -1):
             if i < n - 1:
@@ -532,10 +533,10 @@ class InterHandlerDataFlow:
 # ---------------------------------------------------------------------------
 
 def compose_summaries(
-    summaries: List[HandlerTaintSummary],
+    summaries: list[HandlerTaintSummary],
     *,
-    initial_tags: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    initial_tags: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compose a chain of handler summaries into a single input→output tag map.
 
     Walks the summary chain forward, propagating ``TaintTag`` values
@@ -565,26 +566,24 @@ def compose_summaries(
     # Determine initial input tags
     if initial_tags is None:
         # Use the first handler's uses as inputs
-        tags: Dict[str, Any] = {
-            reg: TaintTag.INPUT for reg in summaries[0].uses
-        }
+        tags: dict[str, Any] = dict.fromkeys(summaries[0].uses, TaintTag.INPUT)
     else:
         tags = dict(initial_tags)
 
     input_tags = dict(tags)
     # Track which original inputs flow to which outputs
-    composed_transfer: Dict[str, Set[str]] = {
+    composed_transfer: dict[str, set[str]] = {
         reg: {reg} for reg in tags
     }
     # Reverse map: current register → set of original inputs that reached it
-    origin_map: Dict[str, Set[str]] = {
+    origin_map: dict[str, set[str]] = {
         reg: {reg} for reg in tags
     }
 
     for s in summaries:
         # New output tags after this handler
-        new_tags: Dict[str, Any] = {}
-        new_origin: Dict[str, Set[str]] = {}
+        new_tags: dict[str, Any] = {}
+        new_origin: dict[str, set[str]] = {}
 
         # Pass-through: registers not killed
         for reg, tag in tags.items():
@@ -595,7 +594,7 @@ def compose_summaries(
         # Defs: combine tags from tainted uses
         for d_reg in s.defs:
             combined = TaintTag.CLEAN
-            contributing_origins: Set[str] = set()
+            contributing_origins: set[str] = set()
             for u_reg in s.uses:
                 if u_reg in tags:
                     # Check transfer function

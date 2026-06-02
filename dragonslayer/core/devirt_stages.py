@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+from .exceptions import VMDragonSlayerError
 
 logger = logging.getLogger(__name__)
 
 # B88: Named exception tuple — only catch framework + I/O errors.
-from .exceptions import VMDragonSlayerError
-
 _STAGE_ERRORS: tuple[type[BaseException], ...] = (
     VMDragonSlayerError, OSError, ImportError,
 )
@@ -47,15 +47,15 @@ class DevirtWorkspace:
     trace: Any = None  # ExecutionTrace | None
 
     # Step 2 — anti-evasion hooks
-    hook_set_data: Optional[Dict[str, Any]] = None
+    hook_set_data: dict[str, Any] | None = None
 
     # Step 2b — VM entry points
-    vm_entry_data: Optional[Dict[str, Any]] = None
+    vm_entry_data: dict[str, Any] | None = None
 
     # Step 3 — dispatcher identification
-    dispatcher_match: Optional[Dict[str, Any]] = None
+    dispatcher_match: dict[str, Any] | None = None
     detected_protector: str = "unknown"
-    vmprotect_match: Optional[Dict[str, Any]] = None
+    vmprotect_match: dict[str, Any] | None = None
 
     # Step 3b — bytecode decryptor
     bytecode_decryptor: Any = None  # RollingKeyDecryptor | None
@@ -66,25 +66,25 @@ class DevirtWorkspace:
     dispatcher_addrs: list = field(default_factory=list)
 
     # Step 5 — handler extraction
-    extraction_data: Optional[Dict[str, Any]] = None
+    extraction_data: dict[str, Any] | None = None
 
     # Step 6 — context registers
-    context_layout_data: Optional[Dict[str, Any]] = None
+    context_layout_data: dict[str, Any] | None = None
 
     # Step 7 — semantics + clustering + ML
     opcode_table: Any = None
-    clustering_data: Optional[Dict[str, Any]] = None
-    ml_labels: Optional[Dict[str, str]] = None
+    clustering_data: dict[str, Any] | None = None
+    ml_labels: dict[str, str] | None = None
 
     # Step 7b — handler CFG
     handler_cfg: Any = None  # networkx DiGraph | None
-    handler_cfg_data: Optional[Dict[str, Any]] = None
+    handler_cfg_data: dict[str, Any] | None = None
 
     # Step 8 — pseudocode
     pseudocode_result: Any = None
 
     # Step 9 — nested VMs
-    nested_layers: List[Dict[str, Any]] = field(default_factory=list)
+    nested_layers: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -220,8 +220,8 @@ def step_decrypt_bytecode(ws: DevirtWorkspace) -> None:
     """Create rolling-key decryptor and decrypt handler table."""
     try:
         from ..analysis.bytecode_decrypt import (
-            make_decryptor_from_dispatcher,
             decrypt_handler_table,
+            make_decryptor_from_dispatcher,
             make_generic_decryptor,
         )
         if ws.vmprotect_match is not None:
@@ -367,7 +367,7 @@ def step_analyze_semantics(ws: DevirtWorkspace) -> None:
     from ..analysis.handler_semantics import analyse_handler_semantics
 
     # Collect symbolic summaries from all available sources
-    sym_summaries: Optional[Dict[int, Any]] = None
+    sym_summaries: dict[int, Any] | None = None
     try:
         from ..analysis.symbolic_depth import collect_symbolic_summaries
         ext_handlers = None
@@ -416,12 +416,12 @@ def step_analyze_semantics(ws: DevirtWorkspace) -> None:
 
 def _run_ml_classification(
     ws: DevirtWorkspace,
-    sym_summaries: Optional[Dict[int, Any]],
+    sym_summaries: dict[int, Any] | None,
 ) -> None:
     """Run ML ensemble classification on opcode table entries."""
     try:
-        from ..ml.model import SymbolicClassifierModel, VMHandlerModel
         from ..ml.ensemble import WeightedEnsemble
+        from ..ml.model import SymbolicClassifierModel, VMHandlerModel
 
         sym_model = SymbolicClassifierModel()
         heur_model = VMHandlerModel()
@@ -432,7 +432,7 @@ def _run_ml_classification(
 
         ws.ml_labels = {}
         for entry in ws.opcode_table.entries:
-            features: Dict[str, Any] = {}
+            features: dict[str, Any] = {}
             if sym_summaries and entry.handler_address in sym_summaries:
                 s = sym_summaries[entry.handler_address]
                 features["symbolic_summary"] = (
@@ -539,16 +539,16 @@ def step_emit_pseudocode(ws: DevirtWorkspace) -> None:
 
 def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
     """Detect and recursively deobfuscate nested VM layers (B100)."""
+    from ..analysis.handler_semantics import analyse_handler_semantics
+    from ..analysis.pseudocode import emit_pseudocode
+    from ..analysis.vm_discovery.dispatcher import find_dispatcher
     from ..analysis.vm_discovery.handler_boundaries import (
         identify_vip_register,
         segment_trace,
     )
-    from ..analysis.handler_semantics import analyse_handler_semantics
-    from ..analysis.pseudocode import emit_pseudocode
 
     # These helpers are defined in pipeline.py at module level
     from .pipeline import _detect_inner_vm_entries, _extract_inner_trace
-    from ..analysis.vm_discovery.dispatcher import find_dispatcher
 
     max_nesting = int(ws.shared_data.get("max_nesting_depth", 3))
 
@@ -617,7 +617,7 @@ def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
 # Sub-step 10: Assemble final result
 # ---------------------------------------------------------------------------
 
-def step_assemble_result(ws: DevirtWorkspace) -> Dict[str, Any]:
+def step_assemble_result(ws: DevirtWorkspace) -> dict[str, Any]:
     """Build the final :class:`DevirtualisationResult` and return as dict."""
     from ..analysis.devirtualisation_result import DevirtualisationResult
 

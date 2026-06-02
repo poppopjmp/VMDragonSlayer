@@ -16,7 +16,7 @@ import logging
 import os
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -50,7 +50,7 @@ class CertAnalyzer(Plugin):
     ) -> PluginResult:
         t0 = time.monotonic()
 
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         if not file_path or not os.path.isfile(file_path):
             fd, tmp_path = tempfile.mkstemp(suffix=".bin")
             os.write(fd, file_data)
@@ -77,8 +77,8 @@ class CertAnalyzer(Plugin):
                 os.unlink(tmp_path)
 
     @staticmethod
-    def _scan(file_path: str) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+    def _scan(file_path: str) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "signed": False,
             "certificates": [],
             "format": "unknown",
@@ -97,7 +97,7 @@ class CertAnalyzer(Plugin):
                 result["signed"] = True
                 for sig in binary.signatures:
                     for crt in sig.certificates:
-                        cert_info: Dict[str, str] = {
+                        cert_info: dict[str, str] = {
                             "subject": str(crt.subject),
                             "issuer": str(crt.issuer),
                             "serial": str(crt.serial_number),

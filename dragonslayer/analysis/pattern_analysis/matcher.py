@@ -25,12 +25,11 @@ The :class:`PatternMatcher` adds:
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from .database import Pattern, PatternDatabase
-from .recognizer import PatternRecognizer, Match
+from .recognizer import Match, PatternRecognizer
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +44,13 @@ class MatchContext:
 
     All fields are optional — the matcher uses whatever is available.
     """
-    preceding_mnemonics: List[str] = field(default_factory=list)
-    following_mnemonics: List[str] = field(default_factory=list)
-    registers_read: List[str] = field(default_factory=list)
-    registers_written: List[str] = field(default_factory=list)
-    handler_index: Optional[int] = None
-    dispatcher_address: Optional[int] = None
-    handler_address: Optional[int] = None
+    preceding_mnemonics: list[str] = field(default_factory=list)
+    following_mnemonics: list[str] = field(default_factory=list)
+    registers_read: list[str] = field(default_factory=list)
+    registers_written: list[str] = field(default_factory=list)
+    handler_index: int | None = None
+    dispatcher_address: int | None = None
+    handler_address: int | None = None
 
 
 @dataclass
@@ -65,9 +64,9 @@ class RankedMatch:
     end_offset: int
     matched_bytes: str
     reason: str
-    alternatives: List["RankedMatch"] = field(default_factory=list)
+    alternatives: list[RankedMatch] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "pattern_id": self.pattern.pattern_id,
             "operation": self.pattern.operation,
@@ -88,37 +87,37 @@ class RankedMatch:
 # ---------------------------------------------------------------------------
 
 # Mnemonic sets used for context classification
-_ARITH_MNEMONICS: Set[str] = {
+_ARITH_MNEMONICS: set[str] = {
     "add", "sub", "imul", "mul", "idiv", "div", "neg", "inc", "dec",
     "adc", "sbb",
 }
-_LOGIC_MNEMONICS: Set[str] = {
+_LOGIC_MNEMONICS: set[str] = {
     "and", "or", "xor", "not", "shl", "shr", "sar", "rol", "ror",
     "bt", "bts", "btr", "btc",
 }
-_MEMORY_MNEMONICS: Set[str] = {
+_MEMORY_MNEMONICS: set[str] = {
     "mov", "movzx", "movsx", "movsxd", "lea", "movabs",
 }
-_STACK_MNEMONICS: Set[str] = {"push", "pop", "pushf", "popf", "pusha", "popa"}
-_BRANCH_MNEMONICS: Set[str] = {
+_STACK_MNEMONICS: set[str] = {"push", "pop", "pushf", "popf", "pusha", "popa"}
+_BRANCH_MNEMONICS: set[str] = {
     "jmp", "je", "jne", "jz", "jnz", "jb", "ja", "jl", "jg",
     "jbe", "jae", "jle", "jge", "call", "ret", "cmove", "cmovne",
 }
-_CRYPTO_MNEMONICS: Set[str] = {
+_CRYPTO_MNEMONICS: set[str] = {
     "cpuid", "rdtsc", "bswap", "ror", "rol",
 }
-_ENTRY_EXIT_MNEMONICS: Set[str] = {"pushf", "popf", "ret"}
+_ENTRY_EXIT_MNEMONICS: set[str] = {"pushf", "popf", "ret"}
 
 # Register sets for context classification
-_GP_REGS_64: Set[str] = {
+_GP_REGS_64: set[str] = {
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 }
-_CONTEXT_REGS: Set[str] = {"rsi", "rdi"}  # typically VM context/bytecode pointers
+_CONTEXT_REGS: set[str] = {"rsi", "rdi"}  # typically VM context/bytecode pointers
 
 
 def _mnemonic_category_score(
-    mnemonics: List[str],
+    mnemonics: list[str],
     handler_type: str,
 ) -> float:
     """Score how well *mnemonics* match *handler_type*."""
@@ -126,7 +125,7 @@ def _mnemonic_category_score(
         return 0.0
 
     mset = {m.lower() for m in mnemonics}
-    overlap_map: Dict[str, Set[str]] = {
+    overlap_map: dict[str, set[str]] = {
         "arithmetic": _ARITH_MNEMONICS,
         "bitwise": _LOGIC_MNEMONICS,
         "memory": _MEMORY_MNEMONICS,
@@ -146,8 +145,8 @@ def _mnemonic_category_score(
 
 
 def _register_pattern_score(
-    reads: List[str],
-    writes: List[str],
+    reads: list[str],
+    writes: list[str],
     handler_type: str,
 ) -> float:
     """Score based on register-usage patterns."""
@@ -176,16 +175,15 @@ def _register_pattern_score(
         if {"rax", "rcx"} & all_regs:
             score += 0.2
 
-    elif handler_type == "crypto":
-        # Crypto handlers often touch many registers
-        if len(all_regs & _GP_REGS_64) >= 3:
-            score += 0.3
+    # Crypto handlers often touch many registers
+    elif handler_type == "crypto" and len(all_regs & _GP_REGS_64) >= 3:
+        score += 0.3
 
     return min(score, 1.0)
 
 
 def _position_score(
-    handler_index: Optional[int],
+    handler_index: int | None,
     handler_type: str,
 ) -> float:
     """Score based on handler position (e.g., vm_enter is typically first)."""
@@ -202,9 +200,9 @@ def _position_score(
 def _compute_context_score(
     pattern: Pattern,
     ctx: MatchContext,
-) -> Tuple[float, str]:
+) -> tuple[float, str]:
     """Compute the aggregate context score and reason string."""
-    scores: List[Tuple[float, str]] = []
+    scores: list[tuple[float, str]] = []
 
     # 1. Surrounding mnemonic coherence
     all_mnemonics = ctx.preceding_mnemonics + ctx.following_mnemonics
@@ -248,12 +246,12 @@ def _normalize_signature(sig: str) -> str:
     return sig.replace(" ", "").replace("|", "").upper()
 
 
-def find_signature_collisions(db: PatternDatabase) -> Dict[str, List[str]]:
+def find_signature_collisions(db: PatternDatabase) -> dict[str, list[str]]:
     """Return groups of pattern IDs that share identical normalised signatures.
 
     Only groups with 2+ patterns are returned.
     """
-    sig_map: Dict[str, List[str]] = {}
+    sig_map: dict[str, list[str]] = {}
     for pat in db.get_all_patterns():
         nsig = _normalize_signature(pat.signature)
         sig_map.setdefault(nsig, []).append(pat.pattern_id)
@@ -302,12 +300,12 @@ class PatternMatcher:
         self,
         instruction_bytes: str,
         *,
-        context: Optional[MatchContext] = None,
+        context: MatchContext | None = None,
         min_confidence: float = 0.5,
-        architecture: Optional[str] = None,
-        handler_type: Optional[str] = None,
+        architecture: str | None = None,
+        handler_type: str | None = None,
         top_k: int = 5,
-    ) -> List[RankedMatch]:
+    ) -> list[RankedMatch]:
         """Match *instruction_bytes* and return ranked results.
 
         When *context* is provided, candidates are re-scored using
@@ -338,19 +336,19 @@ class PatternMatcher:
 
     def match_handler_sequence(
         self,
-        handler_bytes_list: List[str],
+        handler_bytes_list: list[str],
         *,
-        contexts: Optional[List[MatchContext]] = None,
+        contexts: list[MatchContext] | None = None,
         min_confidence: float = 0.5,
-        architecture: Optional[str] = None,
-    ) -> List[List[RankedMatch]]:
+        architecture: str | None = None,
+    ) -> list[list[RankedMatch]]:
         """Match a sequence of handler byte-strings in batch.
 
         Returns one list of :class:`RankedMatch` per handler.  If
         *contexts* is provided it must have the same length as
         *handler_bytes_list*.
         """
-        results: List[List[RankedMatch]] = []
+        results: list[list[RankedMatch]] = []
         for i, hbytes in enumerate(handler_bytes_list):
             ctx = contexts[i] if contexts and i < len(contexts) else None
             if ctx is None:
@@ -366,11 +364,11 @@ class PatternMatcher:
         return results
 
     @property
-    def collision_groups(self) -> Dict[str, List[str]]:
+    def collision_groups(self) -> dict[str, list[str]]:
         """Return the pre-computed signature collision groups."""
         return dict(self._collisions)
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Matcher statistics."""
         inner = self._recognizer.get_statistics()
         inner["collision_groups"] = len(self._collisions)
@@ -383,10 +381,10 @@ class PatternMatcher:
     # -- Internal -----------------------------------------------------------
 
     def _rank_matches(
-        self, raw_matches: List[Match], ctx: MatchContext,
-    ) -> List[RankedMatch]:
+        self, raw_matches: list[Match], ctx: MatchContext,
+    ) -> list[RankedMatch]:
         """Re-score raw matches with context and produce RankedMatch list."""
-        ranked: List[RankedMatch] = []
+        ranked: list[RankedMatch] = []
         for m in raw_matches:
             ctx_score, reason = _compute_context_score(m.pattern, ctx)
             # Blend base confidence and context score
@@ -404,7 +402,7 @@ class PatternMatcher:
             ))
         return ranked
 
-    def _disambiguate(self, ranked: List[RankedMatch]) -> List[RankedMatch]:
+    def _disambiguate(self, ranked: list[RankedMatch]) -> list[RankedMatch]:
         """Remove lower-ranked duplicates from collision groups.
 
         When two RankedMatches come from patterns that share a signature,
@@ -412,14 +410,14 @@ class PatternMatcher:
         as an ``alternative``.
         """
         # Build pattern_id → collision-group-key lookup
-        pid_to_group: Dict[str, str] = {}
+        pid_to_group: dict[str, str] = {}
         for sig, ids in self._collisions.items():
             for pid in ids:
                 pid_to_group[pid] = sig
 
         # Group ranked matches by collision key (or unique-per-match)
-        groups: Dict[str, List[RankedMatch]] = {}
-        ungrouped: List[RankedMatch] = []
+        groups: dict[str, list[RankedMatch]] = {}
+        ungrouped: list[RankedMatch] = []
         for rm in ranked:
             gkey = pid_to_group.get(rm.pattern.pattern_id)
             if gkey is not None:
@@ -427,7 +425,7 @@ class PatternMatcher:
             else:
                 ungrouped.append(rm)
 
-        result: List[RankedMatch] = list(ungrouped)
+        result: list[RankedMatch] = list(ungrouped)
         for _gkey, members in groups.items():
             members.sort(key=lambda r: r.final_score, reverse=True)
             winner = members[0]

@@ -22,9 +22,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class PhaseMetricDict(TypedDict):
     elapsed_s: float
     item_count: int
     error_count: int
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class AnalysisMetricsDict(TypedDict):
@@ -45,7 +46,7 @@ class AnalysisMetricsDict(TypedDict):
     run_id: str
     total_elapsed_s: float
     phase_count: int
-    phases: List[PhaseMetricDict]
+    phases: list[PhaseMetricDict]
 
 
 @dataclass
@@ -68,7 +69,7 @@ class PhaseMetric:
     elapsed_s: float = 0.0
     item_count: int = 0
     error_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> PhaseMetricDict:
         return {
@@ -89,13 +90,13 @@ class AnalysisMetrics:
         Optional identifier for the analysis run (e.g. sample hash).
     """
 
-    def __init__(self, run_id: Optional[str] = None) -> None:
+    def __init__(self, run_id: str | None = None) -> None:
         self.run_id = run_id or ""
-        self._phases: Dict[str, PhaseMetric] = {}
-        self._order: List[str] = []
+        self._phases: dict[str, PhaseMetric] = {}
+        self._order: list[str] = []
         self._lock = threading.Lock()
         self._global_start = time.perf_counter()
-        self._global_end: Optional[float] = None
+        self._global_end: float | None = None
 
     # -- context manager for a named phase -----------------------------------
 
@@ -168,7 +169,7 @@ class AnalysisMetrics:
     def phase_count(self) -> int:
         return len(self._phases)
 
-    def get_phase(self, name: str) -> Optional[PhaseMetric]:
+    def get_phase(self, name: str) -> PhaseMetric | None:
         return self._phases.get(name)
 
     # -- serialisation -------------------------------------------------------

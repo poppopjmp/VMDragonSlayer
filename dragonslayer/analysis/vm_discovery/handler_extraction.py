@@ -30,8 +30,9 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class RegisterDelta:
     def delta(self) -> int:
         return self.value_after - self.value_before
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "register": self.register,
             "before": hex(self.value_before),
@@ -72,7 +73,7 @@ class HandlerOperand:
     value: int = 0
     width: int = 0  # in bytes
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "offset": self.offset,
             "raw_bytes": self.raw_bytes.hex(),
@@ -94,33 +95,33 @@ class HandlerBody:
     trace_end: int  # exclusive
 
     # Raw instruction data from the trace
-    instructions: List[Dict[str, Any]] = field(default_factory=list)
+    instructions: list[dict[str, Any]] = field(default_factory=list)
     raw_bytes: bytes = b""
 
     # Register snapshots
-    registers_at_entry: Dict[str, int] = field(default_factory=dict)
-    registers_at_exit: Dict[str, int] = field(default_factory=dict)
-    register_deltas: List[RegisterDelta] = field(default_factory=list)
+    registers_at_entry: dict[str, int] = field(default_factory=dict)
+    registers_at_exit: dict[str, int] = field(default_factory=dict)
+    register_deltas: list[RegisterDelta] = field(default_factory=list)
 
     # Operand extraction
-    operand: Optional[HandlerOperand] = None
+    operand: HandlerOperand | None = None
     vip_delta: int = 0  # how much vIP advanced
 
     # Fingerprint and classification
     fingerprint: str = ""  # structural hash
-    mnemonic_sequence: List[str] = field(default_factory=list)
+    mnemonic_sequence: list[str] = field(default_factory=list)
     category: str = ""
-    handler_id: Optional[int] = None
+    handler_id: int | None = None
 
     # Memory access patterns
-    memory_reads: List[Dict[str, Any]] = field(default_factory=list)
-    memory_writes: List[Dict[str, Any]] = field(default_factory=list)
+    memory_reads: list[dict[str, Any]] = field(default_factory=list)
+    memory_writes: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def instruction_count(self) -> int:
         return len(self.instructions)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "handler_address": hex(self.handler_address),
             "vip_value": hex(self.vip_value),
@@ -147,17 +148,17 @@ class HandlerGroup:
     and structural fingerprint, grouped for analysis."""
     handler_address: int
     fingerprint: str
-    invocations: List[HandlerBody] = field(default_factory=list)
-    canonical_mnemonics: List[str] = field(default_factory=list)
+    invocations: list[HandlerBody] = field(default_factory=list)
+    canonical_mnemonics: list[str] = field(default_factory=list)
     category: str = ""
-    observed_operand_widths: Set[int] = field(default_factory=set)
-    register_effects: Dict[str, List[int]] = field(default_factory=dict)
+    observed_operand_widths: set[int] = field(default_factory=set)
+    register_effects: dict[str, list[int]] = field(default_factory=dict)
 
     @property
     def visit_count(self) -> int:
         return len(self.invocations)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "handler_address": hex(self.handler_address),
             "fingerprint": self.fingerprint,
@@ -174,14 +175,14 @@ class HandlerGroup:
 @dataclass
 class ExtractionResult:
     """Output of :func:`extract_handler_bodies`."""
-    bodies: List[HandlerBody] = field(default_factory=list)
-    groups: List[HandlerGroup] = field(default_factory=list)
+    bodies: list[HandlerBody] = field(default_factory=list)
+    groups: list[HandlerGroup] = field(default_factory=list)
     vip_register: str = ""
     total_invocations: int = 0
     unique_handlers: int = 0
     bytecode_bytes_consumed: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "vip_register": self.vip_register,
             "total_invocations": self.total_invocations,
@@ -236,7 +237,7 @@ def extract_handler_bodies(
     if bytecode_base == 0 and boundaries:
         bytecode_base = _get_vip_value(boundaries[0])
 
-    bodies: List[HandlerBody] = []
+    bodies: list[HandlerBody] = []
     total_bytecode = 0
 
     for boundary in boundaries:
@@ -271,9 +272,9 @@ def _extract_single_handler(
     trace_instructions: Sequence[Any],
     boundary: Any,
     vip_register: str,
-    dispatcher_set: Set[int],
+    dispatcher_set: set[int],
     bytecode_base: int,
-) -> Optional[HandlerBody]:
+) -> HandlerBody | None:
     """Extract one handler body from a boundary specification."""
     start = _get_trace_start(boundary)
     end = _get_trace_end(boundary)
@@ -284,11 +285,11 @@ def _extract_single_handler(
     end = min(end, len(trace_instructions))
 
     # Collect instruction data, skipping dispatcher instructions
-    insn_dicts: List[Dict[str, Any]] = []
+    insn_dicts: list[dict[str, Any]] = []
     raw_bytes = b""
-    mnemonic_seq: List[str] = []
-    mem_reads: List[Dict[str, Any]] = []
-    mem_writes: List[Dict[str, Any]] = []
+    mnemonic_seq: list[str] = []
+    mem_reads: list[dict[str, Any]] = []
+    mem_writes: list[dict[str, Any]] = []
 
     for idx in range(start, end):
         insn = trace_instructions[idx]
@@ -391,7 +392,7 @@ def fingerprint_handler(body: HandlerBody) -> str:
 
     Returns a hex-digest string.
     """
-    parts: List[str] = []
+    parts: list[str] = []
     for insn in body.instructions:
         disasm = insn.get("disassembly", "")
         normalised = _normalize_disassembly(disasm)
@@ -428,15 +429,15 @@ def _normalize_disassembly(disasm: str) -> str:
 
 def deduplicate_handlers(
     bodies: Sequence[HandlerBody],
-) -> List[HandlerGroup]:
+) -> list[HandlerGroup]:
     """Group handler bodies by (address, fingerprint) and compute aggregate info."""
     # Group by (handler_address, fingerprint)
-    groups_map: Dict[Tuple[int, str], List[HandlerBody]] = defaultdict(list)
+    groups_map: dict[tuple[int, str], list[HandlerBody]] = defaultdict(list)
     for body in bodies:
         key = (body.handler_address, body.fingerprint)
         groups_map[key].append(body)
 
-    groups: List[HandlerGroup] = []
+    groups: list[HandlerGroup] = []
     for (addr, fp), invocations in groups_map.items():
         # Use the first invocation's mnemonic sequence as canonical
         canonical_mnemonics = invocations[0].mnemonic_sequence if invocations else []
@@ -449,13 +450,13 @@ def deduplicate_handlers(
         category = cat_counter.most_common(1)[0][0] if cat_counter else ""
 
         # Collect operand widths
-        operand_widths: Set[int] = set()
+        operand_widths: set[int] = set()
         for inv in invocations:
             if inv.operand and inv.operand.width > 0:
                 operand_widths.add(inv.operand.width)
 
         # Aggregate register effects (delta values per register)
-        reg_effects: Dict[str, List[int]] = defaultdict(list)
+        reg_effects: dict[str, list[int]] = defaultdict(list)
         for inv in invocations:
             for delta in inv.register_deltas:
                 if delta.delta != 0:
@@ -538,7 +539,7 @@ def _extract_operand(
     vip_value: int,
     vip_delta: int,
     bytecode_base: int,
-) -> Optional[HandlerOperand]:
+) -> HandlerOperand | None:
     """Infer the operand consumed by a handler from vIP movement.
 
     In VMProtect, the opcode byte is at vIP[0] and any immediate operand
@@ -555,10 +556,8 @@ def _extract_operand(
 
     operand_width = abs_delta - 1  # opcode byte consumed first
     offset = vip_value - bytecode_base
-    if vip_delta > 0:
-        operand_offset = offset + 1  # byte after the opcode
-    else:
-        operand_offset = offset - abs_delta + 1
+    # byte after the opcode (positive delta) else back up by the operand width
+    operand_offset = offset + 1 if vip_delta > 0 else offset - abs_delta + 1
 
     return HandlerOperand(
         offset=operand_offset,
@@ -574,11 +573,11 @@ _SKIP_REGS = {"rip", "eip", "rflags", "eflags"}
 
 
 def _compute_register_deltas(
-    regs_entry: Dict[str, int],
-    regs_exit: Dict[str, int],
-) -> List[RegisterDelta]:
+    regs_entry: dict[str, int],
+    regs_exit: dict[str, int],
+) -> list[RegisterDelta]:
     """Compute register deltas between handler entry and exit."""
-    deltas: List[RegisterDelta] = []
+    deltas: list[RegisterDelta] = []
     for reg, before in regs_entry.items():
         if reg.lower() in _SKIP_REGS:
             continue
@@ -604,8 +603,8 @@ def _classify_memory_access(
     disasm: str,
     mnemonic: str,
     address: int,
-    reads: List[Dict[str, Any]],
-    writes: List[Dict[str, Any]],
+    reads: list[dict[str, Any]],
+    writes: list[dict[str, Any]],
 ) -> None:
     """Heuristically classify memory accesses from disassembly."""
     import re
@@ -675,13 +674,13 @@ def _get_raw_bytes(insn: Any) -> bytes:
     return raw
 
 
-def _get_registers(insn: Any) -> Dict[str, int]:
+def _get_registers(insn: Any) -> dict[str, int]:
     if isinstance(insn, dict):
         return dict(insn.get("registers", {}))
     return dict(getattr(insn, "registers", {}))
 
 
-def _insn_to_dict(insn: Any) -> Dict[str, Any]:
+def _insn_to_dict(insn: Any) -> dict[str, Any]:
     if isinstance(insn, dict):
         return dict(insn)
     if hasattr(insn, "to_dict"):

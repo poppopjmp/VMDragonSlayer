@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -78,7 +78,7 @@ class BinExportPlugin(Plugin):
                 duration=time.monotonic() - t0,
             )
 
-    def _resolve_binexport(self, file_path: str, ctx: PluginContext) -> Optional[str]:
+    def _resolve_binexport(self, file_path: str, ctx: PluginContext) -> str | None:
         if file_path and file_path.endswith(".BinExport") and os.path.isfile(file_path):
             return file_path
         candidates = []
@@ -94,15 +94,15 @@ class BinExportPlugin(Plugin):
                 return c
         return None
 
-    def _analyze(self, be_path: str) -> Dict[str, Any]:
+    def _analyze(self, be_path: str) -> dict[str, Any]:
         be = ProgramBinExport(be_path)
-        functions: list[Dict[str, Any]] = []
+        functions: list[dict[str, Any]] = []
         total_instructions = 0
         call_graph_edges: list[tuple[int, int]] = []
 
         for func_addr, func in be.items():
             mnemonics: list[str] = []
-            instructions: list[Dict[str, Any]] = []
+            instructions: list[dict[str, Any]] = []
             block_count = 0
 
             # Walk basic blocks → instructions when the API exposes them.
@@ -119,7 +119,7 @@ class BinExportPlugin(Plugin):
                         mnem = getattr(inst, "mnemonic", "")
                         if mnem:
                             mnemonics.append(mnem.lower())
-                        inst_entry: Dict[str, Any] = {"mnemonic": mnem.lower()}
+                        inst_entry: dict[str, Any] = {"mnemonic": mnem.lower()}
                         if hasattr(inst, "address"):
                             inst_entry["address"] = inst.address
                         if hasattr(inst, "operands"):
@@ -137,7 +137,7 @@ class BinExportPlugin(Plugin):
                 for callee in callees:
                     call_graph_edges.append((func_addr, callee))
 
-            func_entry: Dict[str, Any] = {
+            func_entry: dict[str, Any] = {
                 "name": func.name,
                 "address": func_addr,
                 "block_count": block_count,

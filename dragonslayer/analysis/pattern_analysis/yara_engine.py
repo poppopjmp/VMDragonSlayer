@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .database import Pattern, PatternDatabase
@@ -70,7 +70,7 @@ class _YaraRuleEntry:
     variant_index: int  # 0 = main sig, 1+ = variant
 
 
-def _build_yara_source(patterns: List["Pattern"]) -> tuple[str, list[_YaraRuleEntry]]:
+def _build_yara_source(patterns: list[Pattern]) -> tuple[str, list[_YaraRuleEntry]]:
     """Build a single YARA source string from *patterns*.
 
     Returns ``(source, entries)`` where *entries* map each rule name
@@ -135,7 +135,7 @@ class YaraMatch:
     confidence: float
     variant_index: int
     matched_bytes: bytes
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 class YaraEngine:
@@ -149,9 +149,9 @@ class YaraEngine:
     """
 
     def __init__(self) -> None:
-        self._compiled: Optional[Any] = None  # yara.Rules
+        self._compiled: Any | None = None  # yara.Rules
         self._entries: list[_YaraRuleEntry] = []
-        self._entry_lookup: Dict[str, _YaraRuleEntry] = {}
+        self._entry_lookup: dict[str, _YaraRuleEntry] = {}
 
     # ------------------------------------------------------------------
     @property
@@ -167,10 +167,10 @@ class YaraEngine:
     # ------------------------------------------------------------------
     def compile_from_database(
         self,
-        database: "PatternDatabase",
+        database: PatternDatabase,
         *,
-        architecture: Optional[str] = None,
-        handler_type: Optional[str] = None,
+        architecture: str | None = None,
+        handler_type: str | None = None,
         min_confidence: float = 0.0,
     ) -> int:
         """Compile patterns from *database* into YARA rules.
@@ -225,7 +225,7 @@ class YaraEngine:
         data: bytes,
         *,
         min_confidence: float = 0.0,
-    ) -> List[YaraMatch]:
+    ) -> list[YaraMatch]:
         """Scan *data* against compiled YARA rules.
 
         Returns a list of :class:`YaraMatch` ordered by offset.
@@ -265,7 +265,7 @@ class YaraEngine:
         hex_string: str,
         *,
         min_confidence: float = 0.0,
-    ) -> List[YaraMatch]:
+    ) -> list[YaraMatch]:
         """Convenience: scan a hex-encoded byte string."""
         cleaned = hex_string.replace(" ", "").replace("|", "").replace(",", "")
         data = bytes.fromhex(cleaned)

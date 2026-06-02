@@ -37,9 +37,10 @@ from __future__ import annotations
 
 import logging
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class CVVMProfile:
     xlat_table_address: int = 0
     opcode_width: int = 1
     xlat_table: bytes = b""
-    key_transforms: List[Dict[str, Any]] = field(default_factory=list)
+    key_transforms: list[dict[str, Any]] = field(default_factory=list)
     handler_count: int = 0
 
 
@@ -197,7 +198,7 @@ class CVBytecodeDecoder:
     def __init__(
         self,
         xlat_table: bytes = b"",
-        key_transforms: Sequence[Dict[str, Any]] | None = None,
+        key_transforms: Sequence[dict[str, Any]] | None = None,
         initial_key: int = 0,
         key_width: int = 32,
     ) -> None:
@@ -207,7 +208,7 @@ class CVBytecodeDecoder:
         self._key_width = key_width
         self._mask = (1 << key_width) - 1
 
-    def _apply_transform(self, key: int, opcode: int, t: Dict[str, Any]) -> int:
+    def _apply_transform(self, key: int, opcode: int, t: dict[str, Any]) -> int:
         op = t.get("op", "xor").lower()
         imm = t.get("imm", 0)
         src = t.get("source", "opcode")
@@ -247,12 +248,12 @@ class CVBytecodeDecoder:
             return self._xlat[value]
         return value
 
-    def decrypt(self, data: bytes) -> List[CVDecryptedOpcode]:
+    def decrypt(self, data: bytes) -> list[CVDecryptedOpcode]:
         """Decrypt a CV bytecode buffer.
 
         Returns list of decrypted opcodes.
         """
-        result: List[CVDecryptedOpcode] = []
+        result: list[CVDecryptedOpcode] = []
         key = self._initial_key
         offset = 0
 
@@ -325,7 +326,7 @@ class CVHandlerEntry:
 class CVOpcodeTable:
     """Reconstructed Code Virtualizer opcode table."""
 
-    entries: List[CVHandlerEntry] = field(default_factory=list)
+    entries: list[CVHandlerEntry] = field(default_factory=list)
     base_address: int = 0
     entry_size: int = 4
     encoding: str = "absolute"
@@ -334,7 +335,7 @@ class CVOpcodeTable:
     def handler_count(self) -> int:
         return len(self.entries)
 
-    def get_handler(self, opcode: int) -> Optional[CVHandlerEntry]:
+    def get_handler(self, opcode: int) -> CVHandlerEntry | None:
         for entry in self.entries:
             if entry.opcode == opcode:
                 return entry
@@ -372,7 +373,7 @@ def reconstruct_cv_handler_table(
     CVOpcodeTable
     """
     fmt = "<I" if entry_size == 4 else "<Q"
-    entries: List[CVHandlerEntry] = []
+    entries: list[CVHandlerEntry] = []
     n_entries = min(len(table_data) // entry_size, max_entries)
 
     for i in range(n_entries):
@@ -449,6 +450,7 @@ def classify_cv_handler_entries(
     """
     try:
         import capstone
+
         from dragonslayer.analysis.handler_semantics import _classify_handler
         from dragonslayer.analysis.trace_ingestion import TraceInstruction
     except ImportError:
@@ -478,6 +480,11 @@ def classify_cv_handler_entries(
                 raw_bytes=binary_data[addr - image_base : addr - image_base + size],
                 disassembly=f"{mnem} {op_str}".strip(),
             ))
+            # Stop at the handler terminator so trailing padding/data isn't
+            # mis-disassembled into the histogram (e.g. 0x00 0x00 → "add
+            # byte ptr [eax], al"), which would swamp the real operation.
+            if mnem in ("ret", "retn", "retf", "iret", "iretd", "iretq", "jmp"):
+                break
             if len(insns) >= max_insns:
                 break
 
@@ -527,20 +534,20 @@ class CVDevirtResult:
     profile: CVVMProfile = field(default_factory=CVVMProfile)
     opcode_table: CVOpcodeTable = field(default_factory=CVOpcodeTable)
     decrypted_bytecode: bytes = b""
-    handler_classifications: Dict[int, str] = field(default_factory=dict)
-    lifted_instructions: List[Dict[str, Any]] = field(default_factory=list)
+    handler_classifications: dict[int, str] = field(default_factory=dict)
+    lifted_instructions: list[dict[str, Any]] = field(default_factory=list)
     success: bool = False
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 def devirtualize_cv(
     bytecode: bytes,
     *,
-    profile: Optional[CVVMProfile] = None,
-    table_data: Optional[bytes] = None,
+    profile: CVVMProfile | None = None,
+    table_data: bytes | None = None,
     image_base: int = 0x400000,
-    entry_mnemonics: Optional[Sequence[str]] = None,
-    binary_data: Optional[bytes] = None,
+    entry_mnemonics: Sequence[str] | None = None,
+    binary_data: bytes | None = None,
 ) -> CVDevirtResult:
     """End-to-end Code Virtualizer devirtualisation.
 

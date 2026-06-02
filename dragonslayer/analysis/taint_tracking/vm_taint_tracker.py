@@ -14,34 +14,34 @@ Specialised taint tracker for VM-protected binaries.  Extends
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .tracker import TaintTracker, TaintTag, TaintResult
+from .tracker import TaintResult, TaintTag, TaintTracker
 
 logger = logging.getLogger(__name__)
 
 # ── Virtual register mapping presets ───────────────────────────────────
 # Each mapping: native_reg -> vm_role
-_VMPROTECT_X64_MAP: Dict[str, str] = {
+_VMPROTECT_X64_MAP: dict[str, str] = {
     "rsi": "vIP",          # virtual instruction pointer
     "rbp": "vSP",          # virtual stack pointer
     "rdi": "vContext",     # VM context base pointer
     "r12": "vHandlerTbl",  # handler dispatch table base
 }
 
-_VMPROTECT_X86_MAP: Dict[str, str] = {
+_VMPROTECT_X86_MAP: dict[str, str] = {
     "esi": "vIP",
     "ebp": "vSP",
     "edi": "vContext",
 }
 
-_THEMIDA_X64_MAP: Dict[str, str] = {
+_THEMIDA_X64_MAP: dict[str, str] = {
     "rbx": "vIP",
     "rbp": "vSP",
     "rsi": "vContext",
 }
 
-VM_REG_PRESETS: Dict[str, Dict[str, str]] = {
+VM_REG_PRESETS: dict[str, dict[str, str]] = {
     "vmprotect_x64": _VMPROTECT_X64_MAP,
     "vmprotect_x86": _VMPROTECT_X86_MAP,
     "themida_x64": _THEMIDA_X64_MAP,
@@ -68,17 +68,17 @@ class VMTaintTracker:
 
     def __init__(self) -> None:
         self._tracker = TaintTracker()
-        self._vreg_map: Dict[str, str] = {}   # native → VM role
+        self._vreg_map: dict[str, str] = {}   # native → VM role
 
     # ── public API ─────────────────────────────────────────────────────
     def analyze_vm_trace(
         self,
         instructions: list,
         *,
-        vm_context_regs: Optional[List[str]] = None,
-        vm_operand_regs: Optional[List[str]] = None,
-        vm_preset: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        vm_context_regs: list[str] | None = None,
+        vm_operand_regs: list[str] | None = None,
+        vm_preset: str | None = None,
+    ) -> dict[str, Any]:
         """
         Analyse a VM execution trace with automatic VM-context tainting.
 
@@ -147,12 +147,12 @@ class VMTaintTracker:
         }
 
     # ── virtual register mapping ───────────────────────────────────────
-    def _map_events_to_vreg(self, result: TaintResult) -> List[Dict[str, Any]]:
+    def _map_events_to_vreg(self, result: TaintResult) -> list[dict[str, Any]]:
         """
         Produce an event list where native register names are annotated
         with their VM role names.
         """
-        mapped: List[Dict[str, Any]] = []
+        mapped: list[dict[str, Any]] = []
         for event in result.events:
             entry = dict(event)
             src = event.get("source", "")
@@ -165,7 +165,7 @@ class VMTaintTracker:
         return mapped
 
     # ── memory taint summary ───────────────────────────────────────────
-    def _summarise_memory_taint(self) -> Dict[str, Any]:
+    def _summarise_memory_taint(self) -> dict[str, Any]:
         """Expose memory taint state from the underlying tracker."""
         mem_t = self._tracker._mem_taint  # noqa: SLF001
         if not mem_t:
@@ -180,7 +180,7 @@ class VMTaintTracker:
 
     # ── handler boundary detection ─────────────────────────────────────
     @staticmethod
-    def _find_handler_boundaries(result: TaintResult) -> List[Dict[str, Any]]:
+    def _find_handler_boundaries(result: TaintResult) -> list[dict[str, Any]]:
         """
         Find handler boundaries by looking for patterns where taint
         is consumed and new taint is introduced (handler transitions).
@@ -189,13 +189,13 @@ class VMTaintTracker:
         1. vIP taint source appears after a gap → new handler fetched.
         2. Untaint followed by re-taint of operand registers → handler switch.
         """
-        boundaries: List[Dict[str, Any]] = []
+        boundaries: list[dict[str, Any]] = []
         prev_destinations: set = set()
         last_untaint_addr: int = 0
 
         for event in result.events:
             dst = event.get("destination", "")
-            src = event.get("source", "")
+            event.get("source", "")
             event_type = event.get("type", "")
             addr = event.get("address", 0)
 
@@ -225,9 +225,9 @@ class VMTaintTracker:
         return boundaries
 
     @staticmethod
-    def _summarise_flow(result: TaintResult) -> Dict[str, Any]:
+    def _summarise_flow(result: TaintResult) -> dict[str, Any]:
         """Build a summary of the taint flow."""
-        event_types: Dict[str, int] = {}
+        event_types: dict[str, int] = {}
         sources: set = set()
         destinations: set = set()
 

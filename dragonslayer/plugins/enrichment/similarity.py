@@ -15,13 +15,12 @@ Optional heavy dependencies: ``pefile``, ``pyelftools``, ``macholib``,
 
 from __future__ import annotations
 
-import hashlib
+import contextlib
 import logging
 import math
-import os
 import time
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -74,14 +73,14 @@ def _detect_format(data: bytes) -> str:
     return "UNKNOWN"
 
 
-def _extract_pe_features(file_path: str) -> Dict[str, Any]:
+def _extract_pe_features(file_path: str) -> dict[str, Any]:
     """Extract PE features for similarity comparison."""
-    features: Dict[str, Any] = {}
-    pe: Optional[Any] = None
+    features: dict[str, Any] = {}
+    pe: Any | None = None
     try:
         pe = pefile.PE(file_path)
         # Imports
-        imports: List[str] = []
+        imports: list[str] = []
         import_freq: Counter[str] = Counter()
         if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
             for entry in pe.DIRECTORY_ENTRY_IMPORT:
@@ -100,7 +99,7 @@ def _extract_pe_features(file_path: str) -> Dict[str, Any]:
         )
 
         # Exports
-        exports: List[str] = []
+        exports: list[str] = []
         if hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
             for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
                 name = exp.name.decode("utf-8", errors="replace") if exp.name else f"ord_{exp.ordinal}"
@@ -108,7 +107,7 @@ def _extract_pe_features(file_path: str) -> Dict[str, Any]:
         features["exports"] = sorted(exports)
 
         # Resources (type strings)
-        resources: List[str] = []
+        resources: list[str] = []
         if hasattr(pe, "DIRECTORY_ENTRY_RESOURCE"):
             for res_type in pe.DIRECTORY_ENTRY_RESOURCE.entries:
                 resources.append(str(res_type.id))
@@ -125,13 +124,13 @@ def _extract_pe_features(file_path: str) -> Dict[str, Any]:
     return features
 
 
-def _extract_elf_features(file_path: str) -> Dict[str, Any]:
-    features: Dict[str, Any] = {}
+def _extract_elf_features(file_path: str) -> dict[str, Any]:
+    features: dict[str, Any] = {}
     try:
         with open(file_path, "rb") as f:
             elf = ELFFile(f)
-            imports: List[str] = []
-            exports: List[str] = []
+            imports: list[str] = []
+            exports: list[str] = []
             for sec in elf.iter_sections():
                 if isinstance(sec, SymbolTableSection):
                     for sym in sec.iter_symbols():
@@ -151,25 +150,26 @@ def _extract_elf_features(file_path: str) -> Dict[str, Any]:
     return features
 
 
-def _extract_macho_features(file_path: str) -> Dict[str, Any]:
-    features: Dict[str, Any] = {"imports": [], "exports": [], "sections": [], "resources": [], "import_frequency": {}}
+def _extract_macho_features(file_path: str) -> dict[str, Any]:
+    features: dict[str, Any] = {"imports": [], "exports": [], "sections": [], "resources": [], "import_frequency": {}}
     try:
-        from macholib.mach_o import LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_SEGMENT, LC_SEGMENT_64
+        from macholib.mach_o import (
+            LC_LOAD_DYLIB,
+            LC_LOAD_WEAK_DYLIB,
+            LC_SEGMENT,
+            LC_SEGMENT_64,
+        )
         macho = MachO(file_path)
-        libraries: List[str] = []
-        segments: List[str] = []
+        libraries: list[str] = []
+        segments: list[str] = []
         for header in macho.headers:
             for cmd in header.commands:
                 if cmd[0].cmd in (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB):
-                    try:
+                    with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                         libraries.append(cmd[2].decode("utf-8").rstrip("\x00"))
-                    except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                        pass
                 elif cmd[0].cmd in (LC_SEGMENT, LC_SEGMENT_64):
-                    try:
+                    with contextlib.suppress(ValueError, TypeError, UnicodeDecodeError, AttributeError):
                         segments.append(cmd[1].segname.decode("utf-8").rstrip("\x00"))
-                    except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
-                        pass
         features["imports"] = sorted(set(libraries))
         features["sections"] = sorted(set(segments))
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
@@ -210,14 +210,14 @@ WEIGHTS = {
 }
 
 
-def compute_similarity(feat_a: Dict[str, Any], feat_b: Dict[str, Any], data_a: bytes = b"", data_b: bytes = b"",
-                       ssdeep_a: str = "", ssdeep_b: str = "") -> Dict[str, Any]:
+def compute_similarity(feat_a: dict[str, Any], feat_b: dict[str, Any], data_a: bytes = b"", data_b: bytes = b"",
+                       ssdeep_a: str = "", ssdeep_b: str = "") -> dict[str, Any]:
     """Compute weighted similarity between two feature dicts.
 
     *ssdeep_a* / *ssdeep_b* allow passing pre-computed hashes so that
     the raw bytes are not required for stored-sample comparisons.
     """
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
     scores["imports"] = _jaccard(set(feat_a.get("imports", [])), set(feat_b.get("imports", [])))
     scores["import_frequency"] = _cosine(
         Counter(feat_a.get("import_frequency", {})),
@@ -280,12 +280,10 @@ class SimilarityPlugin(Plugin):
             # Compute ssdeep hash
             ssdeep_hash = ""
             if _HAS_SSDEEP:
-                try:
+                with contextlib.suppress(ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                     ssdeep_hash = ssdeep.hash(file_data)
-                except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
-                    pass
 
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "format": _detect_format(file_data),
                 "features": features,
                 "ssdeep": ssdeep_hash,
@@ -325,7 +323,7 @@ class SimilarityPlugin(Plugin):
                 duration=time.monotonic() - t0,
             )
 
-    def _extract(self, file_path: str, file_data: bytes) -> Dict[str, Any]:
+    def _extract(self, file_path: str, file_data: bytes) -> dict[str, Any]:
         fmt = _detect_format(file_data)
         if fmt == "PE" and _HAS_PEFILE:
             return _extract_pe_features(file_path)
@@ -337,10 +335,10 @@ class SimilarityPlugin(Plugin):
 
     def _compare_against_db(
         self,
-        features: Dict[str, Any],
+        features: dict[str, Any],
         file_data: bytes,
         ctx: PluginContext,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Compare current sample against stored feature sets."""
         assert ctx.storage is not None
         hits = ctx.storage.query("similarity_features", {"match": {}}, size=50)
@@ -348,10 +346,8 @@ class SimilarityPlugin(Plugin):
         # Pre-compute our ssdeep hash once
         our_ssdeep = ""
         if _HAS_SSDEEP and file_data:
-            try:
+            with contextlib.suppress(ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 our_ssdeep = ssdeep.hash(file_data)
-            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
-                pass
 
         comparisons = []
         for stored in hits:

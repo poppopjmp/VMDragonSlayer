@@ -9,9 +9,9 @@ the pipeline's shared context and other analysis results.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .tracker import TaintTracker, TaintTag
+from .tracker import TaintTag, TaintTracker
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +31,9 @@ class TaintAnalyzer:
         self,
         instructions: list,
         *,
-        taint_sources: Optional[Dict[str, str]] = None,
-        shared_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        taint_sources: dict[str, str] | None = None,
+        shared_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Run taint analysis with configurable taint sources.
 

@@ -37,7 +37,8 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def extract_symbolic_summaries(
-    shared_data: Dict[str, Any],
-    boundaries: Optional[Sequence[Any]] = None,
-) -> Dict[int, Dict[str, Any]]:
+    shared_data: dict[str, Any],
+    boundaries: Sequence[Any] | None = None,
+) -> dict[int, dict[str, Any]]:
     """Harvest per-handler symbolic summaries from pipeline shared_data.
 
     Probes the following sources (in priority order):
@@ -68,7 +69,7 @@ def extract_symbolic_summaries(
     Returns a dict mapping handler address → summary dict compatible
     with :func:`~dragonslayer.analysis.handler_clustering.cluster_handlers_by_semantics`.
     """
-    summaries: Dict[int, Dict[str, Any]] = {}
+    summaries: dict[int, dict[str, Any]] = {}
 
     # ── Source 1: explicit handler_summaries ──────────────────────────
     sym_exec = shared_data.get("symbolic_execution", {})
@@ -144,7 +145,7 @@ def run_handler_symbolic_execution(
     *,
     bit_width: int = 64,
     max_handlers: int = 500,
-) -> Dict[int, Dict[str, Any]]:
+) -> dict[int, dict[str, Any]]:
     """Run the symbolic executor on extracted handler bodies.
 
     Parameters
@@ -168,7 +169,7 @@ def run_handler_symbolic_execution(
         return {}
 
     executor = SymbolicExecutor(arch="x86_64" if bit_width == 64 else "x86")
-    summaries: Dict[int, Dict[str, Any]] = {}
+    summaries: dict[int, dict[str, Any]] = {}
 
     for i, body in enumerate(handler_bodies):
         if i >= max_handlers:
@@ -205,13 +206,13 @@ def run_handler_symbolic_execution(
 # ---------------------------------------------------------------------------
 
 def collect_symbolic_summaries(
-    shared_data: Dict[str, Any],
-    boundaries: Optional[Sequence[Any]] = None,
-    handler_bodies: Optional[Sequence[Any]] = None,
+    shared_data: dict[str, Any],
+    boundaries: Sequence[Any] | None = None,
+    handler_bodies: Sequence[Any] | None = None,
     *,
     bit_width: int = 64,
     run_fresh: bool = True,
-) -> Dict[int, Dict[str, Any]]:
+) -> dict[int, dict[str, Any]]:
     """Unified function: extract existing summaries, optionally run fresh SE.
 
     This is the intended entry point from the pipeline.
@@ -255,7 +256,7 @@ def collect_symbolic_summaries(
 # Converters  (internal)
 # ---------------------------------------------------------------------------
 
-def _handler_info_to_summary(h: Dict[str, Any]) -> Dict[str, Any]:
+def _handler_info_to_summary(h: dict[str, Any]) -> dict[str, Any]:
     """Convert a HandlerInfo dict to HandlerSymbolicSummary-compatible dict."""
     return {
         "address": h.get("address", 0),
@@ -268,7 +269,7 @@ def _handler_info_to_summary(h: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _snapshot_to_summary(addr: int, snap: Dict[str, Any]) -> Dict[str, Any]:
+def _snapshot_to_summary(addr: int, snap: dict[str, Any]) -> dict[str, Any]:
     """Convert a register snapshot dict to HandlerSymbolicSummary-compatible."""
     regs = snap.get("registers", snap)
     if not isinstance(regs, dict):
@@ -290,7 +291,7 @@ def _snapshot_to_summary(addr: int, snap: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _extraction_to_summary(h: Dict[str, Any]) -> Dict[str, Any]:
+def _extraction_to_summary(h: dict[str, Any]) -> dict[str, Any]:
     """Convert handler extraction dict to HandlerSymbolicSummary-compatible.
 
     Handler extraction provides ``register_delta`` which lists registers

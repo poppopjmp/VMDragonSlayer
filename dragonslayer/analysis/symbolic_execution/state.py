@@ -12,8 +12,8 @@ as it explores VM handler paths.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ else:
 # bit_hi is *exclusive* — e.g. (0, 8) means bits [7:0].
 # For 32-bit sub-registers on x86-64, writes zero-extend to 64 bits.
 
-_SUBREG_MAP_64: Dict[str, tuple] = {}
-_SUBREG_MAP_32: Dict[str, tuple] = {}
+_SUBREG_MAP_64: dict[str, tuple] = {}
+_SUBREG_MAP_32: dict[str, tuple] = {}
 
 def _build_subreg_maps() -> None:
     """Populate the sub-register alias tables."""
@@ -54,7 +54,7 @@ def _build_subreg_maps() -> None:
     _R8H = ["ah",  "bh",  "ch",  "dh"]  # only first 4 have *h
 
     # --- x86-64 map -------------------------------------------------------
-    for r64, r32, r16, r8l in zip(_R64, _R32, _R16, _R8L):
+    for r64, r32, r16, r8l in zip(_R64, _R32, _R16, _R8L, strict=False):
         # 32-bit → zero-extends to 64
         _SUBREG_MAP_64[r32] = (r64, 0, 32,  True)   # (parent, bit_lo, width, zero_ext)
         # 16-bit sub
@@ -73,7 +73,7 @@ def _build_subreg_maps() -> None:
         _SUBREG_MAP_64[f"r{n}b"]  = (base, 0, 8,  False)
 
     # --- x86-32 map -------------------------------------------------------
-    for r32, r16, r8l in zip(_R32, _R16, _R8L[:4]):
+    for r32, r16, r8l in zip(_R32, _R16, _R8L[:4], strict=False):
         _SUBREG_MAP_32[r16] = (r32, 0, 16, False)
         _SUBREG_MAP_32[r8l] = (r32, 0, 8,  False)
     for i, r8h in enumerate(_R8H):
@@ -130,7 +130,7 @@ class MemoryAccessRecord:
     address_expr: str      # z3 s-expression or hex string
     value_expr: str        # z3 s-expression or hex string / concrete
     size: int              # bytes
-    region: Optional[str] = None  # region name if resolved
+    region: str | None = None  # region name if resolved
     timestamp: int = 0
 
 
@@ -192,33 +192,33 @@ class SymbolicState:
         self.halted: bool = False
         self.halt_reason: str = ""
 
-        self.registers: Dict[str, Any] = {}
-        self.memory: Dict[int, Any] = {}
-        self.constraints: List[Any] = []
-        self._memory_log: List[MemoryWrite] = []
-        self._symbolic_store: List[MemoryWrite] = []  # writes with symbolic addresses
-        self._read_log: List[MemoryAccessRecord] = []   # symbolic reads
-        self._write_log: List[MemoryAccessRecord] = []  # symbolic writes
-        self._visited_pcs: Set[int] = set()
-        self._visit_counts: Dict[int, int] = {}  # per-address visit count
+        self.registers: dict[str, Any] = {}
+        self.memory: dict[int, Any] = {}
+        self.constraints: list[Any] = []
+        self._memory_log: list[MemoryWrite] = []
+        self._symbolic_store: list[MemoryWrite] = []  # writes with symbolic addresses
+        self._read_log: list[MemoryAccessRecord] = []   # symbolic reads
+        self._write_log: list[MemoryAccessRecord] = []  # symbolic writes
+        self._visited_pcs: set[int] = set()
+        self._visit_counts: dict[int, int] = {}  # per-address visit count
         self._last_cmp: Any = None  # legacy compat — kept for callers
 
         # Named memory regions (e.g. "stack", "vm_context")
-        self._regions: Dict[str, SymbolicMemoryRegion] = {}
+        self._regions: dict[str, SymbolicMemoryRegion] = {}
         # Counter for generating unique symbolic memory read names
         self._sym_read_counter: int = 0
 
         # B45: Alias query result cache  {(id(a1), id(a2)): result}
-        self._alias_cache: Dict[tuple, str] = {}
+        self._alias_cache: dict[tuple, str] = {}
 
         # B54: Priority for coverage-guided scheduling (lower = higher prio)
         self.priority: float = 0.0
         self._seq: int = 0  # tie-breaker for heapq
         # B54: Symbolic call stack for call/return tracking
-        self.call_stack: List[int] = []
+        self.call_stack: list[int] = []
 
         # Explicit EFLAGS: ZF, CF, SF, OF, PF (parity), AF (auxiliary carry)
-        self.flags: Dict[str, Any] = {
+        self.flags: dict[str, Any] = {
             "ZF": False,
             "CF": False,
             "SF": False,
@@ -247,7 +247,7 @@ class SymbolicState:
 
     # -- Priority / ordering (B54) -------------------------------------------
 
-    def __lt__(self, other: "SymbolicState") -> bool:
+    def __lt__(self, other: SymbolicState) -> bool:
         """Support heapq ordering: lower priority value = explored first."""
         if self.priority != other.priority:
             return self.priority < other.priority
@@ -270,7 +270,7 @@ class SymbolicState:
         """Push *return_addr* onto the symbolic call stack."""
         self.call_stack.append(return_addr)
 
-    def pop_call(self) -> Optional[int]:
+    def pop_call(self) -> int | None:
         """Pop return address from call stack, or *None* if empty."""
         if self.call_stack:
             return self.call_stack.pop()
@@ -334,7 +334,7 @@ class SymbolicState:
             # AF: auxiliary carry (half-carry from bit 3 to bit 4)
             left_nib = z3.Extract(3, 0, left_bv) if left_bv.sort().size() >= 4 else left_bv
             right_nib = z3.Extract(3, 0, right_bv) if right_bv.sort().size() >= 4 else right_bv
-            res_nib = z3.Extract(3, 0, result) if bw >= 4 else result
+            z3.Extract(3, 0, result) if bw >= 4 else result
             if is_sub:
                 self.flags["AF"] = z3.UGT(
                     z3.ZeroExt(1, left_nib) - z3.ZeroExt(1, right_nib),
@@ -445,7 +445,7 @@ class SymbolicState:
 
     # -- Register access (with sub-register aliasing) -------------------------
 
-    def _subreg_info(self, name: str) -> Optional[tuple]:
+    def _subreg_info(self, name: str) -> tuple | None:
         """Return ``(parent, bit_lo, width, zero_ext)`` or *None*."""
         table = _SUBREG_MAP_64 if self.bit_width == 64 else _SUBREG_MAP_32
         return table.get(name)
@@ -466,11 +466,11 @@ class SymbolicState:
         """
         self._regions[name] = SymbolicMemoryRegion(name=name, base=base, size=size)
 
-    def get_region(self, name: str) -> Optional[SymbolicMemoryRegion]:
+    def get_region(self, name: str) -> SymbolicMemoryRegion | None:
         """Look up a named region."""
         return self._regions.get(name)
 
-    def resolve_region(self, address: Any) -> Optional[SymbolicMemoryRegion]:
+    def resolve_region(self, address: Any) -> SymbolicMemoryRegion | None:
         """Identify which region *address* belongs to, if any.
 
         For concrete addresses, checks if the address falls within a
@@ -507,7 +507,7 @@ class SymbolicState:
         return None
 
     def _log_read(self, address: Any, value: Any, size: int,
-                  region: Optional[SymbolicMemoryRegion] = None) -> None:
+                  region: SymbolicMemoryRegion | None = None) -> None:
         """Record a read access for the memory effects summary."""
         addr_str = str(address) if hasattr(address, "sexpr") else f"{address:#x}" if isinstance(address, int) else str(address)
         val_str = str(value) if hasattr(value, "sexpr") else f"{value:#x}" if isinstance(value, int) else str(value)
@@ -521,7 +521,7 @@ class SymbolicState:
         ))
 
     def _log_write(self, address: Any, value: Any, size: int,
-                   region: Optional[SymbolicMemoryRegion] = None) -> None:
+                   region: SymbolicMemoryRegion | None = None) -> None:
         """Record a write access for the memory effects summary."""
         addr_str = str(address) if hasattr(address, "sexpr") else f"{address:#x}" if isinstance(address, int) else str(address)
         val_str = str(value) if hasattr(value, "sexpr") else f"{value:#x}" if isinstance(value, int) else str(value)
@@ -534,7 +534,7 @@ class SymbolicState:
             timestamp=self.depth,
         ))
 
-    def summarize_memory_effects(self) -> Dict[str, Any]:
+    def summarize_memory_effects(self) -> dict[str, Any]:
         """Produce a structured summary of all memory reads and writes.
 
         Returns a dict with ``loads`` (list of load records) and
@@ -542,8 +542,8 @@ class SymbolicState:
         names where resolved.  This is used for handler classification
         and clustering.
         """
-        def _rec_to_dict(rec: MemoryAccessRecord) -> Dict[str, Any]:
-            d: Dict[str, Any] = {
+        def _rec_to_dict(rec: MemoryAccessRecord) -> dict[str, Any]:
+            d: dict[str, Any] = {
                 "kind": rec.kind,
                 "address": rec.address_expr,
                 "value": rec.value_expr,
@@ -650,7 +650,7 @@ class SymbolicState:
         """Return True if *address* is a z3 expression (not a concrete int)."""
         return _Z3_AVAILABLE and hasattr(address, "sort")
 
-    def _try_concretise(self, address: Any) -> Optional[int]:
+    def _try_concretise(self, address: Any) -> int | None:
         """Try to reduce a symbolic address to a concrete int.
 
         Uses the accumulated path constraints.  Returns ``None`` if
@@ -737,21 +737,21 @@ class SymbolicState:
 
     def alias_analysis_batch(
         self,
-        addresses: List[Any],
-    ) -> Dict[tuple, str]:
+        addresses: list[Any],
+    ) -> dict[tuple, str]:
         """Batch alias analysis for a list of addresses (B45).
 
         Returns a dictionary mapping ``(i, j)`` index-pairs to alias
         results.  Exploits the cache so previously-resolved pairs are
         instant.
         """
-        results: Dict[tuple, str] = {}
+        results: dict[tuple, str] = {}
         for i in range(len(addresses)):
             for j in range(i + 1, len(addresses)):
                 results[(i, j)] = self.query_alias(addresses[i], addresses[j])
         return results
 
-    def _forward_from_symbolic_store(self, address: Any, size: int) -> Optional[Any]:
+    def _forward_from_symbolic_store(self, address: Any, size: int) -> Any | None:
         """Search the symbolic store (most recent first) for a must-aliasing write.
 
         If a prior write to a *must-alias* address of the same size is
@@ -839,10 +839,7 @@ class SymbolicState:
             b = self.memory.get(address + i)
             if b is None:
                 all_concrete = False
-                if _Z3_AVAILABLE:
-                    b = z3.BitVec(f"mem_{(address + i):#x}", 8)
-                else:
-                    b = 0
+                b = z3.BitVec(f"mem_{address + i:#x}", 8) if _Z3_AVAILABLE else 0
             elif _Z3_AVAILABLE and hasattr(b, "sort"):
                 all_concrete = False
                 if b.sort().size() != 8:
@@ -965,7 +962,7 @@ class SymbolicState:
 
     # -- State management ---------------------------------------------------
 
-    def fork(self) -> "SymbolicState":
+    def fork(self) -> SymbolicState:
         """Create a deep copy for path forking."""
         new = SymbolicState(arch=self.arch, bit_width=self.bit_width, initial_pc=self.pc)
         new.depth = self.depth
@@ -1010,7 +1007,7 @@ class SymbolicState:
                 pass
         return False
 
-    def merge(self, other: "SymbolicState") -> "SymbolicState":
+    def merge(self, other: SymbolicState) -> SymbolicState:
         """Merge two states at a control-flow join point (B52).
 
         Creates a merged state where:
@@ -1065,9 +1062,7 @@ class SymbolicState:
                 continue
             if v_self is None:
                 merged.registers[reg] = v_other
-            elif v_other is None:
-                merged.registers[reg] = v_self
-            elif self._values_equal(v_self, v_other):
+            elif v_other is None or self._values_equal(v_self, v_other):
                 merged.registers[reg] = v_self
             else:
                 # Create ITE phi-node
@@ -1086,9 +1081,7 @@ class SymbolicState:
             f_other = other.flags.get(flag)
             if f_self is None:
                 merged.flags[flag] = f_other
-            elif f_other is None:
-                merged.flags[flag] = f_self
-            elif self._values_equal(f_self, f_other):
+            elif f_other is None or self._values_equal(f_self, f_other):
                 merged.flags[flag] = f_self
             else:
                 try:
@@ -1164,18 +1157,18 @@ class SymbolicState:
         return max(self._visit_counts.values()) if self._visit_counts else 0
 
     @property
-    def visited_addresses(self) -> Set[int]:
+    def visited_addresses(self) -> set[int]:
         return set(self._visited_pcs)
 
     @property
-    def memory_writes(self) -> List[MemoryWrite]:
+    def memory_writes(self) -> list[MemoryWrite]:
         return list(self._memory_log)
 
     def halt(self, reason: str = "completed") -> None:
         self.halted = True
         self.halt_reason = reason
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to JSON-friendly dict (symbolic values → strings)."""
         def _ser(val: Any) -> Any:
             if _Z3_AVAILABLE and hasattr(val, "sexpr"):

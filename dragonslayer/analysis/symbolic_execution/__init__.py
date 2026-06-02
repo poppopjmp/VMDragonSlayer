@@ -7,8 +7,11 @@ modules have not been implemented yet.
 
 try:
     from .state import (
-        SymbolicState, AliasResult, MemoryWrite,
-        SymbolicMemoryRegion, MemoryAccessRecord,
+        AliasResult,
+        MemoryAccessRecord,
+        MemoryWrite,
+        SymbolicMemoryRegion,
+        SymbolicState,
     )
 except (ImportError, AttributeError):
     SymbolicState = None  # type: ignore[assignment,misc]
@@ -18,7 +21,7 @@ except (ImportError, AttributeError):
     MemoryAccessRecord = None  # type: ignore[assignment,misc]
 
 try:
-    from .solver import Z3Solver, SolverResult
+    from .solver import SolverResult, Z3Solver
 except (ImportError, AttributeError):
     Z3Solver = None  # type: ignore[assignment,misc]
     SolverResult = None  # type: ignore[assignment,misc]
@@ -30,7 +33,12 @@ except (ImportError, AttributeError):
     LiftedInstruction = None  # type: ignore[assignment,misc]
 
 try:
-    from .executor import SymbolicExecutor, ExecutionResult, HandlerSymbolicSummary, LoopInfo
+    from .executor import (
+        ExecutionResult,
+        HandlerSymbolicSummary,
+        LoopInfo,
+        SymbolicExecutor,
+    )
 except (ImportError, AttributeError):
     SymbolicExecutor = None  # type: ignore[assignment,misc]
     ExecutionResult = None  # type: ignore[assignment,misc]

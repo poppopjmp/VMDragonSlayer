@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +48,12 @@ _VOLATILE_REGS: frozenset[str] = frozenset({
 # zero_extend).  ``zero_extend`` is True for 32-bit writes that zero the
 # upper 32 bits of the 64-bit parent.
 
-_SUBREG_FAMILIES: Dict[str, tuple] = {}
-_REG_FAMILY: Dict[str, Set[str]] = {}   # canonical → all names in family
+_SUBREG_FAMILIES: dict[str, tuple] = {}
+_REG_FAMILY: dict[str, set[str]] = {}   # canonical → all names in family
 
 def _build_family_tables() -> None:
     """Populate the sub-register lookup tables once at import time."""
-    _specs: List[tuple] = [
+    _specs: list[tuple] = [
         # (canonical64, [(name, bit_lo, width, zero_ext), ...])
     ]
     _base_names = [
@@ -68,7 +68,7 @@ def _build_family_tables() -> None:
     ]
     for fam in _base_names:
         canonical = fam[0]  # 64-bit parent
-        members: List[tuple] = []
+        members: list[tuple] = []
         for name in fam:
             if name == canonical:
                 members.append((name, 0, 64, False))
@@ -78,13 +78,9 @@ def _build_family_tables() -> None:
                 members.append((name, 0, 16, False))
             elif len(name) == 2 and name.endswith("h"):
                 members.append((name, 8, 8, False))
-            elif len(name) == 2 and name.endswith("l"):
+            elif len(name) == 2 and name.endswith("l") or len(name) == 3 and name.endswith("l"):
                 members.append((name, 0, 8, False))
-            elif len(name) == 3 and name.endswith("l"):  # e.g. sil
-                members.append((name, 0, 8, False))
-            elif len(name) == 2 and name.endswith("i"):  # si, di
-                members.append((name, 0, 16, False))
-            elif len(name) == 2 and name.endswith("p"):  # bp, sp
+            elif len(name) == 2 and name.endswith("i") or len(name) == 2 and name.endswith("p"):  # si, di
                 members.append((name, 0, 16, False))
             else:
                 members.append((name, 0, 16, False))  # fallback
@@ -102,7 +98,7 @@ def _build_family_tables() -> None:
         _specs.append((canonical, members))
 
     for canonical, members in _specs:
-        family_set: Set[str] = set()
+        family_set: set[str] = set()
         for name, bit_lo, width, zext in members:
             _SUBREG_FAMILIES[name] = (canonical, bit_lo, width, zext)
             family_set.add(name)
@@ -129,10 +125,10 @@ _build_family_tables()
 # EFLAGS taint tables  (Batch 33)
 # ═══════════════════════════════════════════════════════════════════════════════
 # Individual flag pseudo-registers tracked: eflags, cf, pf, af, zf, sf, of, df
-_INDIVIDUAL_FLAGS: Set[str] = {"eflags", "cf", "pf", "af", "zf", "sf", "of", "df"}
+_INDIVIDUAL_FLAGS: set[str] = {"eflags", "cf", "pf", "af", "zf", "sf", "of", "df"}
 
 # Mnemonics that write (produce) EFLAGS.
-_EFLAGS_PRODUCERS: Set[str] = {
+_EFLAGS_PRODUCERS: set[str] = {
     # Arithmetic
     "add", "adc", "sub", "sbb", "neg", "inc", "dec", "imul", "mul", "div", "idiv",
     "cmp", "test",
@@ -146,7 +142,7 @@ _EFLAGS_PRODUCERS: Set[str] = {
 }
 
 # Mnemonics that read (consume) EFLAGS.
-_EFLAGS_CONSUMERS: Set[str] = {
+_EFLAGS_CONSUMERS: set[str] = {
     # Conditional jumps
     "ja", "jae", "jb", "jbe", "jc", "je", "jg", "jge", "jl", "jle",
     "jna", "jnae", "jnb", "jnbe", "jnc", "jne", "jng", "jnge", "jnl",
@@ -199,7 +195,7 @@ def subreg_canonical(reg: str) -> str:
     return info[0] if info else reg.lower()
 
 
-def subreg_aliases(reg: str) -> Set[str]:
+def subreg_aliases(reg: str) -> set[str]:
     """Return all names in the same register family as *reg*.
 
     Args:
@@ -214,7 +210,7 @@ def subreg_aliases(reg: str) -> Set[str]:
     return _REG_FAMILY.get(info[0], {reg.lower()})
 
 
-def subreg_info(reg: str) -> Optional[tuple]:
+def subreg_info(reg: str) -> tuple | None:
     """Return ``(canonical, bit_lo, width, zero_ext)`` or ``None``.
 
     Args:
@@ -261,9 +257,9 @@ class MemoryAliasTracker:
     """
 
     def __init__(self) -> None:
-        self._bindings: Dict[str, int] = {}
+        self._bindings: dict[str, int] = {}
         # Reverse: address → set of register names
-        self._addr_to_regs: Dict[int, set[str]] = {}
+        self._addr_to_regs: dict[int, set[str]] = {}
 
     def bind(self, reg: str, addr: int) -> None:
         """Record that *reg* now points to concrete *addr*.
@@ -295,7 +291,7 @@ class MemoryAliasTracker:
             if not self._addr_to_regs[old]:
                 del self._addr_to_regs[old]
 
-    def resolve(self, reg: str) -> Optional[int]:
+    def resolve(self, reg: str) -> int | None:
         """Return the concrete address *reg* is known to hold, or ``None``.
 
         Args:
@@ -314,7 +310,7 @@ class MemoryAliasTracker:
         b = self._bindings.get(reg_b.lower())
         return a is not None and a == b
 
-    def aliases_of(self, reg: str) -> Set[str]:
+    def aliases_of(self, reg: str) -> set[str]:
         """Return all registers that must-alias *reg* (excluding itself).
 
         Args:
@@ -347,7 +343,7 @@ class ByteTaintMap:
     """
 
     # B74: canonical register → byte count
-    _CANONICAL_SIZES: Dict[str, int] = {}
+    _CANONICAL_SIZES: dict[str, int] = {}
 
     @classmethod
     def _init_sizes(cls) -> None:
@@ -364,9 +360,9 @@ class ByteTaintMap:
 
     def __init__(self) -> None:
         ByteTaintMap._init_sizes()
-        self._map: Dict[str, List[TaintTag]] = {}
+        self._map: dict[str, list[TaintTag]] = {}
 
-    def _ensure(self, canonical: str) -> List[TaintTag]:
+    def _ensure(self, canonical: str) -> list[TaintTag]:
         """Lazily create a correctly-sized array for *canonical*."""
         arr = self._map.get(canonical)
         if arr is None:
@@ -459,7 +455,7 @@ class ByteTaintMap:
         """Remove all taint data."""
         self._map.clear()
 
-    def to_dict(self) -> Dict[str, List[str]]:
+    def to_dict(self) -> dict[str, list[str]]:
         """Serialise for debugging / tests."""
         return {
             k: [str(t) for t in v]
@@ -471,9 +467,9 @@ class ByteTaintMap:
 @dataclass
 class TaintState:
     """Snapshot of taint status for registers and memory."""
-    registers: Dict[str, TaintTag] = field(default_factory=dict)
-    memory: Dict[int, TaintTag] = field(default_factory=dict)
-    active_tags: Set[TaintTag] = field(default_factory=set)
+    registers: dict[str, TaintTag] = field(default_factory=dict)
+    memory: dict[int, TaintTag] = field(default_factory=dict)
+    active_tags: set[TaintTag] = field(default_factory=set)
 
 
 @dataclass
@@ -492,14 +488,14 @@ class TaintEvent:
 class TaintResult:
     """Complete taint analysis result."""
     success: bool
-    tainted_registers: Dict[str, str] = field(default_factory=dict)
-    tainted_memory: Dict[str, str] = field(default_factory=dict)
-    events: List[Dict[str, Any]] = field(default_factory=list)
-    taint_flow_graph: Dict[str, List[str]] = field(default_factory=dict)
+    tainted_registers: dict[str, str] = field(default_factory=dict)
+    tainted_memory: dict[str, str] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
+    taint_flow_graph: dict[str, list[str]] = field(default_factory=dict)
     instructions_analyzed: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "success": self.success,
             "tainted_registers": self.tainted_registers,
@@ -539,11 +535,11 @@ class TaintTracker:
         alias_oracle: Any = None,
         implicit_flow_depth: int = 16,
     ) -> None:
-        self._reg_taint: Dict[str, TaintTag] = {}
-        self._mem_taint: Dict[int, TaintTag] = {}
-        self._symbolic_mem_taint: Dict[Any, TaintTag] = {}
-        self._events: List[TaintEvent] = []
-        self._flow_graph: Dict[str, Set[str]] = {}
+        self._reg_taint: dict[str, TaintTag] = {}
+        self._mem_taint: dict[int, TaintTag] = {}
+        self._symbolic_mem_taint: dict[Any, TaintTag] = {}
+        self._events: list[TaintEvent] = []
+        self._flow_graph: dict[str, set[str]] = {}
         self._subreg_aware = sub_register_aware
         self._alias_oracle = alias_oracle
 
@@ -559,8 +555,8 @@ class TaintTracker:
 
         # B72: Interprocedural taint context — tracks register taint at
         # call boundaries so cross-function analysis is possible.
-        self._context_stack: List[
-            tuple[Dict[str, TaintTag], Dict[str, List[TaintTag]], Dict[str, int]]
+        self._context_stack: list[
+            tuple[dict[str, TaintTag], dict[str, list[TaintTag]], dict[str, int]]
         ] = []
         self._call_depth: int = 0
 
@@ -610,7 +606,7 @@ class TaintTracker:
             for r in return_regs
         }
         # B73: Also capture callee byte-taint for return regs
-        return_byte_taint: Dict[str, List[TaintTag]] = {}
+        return_byte_taint: dict[str, list[TaintTag]] = {}
         for r in return_regs:
             info = subreg_info(r.lower())
             canonical = info[0] if info else r.lower()
@@ -850,12 +846,12 @@ class TaintTracker:
         self._process_instruction(insn)
 
     @property
-    def reg_taint(self) -> Dict[str, TaintTag]:
+    def reg_taint(self) -> dict[str, TaintTag]:
         """Public read access to register taint map."""
         return self._reg_taint
 
     @property
-    def mem_taint(self) -> Dict[int, TaintTag]:
+    def mem_taint(self) -> dict[int, TaintTag]:
         """Public read access to memory taint map."""
         return self._mem_taint
 
@@ -917,7 +913,7 @@ class TaintTracker:
         operands = getattr(insn, "operands", "")
         category = getattr(insn, "category", "unknown")
         # Concrete register values from an execution trace (if available)
-        reg_values: Dict[str, int] = getattr(insn, "registers", {}) or {}
+        reg_values: dict[str, int] = getattr(insn, "registers", {}) or {}
 
         mnem_lower = mnemonic.lower()
 
@@ -957,7 +953,7 @@ class TaintTracker:
 
         # Collect taint from read operands (registers)
         combined_taint = TaintTag.CLEAN
-        tainted_sources: List[str] = []
+        tainted_sources: list[str] = []
 
         for reg in effective_reads:
             reg_lower = reg.lower()
@@ -995,7 +991,7 @@ class TaintTracker:
                         tainted_sources.append(
                             f"mem_alias[{query_addr:#x}]"
                             if isinstance(query_addr, int)
-                            else f"mem_alias[sym]"
+                            else "mem_alias[sym]"
                         )
 
         # Taint from base register used as memory pointer
@@ -1140,9 +1136,9 @@ class TaintTracker:
     @staticmethod
     def _extract_memory_address(
         operands: str,
-        reads: List[str],
-        reg_values: Dict[str, int] | None = None,
-    ) -> Optional[int]:
+        reads: list[str],
+        reg_values: dict[str, int] | None = None,
+    ) -> int | None:
         """
         Extract a concrete memory address from an x86 memory operand.
 
@@ -1181,7 +1177,7 @@ class TaintTracker:
         return None
 
     @staticmethod
-    def _resolve_addr_expr(expr: str, rv: Dict[str, int]) -> Optional[int]:
+    def _resolve_addr_expr(expr: str, rv: dict[str, int]) -> int | None:
         """Evaluate a simple x86 address expression given concrete register values.
 
         Supports: ``base``, ``base+disp``, ``base+index*scale``,
@@ -1243,7 +1239,7 @@ class TaintTracker:
         return total if resolved else None
 
     @staticmethod
-    def _event_to_dict(event: TaintEvent) -> Dict[str, Any]:
+    def _event_to_dict(event: TaintEvent) -> dict[str, Any]:
         return {
             "address": event.address,
             "instruction": event.instruction,

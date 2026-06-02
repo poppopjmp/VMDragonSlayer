@@ -14,8 +14,8 @@ common VM deobfuscation tasks:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ except ImportError:
 
 # B57: Import resource-limit exceptions for raising on solver exhaustion.
 try:
-    from dragonslayer.core.exceptions import ResourceLimitError, AnalysisTimeoutError
+    from dragonslayer.core.exceptions import AnalysisTimeoutError, ResourceLimitError
 except ImportError:  # pragma: no cover — standalone usage
     class ResourceLimitError(RuntimeError):  # type: ignore[no-redef]
         pass
@@ -40,9 +40,9 @@ except ImportError:  # pragma: no cover — standalone usage
 class SolverResult:
     """Outcome of a solver query."""
     satisfiable: bool
-    model: Optional[Dict[str, Any]] = None
-    simplified: Optional[str] = None
-    error: Optional[str] = None
+    model: dict[str, Any] | None = None
+    simplified: str | None = None
+    error: str | None = None
 
 
 class Z3Solver:
@@ -64,7 +64,7 @@ class Z3Solver:
             raise ImportError("z3-solver is required for Z3Solver — install via pip install z3-solver")
         self.timeout_ms = timeout_ms
         self.memory_limit_mb = memory_limit_mb
-        self._constraints: List[Any] = []
+        self._constraints: list[Any] = []
 
         # B53: Apply global z3 memory limit if requested
         if memory_limit_mb > 0:
@@ -72,7 +72,7 @@ class Z3Solver:
                 z3.set_param("memory_max_size", memory_limit_mb)
             except z3.Z3Exception:
                 logger.debug("Failed to set z3 memory limit to %d MB", memory_limit_mb)
-        self._constraint_stack: List[int] = []  # indices for push/pop sync
+        self._constraint_stack: list[int] = []  # indices for push/pop sync
         self._solver = z3.Solver()
         self._solver.set("timeout", timeout_ms)
 
@@ -164,7 +164,7 @@ class Z3Solver:
         self._constraints.append(constraint)
         self._solver.assert_and_track(constraint, label)
 
-    def unsat_core(self) -> List[str]:
+    def unsat_core(self) -> list[str]:
         """Return the names of constraints in the UNSAT core.
 
         Only meaningful after :meth:`check` returns UNSAT and the
@@ -217,7 +217,7 @@ class Z3Solver:
             result = self._solver.check()
             if result == z3.sat:
                 model = self._solver.model()
-                model_dict: Dict[str, Any] = {}
+                model_dict: dict[str, Any] = {}
                 for decl in model.decls():
                     val = model[decl]
                     try:
@@ -250,7 +250,7 @@ class Z3Solver:
 
     # -- Analysis helpers ---------------------------------------------------
 
-    def is_opaque_predicate(self, condition: Any) -> Optional[bool]:
+    def is_opaque_predicate(self, condition: Any) -> bool | None:
         """
         Determine if *condition* is an opaque predicate.
 
@@ -285,7 +285,7 @@ class Z3Solver:
         self,
         condition: Any,
         path_constraints: Any,
-    ) -> Optional[bool]:
+    ) -> bool | None:
         """Determine if *condition* is opaque *under* accumulated path
         constraints.
 
@@ -343,9 +343,9 @@ class Z3Solver:
     def enumerate_values(
         self,
         expr: Any,
-        constraints: List[Any] | None = None,
+        constraints: list[Any] | None = None,
         max_values: int = 256,
-    ) -> List[int]:
+    ) -> list[int]:
         """Enumerate all distinct concrete values of *expr* under constraints.
 
         Used for indirect dispatch resolution: given a symbolic jump
@@ -361,7 +361,7 @@ class Z3Solver:
         if all_constraints:
             s.add(*all_constraints)
 
-        values: List[int] = []
+        values: list[int] = []
         bits = expr.sort().size() if hasattr(expr, "sort") else 64
 
         for _ in range(max_values):
@@ -379,7 +379,7 @@ class Z3Solver:
 
         return sorted(values)
 
-    def solve_for(self, target_var: Any, constraints: List[Any] | None = None) -> SolverResult:
+    def solve_for(self, target_var: Any, constraints: list[Any] | None = None) -> SolverResult:
         """
         Solve for a specific variable given constraints.
 
@@ -407,8 +407,8 @@ class Z3Solver:
 
     def solve_xor_key_schedule(
         self,
-        ciphertext_chunks: List[int],
-        known_plaintext_chunks: List[int],
+        ciphertext_chunks: list[int],
+        known_plaintext_chunks: list[int],
         bits: int = 64,
     ) -> SolverResult:
         """Solve for a repeating XOR key given known-plaintext pairs.
@@ -446,7 +446,7 @@ class Z3Solver:
 
         if s.check() == z3.sat:
             model = s.model()
-            result_model: Dict[str, Any] = {}
+            result_model: dict[str, Any] = {}
             for kv in key_vars:
                 val = model.eval(kv, model_completion=True)
                 try:
@@ -459,10 +459,10 @@ class Z3Solver:
 
     def solve_chained_decryption(
         self,
-        ciphertext_chain: List[int],
+        ciphertext_chain: list[int],
         initial_state: int,
         bits: int = 64,
-        known_plaintexts: Dict[int, int] | None = None,
+        known_plaintexts: dict[int, int] | None = None,
     ) -> SolverResult:
         """Solve for a chained (CBC-like) XOR decryption key.
 
@@ -506,7 +506,7 @@ class Z3Solver:
 
         if s.check() == z3.sat:
             model = s.model()
-            result_model: Dict[str, Any] = {"key": model.eval(key, model_completion=True).as_long()}
+            result_model: dict[str, Any] = {"key": model.eval(key, model_completion=True).as_long()}
             for i, pv in enumerate(plains):
                 val = model.eval(pv, model_completion=True)
                 try:
@@ -521,8 +521,8 @@ class Z3Solver:
 
     def detect_key_schedule_length(
         self,
-        ciphertext: List[int],
-        known_plaintext: List[int],
+        ciphertext: list[int],
+        known_plaintext: list[int],
         max_period: int = 32,
         bits: int = 8,
     ) -> SolverResult:
@@ -564,7 +564,7 @@ class Z3Solver:
 
             if s.check() == z3.sat:
                 model = s.model()
-                result_model: Dict[str, Any] = {"key_length": k}
+                result_model: dict[str, Any] = {"key_length": k}
                 for j in range(k):
                     val = model.eval(key_vars[j], model_completion=True)
                     try:
@@ -736,7 +736,7 @@ class Z3Solver:
     # -- B72: Cipher-type auto-detection -------------------------------------
 
     # Well-known constant signatures for common ciphers.
-    _CIPHER_SIGNATURES: Dict[str, tuple[tuple[int, ...], str]] = {
+    _CIPHER_SIGNATURES: dict[str, tuple[tuple[int, ...], str]] = {
         "aes_sbox_fwd": (
             (0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5),
             "AES (forward S-box)",
@@ -778,7 +778,7 @@ class Z3Solver:
         data: bytes | list[int],
         *,
         min_match_bytes: int = 4,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Auto-detect cipher type(s) by scanning for known constants.
 
         Searches *data* for well-known S-boxes, permutation tables,
@@ -799,7 +799,7 @@ class Z3Solver:
             sorted by match length descending.
         """
         raw = bytes(data) if not isinstance(data, bytes) else data
-        hits: List[Dict[str, Any]] = []
+        hits: list[dict[str, Any]] = []
 
         for sig_name, (sig_bytes, description) in cls._CIPHER_SIGNATURES.items():
             # Try byte-level matching (for 8-bit signatures)

@@ -13,10 +13,9 @@ No heavy dependencies beyond the storage backend.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -61,14 +60,14 @@ class FunctionSimilarityPlugin(Plugin):
                 duration=time.monotonic() - t0,
             )
 
-    def _analyze(self, ctx: PluginContext) -> Dict[str, Any]:
+    def _analyze(self, ctx: PluginContext) -> dict[str, Any]:
         """
         Look at functions collected by upstream plugins (angr, triton,
         blackfyre) in ``shared_data`` and search the storage for matching
         function hashes.
         """
         # Gather functions from shared_data
-        all_functions: List[Dict[str, Any]] = []
+        all_functions: list[dict[str, Any]] = []
         for source in ("angr", "triton", "blackfyre"):
             src_data = ctx.shared_data.get(source, {})
             if isinstance(src_data, dict):
@@ -84,7 +83,7 @@ class FunctionSimilarityPlugin(Plugin):
                 "summary": "No function data available from upstream plugins",
             }
 
-        matches: List[Dict[str, Any]] = []
+        matches: list[dict[str, Any]] = []
         functions_checked = 0
         symbols_recovered = 0
 

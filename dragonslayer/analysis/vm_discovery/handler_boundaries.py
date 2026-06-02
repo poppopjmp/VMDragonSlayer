@@ -27,17 +27,19 @@ Usage::
 from __future__ import annotations
 
 import logging
+import re as _re
 import statistics
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Sequence, Tuple
+from typing import Any
 
+from dragonslayer.analysis.symbolic_execution.executor import HandlerSymbolicSummary
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
-    TraceInstruction,
     HandlerMarker,
+    TraceInstruction,
 )
-from dragonslayer.analysis.symbolic_execution.executor import HandlerSymbolicSummary
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +69,10 @@ class HandlerSlice:
 
     start_index: int
     end_index: int  # exclusive
-    instructions: List[TraceInstruction] = field(default_factory=list)
+    instructions: list[TraceInstruction] = field(default_factory=list)
 
     @property
-    def address_range(self) -> Tuple[int, int]:
+    def address_range(self) -> tuple[int, int]:
         """``(first_address, last_address)`` of instructions in this slice."""
         if not self.instructions:
             return (0, 0)
@@ -102,9 +104,9 @@ class HandlerBoundary:
     instruction_count: int
     category: str = ""
     vip_delta: int = 0
-    handler_id: Optional[int] = None
+    handler_id: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the handler boundary to a JSON-compatible dict."""
         return {
             "vip_value": self.vip_value,
@@ -123,12 +125,12 @@ class SegmentationResult:
     """Output of :func:`segment_trace`."""
 
     vip_register: str
-    boundaries: List[HandlerBoundary] = field(default_factory=list)
+    boundaries: list[HandlerBoundary] = field(default_factory=list)
     dispatcher_visits: int = 0
     unique_handlers: int = 0
     bytecode_width_mode: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the segmentation result to a JSON-compatible dict."""
         return {
             "vip_register": self.vip_register,
@@ -155,9 +157,9 @@ def identify_vip_register(
     trace: ExecutionTrace,
     dispatcher_addresses: Sequence[int] = (),
     *,
-    candidates: Optional[Sequence[str]] = None,
-    symbolic_summaries: Optional[Sequence[HandlerSymbolicSummary]] = None,
-) -> Optional[VIPCandidate]:
+    candidates: Sequence[str] | None = None,
+    symbolic_summaries: Sequence[HandlerSymbolicSummary] | None = None,
+) -> VIPCandidate | None:
     """Heuristically identify which native register acts as the vIP.
 
     Algorithm overview:
@@ -188,7 +190,7 @@ def identify_vip_register(
         return None
 
     # Determine which registers to evaluate.
-    all_regs: Set[str] = set()
+    all_regs: set[str] = set()
     for ti in trace.instructions:
         if ti.registers:
             all_regs.update(ti.registers.keys())
@@ -207,13 +209,13 @@ def identify_vip_register(
     disp_set = set(dispatcher_addresses)
 
     # Pre-compute symbolic scores if summaries are provided.
-    sym_scores: Dict[str, float] = {}
+    sym_scores: dict[str, float] = {}
     if symbolic_summaries:
         sym_scores = score_vip_from_symbolic(
             symbolic_summaries, candidates=candidates,
         )
 
-    results: List[VIPCandidate] = []
+    results: list[VIPCandidate] = []
     for reg in sorted(gp_regs):
         cand = _score_register(
             trace.instructions, reg, disp_set,
@@ -237,15 +239,15 @@ def identify_vip_register(
 
 
 def _score_register(
-    instructions: List[TraceInstruction],
+    instructions: list[TraceInstruction],
     reg: str,
-    dispatcher_addrs: Set[int],
+    dispatcher_addrs: set[int],
     *,
     symbolic_bonus: float = 0.0,
-) -> Optional[VIPCandidate]:
+) -> VIPCandidate | None:
     """Score a single register as vIP candidate."""
 
-    values: List[Tuple[int, int]] = []  # (trace_index, value)
+    values: list[tuple[int, int]] = []  # (trace_index, value)
     for idx, ti in enumerate(instructions):
         if reg in (ti.registers or {}):
             values.append((idx, ti.registers[reg]))
@@ -282,10 +284,12 @@ def _score_register(
                 # Check if any instruction within ±3 steps is at a dispatcher addr.
                 for offset in range(-3, 4):
                     check = trace_idx + offset
-                    if 0 <= check < len(instructions):
-                        if instructions[check].address in dispatcher_addrs:
-                            near_disp += 1
-                            break
+                    if (
+                        0 <= check < len(instructions)
+                        and instructions[check].address in dispatcher_addrs
+                    ):
+                        near_disp += 1
+                        break
         disp_corr = near_disp / change_count
 
     # ---- prior weight ---------------------------------------------------
@@ -322,7 +326,7 @@ def _score_register(
     )
 
 
-def _safe_mode(values: List[int]) -> int:
+def _safe_mode(values: list[int]) -> int:
     """Return the statistical mode, or 0 on failure."""
     if not values:
         return 0
@@ -339,16 +343,14 @@ def _safe_mode(values: List[int]) -> int:
 
 # Pattern to extract ``in_{register}`` symbolic input names from
 # HandlerSymbolicSummary.final_registers expressions.
-import re as _re
-
 _IN_REG_RE = _re.compile(r"\bin_(\w+)\b")
 
 
 def score_vip_from_symbolic(
     summaries: Sequence[HandlerSymbolicSummary],
     *,
-    candidates: Optional[Sequence[str]] = None,
-) -> Dict[str, float]:
+    candidates: Sequence[str] | None = None,
+) -> dict[str, float]:
     """Score registers as vIP candidates using symbolic handler summaries.
 
     For each handler summary, the function inspects *final_registers* for
@@ -374,9 +376,9 @@ def score_vip_from_symbolic(
         return {}
 
     # Counters across all summaries.
-    self_advance_count: Dict[str, int] = defaultdict(int)
-    total_appearances: Dict[str, int] = defaultdict(int)
-    referenced_by_others: Dict[str, int] = defaultdict(int)
+    self_advance_count: dict[str, int] = defaultdict(int)
+    total_appearances: dict[str, int] = defaultdict(int)
+    referenced_by_others: dict[str, int] = defaultdict(int)
     handler_count = 0
 
     for summary in summaries:
@@ -385,7 +387,7 @@ def score_vip_from_symbolic(
         handler_count += 1
 
         # Collect all in_{reg} mentions per output register.
-        reg_inputs: Dict[str, Set[str]] = {}
+        reg_inputs: dict[str, set[str]] = {}
         for out_reg, expr_str in summary.final_registers.items():
             mentions = set(_IN_REG_RE.findall(expr_str))
             reg_inputs[out_reg] = mentions
@@ -415,7 +417,7 @@ def score_vip_from_symbolic(
     if candidates:
         all_regs &= {c.lower() for c in candidates}
 
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
     for reg in all_regs:
         # Self-advance ratio: how often does this register update itself?
         sa = self_advance_count.get(reg, 0) / handler_count
@@ -500,18 +502,18 @@ def segment_trace(
 
 
 def _segment_by_dispatcher(
-    instructions: List[TraceInstruction],
+    instructions: list[TraceInstruction],
     vip_reg: str,
-    disp_set: Set[int],
+    disp_set: set[int],
     min_insns: int,
-) -> List[HandlerBoundary]:
+) -> list[HandlerBoundary]:
     """Segment using dispatcher address knowledge."""
 
-    boundaries: List[HandlerBoundary] = []
+    boundaries: list[HandlerBoundary] = []
     in_dispatcher = False
-    current_vip: Optional[int] = None
-    handler_start: Optional[int] = None
-    prev_vip: Optional[int] = None
+    current_vip: int | None = None
+    handler_start: int | None = None
+    prev_vip: int | None = None
 
     for idx, ti in enumerate(instructions):
         at_disp = ti.address in disp_set
@@ -563,18 +565,18 @@ def _segment_by_dispatcher(
 
 
 def _segment_by_vip_changes(
-    instructions: List[TraceInstruction],
+    instructions: list[TraceInstruction],
     vip_reg: str,
     min_insns: int,
-) -> List[HandlerBoundary]:
+) -> list[HandlerBoundary]:
     """Fallback segmentation when dispatcher addresses are unknown.
 
     Cuts the trace at every point where the vIP register changes.  Each
     segment between two consecutive vIP changes is treated as a handler.
     """
 
-    boundaries: List[HandlerBoundary] = []
-    prev_vip: Optional[int] = None
+    boundaries: list[HandlerBoundary] = []
+    prev_vip: int | None = None
     seg_start: int = 0
 
     for idx, ti in enumerate(instructions):
@@ -615,8 +617,8 @@ def _segment_by_vip_changes(
 
 
 def _apply_handler_markers(
-    boundaries: List[HandlerBoundary],
-    markers: List[HandlerMarker],
+    boundaries: list[HandlerBoundary],
+    markers: list[HandlerMarker],
 ) -> None:
     """Enrich boundaries with handler markers (id/category) when the
     marker address falls within the boundary address range."""
@@ -624,7 +626,7 @@ def _apply_handler_markers(
     if not markers:
         return
 
-    marker_by_addr: Dict[int, HandlerMarker] = {
+    marker_by_addr: dict[int, HandlerMarker] = {
         m.address: m for m in markers
     }
 

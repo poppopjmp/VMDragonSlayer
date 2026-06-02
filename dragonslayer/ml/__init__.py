@@ -7,14 +7,14 @@ optional dependencies (scikit-learn, PyTorch, etc.) are missing.
 
 try:
     from .pipeline import (
-        FeatureExtractor,
-        FeatureVector,
-        extract_extended_features,
-        extract_bigram_features,
-        extract_register_effects,
-        extract_operand_pattern_features,
         EXTENDED_FEATURE_NAMES,
         VMPROTECT_BIGRAMS,
+        FeatureExtractor,
+        FeatureVector,
+        extract_bigram_features,
+        extract_extended_features,
+        extract_operand_pattern_features,
+        extract_register_effects,
     )
 except (ImportError, AttributeError):
     FeatureExtractor = None  # type: ignore[assignment,misc]
@@ -28,18 +28,18 @@ except (ImportError, AttributeError):
 
 try:
     from .trainer import (
+        PROTECTOR_CV,
+        PROTECTOR_THEMIDA,
+        PROTECTOR_VMPROTECT,
         ModelTrainer,
         TrainingResult,
-        prepare_training_data,
-        prepare_extended_training_data,
-        generate_synthetic_handlers,
-        generate_multi_protector_data,
         feature_importance,
-        train_full_pipeline,
+        generate_multi_protector_data,
+        generate_synthetic_handlers,
+        prepare_extended_training_data,
+        prepare_training_data,
         train_and_save_model,
-        PROTECTOR_VMPROTECT,
-        PROTECTOR_THEMIDA,
-        PROTECTOR_CV,
+        train_full_pipeline,
     )
 except (ImportError, AttributeError):
     ModelTrainer = None  # type: ignore[assignment,misc]
@@ -56,7 +56,12 @@ except (ImportError, AttributeError):
     PROTECTOR_CV = None  # type: ignore[assignment,misc]
 
 try:
-    from .model import BaseModel, VMHandlerModel, PredictionResult, SymbolicClassifierModel
+    from .model import (
+        BaseModel,
+        PredictionResult,
+        SymbolicClassifierModel,
+        VMHandlerModel,
+    )
 except (ImportError, AttributeError):
     BaseModel = None  # type: ignore[assignment,misc]
     VMHandlerModel = None  # type: ignore[assignment,misc]
@@ -78,9 +83,9 @@ except (ImportError, AttributeError):
 
 try:
     from .evaluate import (
+        ClassMetrics,
         EvaluationReport,
         GroundTruthEntry,
-        ClassMetrics,
         evaluate_model,
         load_ground_truth,
     )
@@ -92,24 +97,24 @@ except (ImportError, AttributeError):
     load_ground_truth = None  # type: ignore[assignment,misc]
 
 try:
-    from .ensemble import EnsembleClassifier, WeightedEnsemble, StackedEnsemble
+    from .ensemble import EnsembleClassifier, StackedEnsemble, WeightedEnsemble
 except (ImportError, AttributeError):
     EnsembleClassifier = None  # type: ignore[assignment,misc]
     WeightedEnsemble = None  # type: ignore[assignment,misc]
     StackedEnsemble = None  # type: ignore[assignment,misc]
 
 try:
-    from .classifier import VMClassifier, FeatureExplainer
+    from .classifier import FeatureExplainer, VMClassifier
 except (ImportError, AttributeError):
     VMClassifier = None  # type: ignore[assignment,misc]
     FeatureExplainer = None  # type: ignore[assignment,misc]
 
 try:
     from .handler_classifier import (
-        TrainedHandlerModel,
-        classify_handlers,
-        build_handler_classifier,
         HANDLER_CATEGORIES,
+        TrainedHandlerModel,
+        build_handler_classifier,
+        classify_handlers,
     )
 except (ImportError, AttributeError):
     TrainedHandlerModel = None  # type: ignore[assignment,misc]
@@ -119,14 +124,14 @@ except (ImportError, AttributeError):
 
 try:
     from .active_learning import (
+        FeedbackEntry,
+        FeedbackStore,
         UncertainSample,
         UncertaintyStrategy,
-        FeedbackStore,
-        FeedbackEntry,
-        select_uncertain_samples,
         compute_entropy,
         compute_margin,
         export_training_set,
+        select_uncertain_samples,
     )
 except (ImportError, AttributeError):
     UncertainSample = None  # type: ignore[assignment,misc]

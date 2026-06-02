@@ -7,36 +7,28 @@ FastAPI-based REST API server for binary analysis operations.
 import asyncio
 import base64
 import contextvars
+import hmac as _hmac
 import json as _json
 import logging
 import os as _os
 import time
 import uuid
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from dataclasses import dataclass, field
-from enum import Enum
-from pathlib import Path
-from typing import AsyncIterator, Dict, Any, Optional, List
 from collections import defaultdict
-import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
 
-#: Module-level version constant (single source of truth).
-_API_VERSION: str = "2025.10"
-
-#: Async-safe request-ID context variable.
-_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "request_id", default="-",
-)
-
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request, status
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
+from starlette.middleware.gzip import GZipMiddleware
 
-from ..core.orchestrator import Orchestrator
 from ..core.api import VMDragonSlayerAPI
+from ..core.config import get_config
 from ..core.exceptions import (
     AnalysisError,
     AnalysisTimeoutError,
@@ -45,8 +37,14 @@ from ..core.exceptions import (
     ResourceLimitError,
     VMDragonSlayerError,
 )
-from ..core.config import get_config
 
+#: Module-level version constant (single source of truth).
+_API_VERSION: str = "2025.10"
+
+#: Async-safe request-ID context variable.
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-",
+)
 
 # ---------------------------------------------------------------------------
 # B68: Structured JSON log formatter for production log aggregation
@@ -66,7 +64,7 @@ class _JSONFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -122,9 +120,9 @@ class AnalysisRequest(BaseModel):
     """Request model for binary analysis."""
     sample_data: str = Field(..., description="Base64-encoded binary data")
     analysis_type: str = Field(default='hybrid', description="Type of analysis to perform")
-    options: Dict[str, Any] = Field(default_factory=dict, description="Additional analysis options")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
-    
+    options: dict[str, Any] = Field(default_factory=dict, description="Additional analysis options")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+
     @field_validator('sample_data')
     @classmethod
     def validate_base64(cls, v) -> str:
@@ -132,7 +130,7 @@ class AnalysisRequest(BaseModel):
         try:
             base64.b64decode(v)
         except (ValueError, TypeError):
-            raise ValueError("Invalid base64 encoding")
+            raise ValueError("Invalid base64 encoding") from None
         return v
 
 
@@ -141,11 +139,11 @@ class AnalysisResponse(BaseModel):
     success: bool
     analysis_id: str
     timestamp: str
-    file_info: Dict[str, Any]
+    file_info: dict[str, Any]
     analysis_type: str
-    results: Dict[str, Any]
+    results: dict[str, Any]
     execution_time: float
-    errors: List[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):
@@ -153,7 +151,7 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: str
     version: str
-    components: Dict[str, str] = Field(
+    components: dict[str, str] = Field(
         default_factory=dict,
         description="Per-component health status (e.g. api, pattern_db).",
     )
@@ -167,7 +165,7 @@ class StatusResponse(BaseModel):
     total_requests: int
     active_requests: int
     analysis_count: int
-    supported_types: List[str]
+    supported_types: list[str]
 
 
 # Valid pipeline stage names for request validation.
@@ -189,7 +187,7 @@ class PipelineRequest(BaseModel):
     """
 
     sample_data: str = Field(..., description="Base64-encoded binary data")
-    stages: Optional[List[str]] = Field(
+    stages: list[str] | None = Field(
         default=None,
         description=(
             "Ordered list of pipeline stage keys to execute.  "
@@ -199,7 +197,7 @@ class PipelineRequest(BaseModel):
     llm_enabled: bool = Field(default=True, description="Enable LLM-assisted stages")
     max_workers: int = Field(default=4, ge=1, le=32, description="Intra-stage thread count")
     timeout: float = Field(default=600, gt=0, description="Per-stage timeout (seconds)")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
     @field_validator("sample_data")
     @classmethod
@@ -207,12 +205,12 @@ class PipelineRequest(BaseModel):
         try:
             base64.b64decode(v)
         except (ValueError, TypeError):
-            raise ValueError("Invalid base64 encoding")
+            raise ValueError("Invalid base64 encoding") from None
         return v
 
     @field_validator("stages")
     @classmethod
-    def validate_stages(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_stages(cls, v: list[str] | None) -> list[str] | None:
         if v is not None:
             invalid = set(v) - _VALID_PIPELINE_STAGES
             if invalid:
@@ -394,8 +392,6 @@ async def timeout_middleware(request: Request, call_next) -> Response:
 # --- API-key authentication middleware ---------------------------------------
 
 # Set VMDS_API_KEY env-var (or config) to enable; empty/unset = no auth.
-import hmac as _hmac
-
 API_KEY: str = _os.environ.get("VMDS_API_KEY", "")
 
 # Paths that never require authentication
@@ -544,8 +540,8 @@ class ServerState:
     total_requests: int = 0
     active_requests: int = 0
     analysis_count: int = 0
-    api: Optional[Any] = None
-    rate_limiter: Dict[str, List[float]] = field(default_factory=lambda: defaultdict(list))
+    api: Any | None = None
+    rate_limiter: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
 
 
 server_state = ServerState()
@@ -715,7 +711,7 @@ async def generic_vmds_error_handler(request: Request, exc: VMDragonSlayerError)
 # Routes
 
 @app.get("/", tags=["Root"])
-async def root() -> Dict[str, Any]:
+async def root() -> dict[str, Any]:
     """Root endpoint with API information."""
     return {
         'name': 'VMDragonSlayer API',
@@ -748,7 +744,7 @@ async def health_check() -> HealthResponse:
     are functional).  The top-level ``status`` is ``"healthy"`` only when
     every probed component is ``"ok"``.
     """
-    components: Dict[str, str] = {}
+    components: dict[str, str] = {}
 
     # Probe 1 — VMDragonSlayerAPI instance
     api = server_state.api
@@ -780,12 +776,12 @@ async def health_check() -> HealthResponse:
 async def get_status() -> StatusResponse:
     """
     Get detailed server status.
-    
+
     Returns server metrics and statistics.
     """
     api = server_state.api
     uptime = time.time() - server_state.start_time
-    
+
     return StatusResponse(
         status='operational',
         version=_API_VERSION,
@@ -798,14 +794,14 @@ async def get_status() -> StatusResponse:
 
 
 @app.get("/metrics", tags=["Health"])
-async def get_metrics() -> Dict[str, Any]:
+async def get_metrics() -> dict[str, Any]:
     """
     Get server metrics in Prometheus format.
-    
+
     Returns performance and usage metrics.
     """
     uptime = time.time() - server_state.start_time
-    
+
     return {
         'vmds_uptime_seconds': uptime,
         'vmds_total_requests': server_state.total_requests,
@@ -816,14 +812,14 @@ async def get_metrics() -> Dict[str, Any]:
 
 
 @app.get("/analysis-types", tags=["Analysis"])
-async def get_analysis_types() -> Dict[str, Any]:
+async def get_analysis_types() -> dict[str, Any]:
     """
     Get list of supported analysis types.
-    
+
     Returns all available analysis types and their descriptions.
     """
     api = server_state.api
-    
+
     types_info = {
         'vm_discovery': 'VM dispatcher and handler detection',
         'vm_detection': 'Alias for vm_discovery',
@@ -841,7 +837,7 @@ async def get_analysis_types() -> Dict[str, Any]:
         'security_extensions': 'Security-focused analysis',
         'realtime': 'Real-time analysis mode'
     }
-    
+
     return {
         'supported_types': api.get_supported_analysis_types() if api else [],
         'descriptions': types_info
@@ -855,12 +851,12 @@ async def analyze_binary(
 ) -> AnalysisResponse:
     """
     Analyze binary data.
-    
+
     Accepts base64-encoded binary data and performs the requested analysis.
-    
+
     Args:
         analysis_request: Analysis request with binary data and options
-        
+
     Returns:
         Analysis results with success status and findings
     """
@@ -904,7 +900,7 @@ async def analyze_binary(
 
         return AnalysisResponse(**result)
 
-    except InvalidDataError as exc:
+    except InvalidDataError:
         # Let the global exception_handler handle it by re-raising
         raise
     except HTTPException:
@@ -917,7 +913,7 @@ async def analyze_binary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Analysis failed due to an internal error."
-        )
+        ) from exc
 
 
 @app.post("/upload-analyze", tags=["Analysis"])
@@ -925,16 +921,16 @@ async def upload_and_analyze(
     request: Request,
     file: UploadFile = File(...),
     analysis_type: str = 'hybrid'
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Upload and analyze a binary file.
-    
+
     Accepts multipart form data with binary file upload.
-    
+
     Args:
         file: Binary file to analyze
         analysis_type: Type of analysis to perform
-        
+
     Returns:
         Analysis results
     """
@@ -988,7 +984,7 @@ async def upload_and_analyze(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Analysis failed due to an internal error."
-        )
+        ) from exc
     finally:
         await file.close()
 
@@ -1001,7 +997,7 @@ async def upload_and_analyze(
 async def run_pipeline(
     request: Request,
     pipeline_request: PipelineRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the configurable analysis pipeline.
 
     Unlike ``/analyze`` (which uses the orchestrator's fixed engine
@@ -1062,7 +1058,7 @@ async def run_pipeline(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Pipeline analysis failed due to an internal error.",
-        )
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1083,7 +1079,7 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(
     request: Request,
     body: FeedbackRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Record an analyst correction for a low-confidence prediction."""
     if not await check_rate_limit(request):
         raise HTTPException(
@@ -1108,19 +1104,19 @@ async def submit_feedback(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Feedback processing failed.",
-        )
+        ) from exc
 
 
 class UncertainRequest(BaseModel):
     """Query parameters for ``POST /uncertain``."""
-    predictions: List[Dict[str, Any]]
+    predictions: list[dict[str, Any]]
     strategy: str = "entropy"
     k: int = 10
     confidence_threshold: float = 0.8
 
 
 @app.post("/uncertain", tags=["Active Learning"])
-async def get_uncertain_samples(body: UncertainRequest) -> Dict[str, Any]:
+async def get_uncertain_samples(body: UncertainRequest) -> dict[str, Any]:
     """Select the most uncertain predictions from a result set."""
     try:
         from dragonslayer.ml.active_learning import select_uncertain_samples
@@ -1139,7 +1135,7 @@ async def get_uncertain_samples(body: UncertainRequest) -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Uncertain sample selection failed.",
-        )
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1148,13 +1144,14 @@ async def get_uncertain_samples(body: UncertainRequest) -> Dict[str, Any]:
 
 
 @app.get("/plugins", tags=["Plugins"])
-async def list_registered_plugins() -> Dict[str, Any]:
+async def list_registered_plugins() -> dict[str, Any]:
     """Return all registered plugins with metadata."""
     try:
         from dragonslayer.plugins import (
-            list_plugins, get_plugin, Stage, validate_plugin_dependencies,
+            get_plugin,
+            list_plugins,
         )
-        registry: List[Dict[str, Any]] = []
+        registry: list[dict[str, Any]] = []
         for name in list_plugins(available_only=False):
             p = get_plugin(name)
             if p is None:
@@ -1176,11 +1173,11 @@ async def list_registered_plugins() -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list plugins.",
-        )
+        ) from exc
 
 
 @app.get("/plugins/health", tags=["Plugins"])
-async def check_plugin_health() -> Dict[str, Any]:
+async def check_plugin_health() -> dict[str, Any]:
     """Validate plugin dependency chains and report broken/missing deps."""
     try:
         from dragonslayer.plugins import validate_plugin_dependencies
@@ -1194,19 +1191,19 @@ async def check_plugin_health() -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Plugin health check failed.",
-        )
+        ) from exc
 
 
 # Entry point for direct execution
 if __name__ == "__main__":
     import uvicorn
-    
+
     config = get_config()
     host = config.get('api.host', 'localhost')
     port = config.get('api.port', 8000)
-    
+
     logger.info("Starting server on %s:%s", host, port)
-    
+
     uvicorn.run(
         "dragonslayer.api.server:app",
         host=host,

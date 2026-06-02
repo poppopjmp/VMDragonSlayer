@@ -50,9 +50,9 @@ from __future__ import annotations
 
 import logging
 import re
-import struct
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class RecoveredKey:
 
     key_value: int = 0
     key_register: str = ""
-    vip_initial: Optional[int] = None
+    vip_initial: int | None = None
     vip_register: str = ""
     confidence: float = 0.0
     source: str = "unknown"
@@ -100,7 +100,7 @@ class RecoveredKey:
 class _RegValue:
     """Lightweight abstract value for a register."""
 
-    concrete: Optional[int] = None
+    concrete: int | None = None
     symbolic: str = ""  # e.g. "rip+0x1234", "[rsp]"
 
     @property
@@ -112,7 +112,7 @@ class _AbstractRegFile:
     """Track concrete register values through a short instruction sequence."""
 
     def __init__(self, *, rip_base: int = 0, bit_width: int = 64) -> None:
-        self._regs: Dict[str, _RegValue] = {}
+        self._regs: dict[str, _RegValue] = {}
         self._rip = rip_base
         self._bit_width = bit_width
         self._mask = (1 << bit_width) - 1
@@ -126,7 +126,7 @@ class _AbstractRegFile:
     def set_concrete(self, reg: str, val: int) -> None:
         self._regs[_canon(reg)] = _RegValue(concrete=val & self._mask)
 
-    def get_concrete(self, reg: str) -> Optional[int]:
+    def get_concrete(self, reg: str) -> int | None:
         v = self.get(reg)
         return v.concrete if v.is_concrete else None
 
@@ -138,7 +138,7 @@ class _AbstractRegFile:
     def rip(self, value: int) -> None:
         self._rip = value
 
-    def snapshot(self) -> Dict[str, Optional[int]]:
+    def snapshot(self) -> dict[str, int | None]:
         """Return all concrete register values."""
         return {r: v.concrete for r, v in self._regs.items() if v.is_concrete}
 
@@ -215,7 +215,7 @@ def _interpret_instruction(
     insn_address: int,
     insn_size: int,
     *,
-    binary_data: Optional[bytes] = None,
+    binary_data: bytes | None = None,
     binary_base: int = 0,
 ) -> None:
     """Update register file for one instruction."""
@@ -315,10 +315,10 @@ def recover_key_from_entry(
     instructions: Sequence[Any],
     dispatcher_match: Any,
     *,
-    binary_data: Optional[bytes] = None,
+    binary_data: bytes | None = None,
     binary_base: int = 0,
     bit_width: int = 64,
-) -> Optional[RecoveredKey]:
+) -> RecoveredKey | None:
     """Recover the initial rolling key by abstract-interpreting the VM entry stub.
 
     Parameters
@@ -411,11 +411,11 @@ def recover_key_from_bytes(
     dispatcher_address: int,
     dispatcher_match: Any,
     *,
-    binary_data: Optional[bytes] = None,
+    binary_data: bytes | None = None,
     binary_base: int = 0,
     bit_width: int = 64,
     max_instructions: int = 50,
-) -> Optional[RecoveredKey]:
+) -> RecoveredKey | None:
     """Recover key by lifting raw bytes from entry to dispatcher.
 
     This is a convenience wrapper that lifts the code between

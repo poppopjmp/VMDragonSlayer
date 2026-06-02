@@ -24,11 +24,10 @@ Extended features (see :func:`extract_extended_features`):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List
-
 import logging
 import re as _re
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +36,9 @@ logger = logging.getLogger(__name__)
 class FeatureVector:
     """Numeric feature vector with metadata."""
 
-    values: List[float] = field(default_factory=list)
-    feature_names: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    values: list[float] = field(default_factory=list)
+    feature_names: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def dimension(self) -> int:
@@ -53,10 +52,10 @@ class FeatureExtractor:
     keys to extraction callables.
     """
 
-    def __init__(self, feature_spec: Dict[str, Any] | None = None) -> None:
+    def __init__(self, feature_spec: dict[str, Any] | None = None) -> None:
         self._spec = feature_spec or {}
 
-    def extract(self, analysis_data: Dict[str, Any]) -> FeatureVector:
+    def extract(self, analysis_data: dict[str, Any]) -> FeatureVector:
         """Build a feature vector from *analysis_data*.
 
         Raises :exc:`NotImplementedError` until a concrete feature spec
@@ -67,8 +66,8 @@ class FeatureExtractor:
                 "FeatureExtractor requires a feature_spec mapping to "
                 "convert analysis data into numeric features"
             )
-        values: List[float] = []
-        names: List[str] = []
+        values: list[float] = []
+        names: list[str] = []
         for key, extractor_fn in self._spec.items():
             val = extractor_fn(analysis_data)
             if isinstance(val, (list, tuple)):
@@ -95,7 +94,7 @@ _BRANCH_MNEMS = frozenset({"jmp", "je", "jne", "jz", "jnz", "jg", "jge", "jl", "
 _NOP_MNEMS = frozenset({"nop", "fnop", "pause", "ud2"})
 _CMP_MNEMS = frozenset({"cmp", "test"})
 
-HANDLER_FEATURE_NAMES: List[str] = [
+HANDLER_FEATURE_NAMES: list[str] = [
     "instruction_count",
     "unique_mnemonic_count",
     "arith_ratio",
@@ -116,7 +115,7 @@ HANDLER_FEATURE_NAMES: List[str] = [
 ]
 
 
-def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
+def extract_handler_features(handler: dict[str, Any]) -> FeatureVector:
     """Extract a :class:`FeatureVector` from a handler dict.
 
     The input should at minimum contain ``instructions`` (list of
@@ -124,7 +123,7 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
     Additional keys: ``reads``, ``writes``, ``block_count``,
     ``operand_width``.
     """
-    mnemonics: List[str] = handler.get("mnemonics", [])
+    mnemonics: list[str] = handler.get("mnemonics", [])
     if not mnemonics:
         for insn in handler.get("instructions", []):
             m = insn.get("mnemonic", "")
@@ -166,10 +165,13 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
                     has_indirect = 1.0
                     break
     # Fallback: if no instruction dicts, check mnemonic list for jmp existence
-    if has_indirect == 0.0 and not instructions:
-        if any(m in ("jmp", "call") for m in mnemonics):
-            # Can't distinguish direct vs indirect without operand info
-            has_indirect = 0.5  # uncertain
+    # Can't distinguish direct vs indirect without operand info
+    if (
+        has_indirect == 0.0
+        and not instructions
+        and any(m in ("jmp", "call") for m in mnemonics)
+    ):
+        has_indirect = 0.5  # uncertain
 
     operand_width = float(handler.get("operand_width", 8))
     block_count = float(handler.get("block_count", 1))
@@ -204,13 +206,12 @@ def extract_handler_features(handler: Dict[str, Any]) -> FeatureVector:
 # Extended features — n-grams, register effects, operand patterns
 # ═══════════════════════════════════════════════════════════════════════════
 
-from collections import Counter as _Counter
 
 # -- Mnemonic bigrams -------------------------------------------------------
 # The top-25 mnemonic bigrams that empirically distinguish VMProtect handler
 # categories.  We compute a fixed-length vector of bigram frequencies.
 
-VMPROTECT_BIGRAMS: List[tuple[str, str]] = [
+VMPROTECT_BIGRAMS: list[tuple[str, str]] = [
     # Arithmetic
     ("mov", "add"),
     ("add", "mov"),
@@ -243,18 +244,18 @@ VMPROTECT_BIGRAMS: List[tuple[str, str]] = [
     ("cmp", "jmp"),
 ]
 
-_BIGRAM_INDEX: Dict[tuple[str, str], int] = {
+_BIGRAM_INDEX: dict[tuple[str, str], int] = {
     bg: i for i, bg in enumerate(VMPROTECT_BIGRAMS)
 }
 
 # General-purpose register names (x86-64) for register-effect features.
-_GP_REGS_64: List[str] = [
+_GP_REGS_64: list[str] = [
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 ]
 
 
-def extract_bigram_features(mnemonics: List[str]) -> List[float]:
+def extract_bigram_features(mnemonics: list[str]) -> list[float]:
     """Compute normalised bigram frequency vector for *mnemonics*.
 
     Returns a float list of length ``len(VMPROTECT_BIGRAMS)`` where each
@@ -273,7 +274,7 @@ def extract_bigram_features(mnemonics: List[str]) -> List[float]:
 
 # -- B56: Mnemonic trigrams --------------------------------------------------
 
-VMPROTECT_TRIGRAMS: List[tuple[str, str, str]] = [
+VMPROTECT_TRIGRAMS: list[tuple[str, str, str]] = [
     # Arithmetic handler patterns
     ("mov", "add", "mov"),
     ("mov", "sub", "mov"),
@@ -302,12 +303,12 @@ VMPROTECT_TRIGRAMS: List[tuple[str, str, str]] = [
     ("xor", "add", "xor"),
 ]
 
-_TRIGRAM_INDEX: Dict[tuple[str, str, str], int] = {
+_TRIGRAM_INDEX: dict[tuple[str, str, str], int] = {
     tg: i for i, tg in enumerate(VMPROTECT_TRIGRAMS)
 }
 
 
-def extract_trigram_features(mnemonics: List[str]) -> List[float]:
+def extract_trigram_features(mnemonics: list[str]) -> list[float]:
     """Compute normalised trigram frequency vector for *mnemonics*.
 
     Returns a float list of length ``len(VMPROTECT_TRIGRAMS)``.
@@ -324,7 +325,7 @@ def extract_trigram_features(mnemonics: List[str]) -> List[float]:
 
 # -- B56: Opcode frequency histogram ----------------------------------------
 
-OPCODE_VOCAB: List[str] = [
+OPCODE_VOCAB: list[str] = [
     "mov", "push", "pop", "add", "sub", "xor", "and", "or",
     "shl", "shr", "sar", "not", "neg", "imul", "lea", "test",
     "cmp", "jmp", "jne", "je", "jz", "jnz", "call", "ret",
@@ -332,20 +333,20 @@ OPCODE_VOCAB: List[str] = [
 ]
 
 
-def extract_opcode_histogram(mnemonics: List[str]) -> List[float]:
+def extract_opcode_histogram(mnemonics: list[str]) -> list[float]:
     """Compute normalised per-opcode frequency histogram.
 
     Returns a float list of length ``len(OPCODE_VOCAB)`` — each element
     is the fraction of instructions that use that opcode.
     """
     total = max(len(mnemonics), 1)
-    freq: Dict[str, int] = {}
+    freq: dict[str, int] = {}
     for m in mnemonics:
         freq[m] = freq.get(m, 0) + 1
     return [freq.get(op, 0) / total for op in OPCODE_VOCAB]
 
 
-def extract_register_effects(handler: Dict[str, Any]) -> List[float]:
+def extract_register_effects(handler: dict[str, Any]) -> list[float]:
     """Extract per-register read/write indicators (32 floats).
 
     For each of the 16 GP registers, produces two values:
@@ -386,14 +387,14 @@ def extract_register_effects(handler: Dict[str, Any]) -> List[float]:
                         reg_writes.add(r)
 
     # Build the 32-element vector: [rax_r, rax_w, rbx_r, rbx_w, ...]
-    result: List[float] = []
+    result: list[float] = []
     for reg in _GP_REGS_64:
         result.append(1.0 if reg in reg_reads else 0.0)
         result.append(1.0 if reg in reg_writes else 0.0)
     return result
 
 
-def extract_operand_pattern_features(handler: Dict[str, Any]) -> List[float]:
+def extract_operand_pattern_features(handler: dict[str, Any]) -> list[float]:
     """Extract operand-pattern features (6 floats).
 
     Returns:
@@ -448,24 +449,24 @@ def extract_operand_pattern_features(handler: Dict[str, Any]) -> List[float]:
 
 # -- Extended feature names --------------------------------------------------
 
-BIGRAM_FEATURE_NAMES: List[str] = [
+BIGRAM_FEATURE_NAMES: list[str] = [
     f"bg_{a}_{b}" for a, b in VMPROTECT_BIGRAMS
 ]
-REGISTER_FEATURE_NAMES: List[str] = []
+REGISTER_FEATURE_NAMES: list[str] = []
 for _r in _GP_REGS_64:
     REGISTER_FEATURE_NAMES.append(f"reg_read_{_r}")
     REGISTER_FEATURE_NAMES.append(f"reg_write_{_r}")
 
-OPERAND_PATTERN_NAMES: List[str] = [
+OPERAND_PATTERN_NAMES: list[str] = [
     "imm_ratio", "mem_deref_ratio", "reg_only_ratio",
     "avg_operand_count", "has_scale_index", "has_rip_relative",
 ]
 
 # B56: Trigram and opcode histogram feature names
-TRIGRAM_FEATURE_NAMES: List[str] = [
+TRIGRAM_FEATURE_NAMES: list[str] = [
     f"tg_{a}_{b}_{c}" for a, b, c in VMPROTECT_TRIGRAMS
 ]
-OPCODE_HIST_NAMES: List[str] = [
+OPCODE_HIST_NAMES: list[str] = [
     f"freq_{op}" for op in OPCODE_VOCAB
 ]
 
@@ -474,7 +475,7 @@ OPCODE_HIST_NAMES: List[str] = [
 # CFG-derived features
 # ═══════════════════════════════════════════════════════════════════════════
 
-CFG_FEATURE_NAMES: List[str] = [
+CFG_FEATURE_NAMES: list[str] = [
     "cfg_edge_count",
     "cfg_edge_density",       # edge_count / block_count
     "cfg_loop_count",
@@ -485,7 +486,7 @@ CFG_FEATURE_NAMES: List[str] = [
 ]
 
 
-def extract_cfg_features(handler: Dict[str, Any]) -> List[float]:
+def extract_cfg_features(handler: dict[str, Any]) -> list[float]:
     """Extract CFG-derived features from handler data.
 
     The handler dict may contain ``cfg`` (a dict with ``edge_count``,
@@ -530,7 +531,7 @@ def extract_cfg_features(handler: Dict[str, Any]) -> List[float]:
 # Taint-derived features
 # ═══════════════════════════════════════════════════════════════════════════
 
-TAINT_FEATURE_NAMES: List[str] = [
+TAINT_FEATURE_NAMES: list[str] = [
     "taint_def_count",
     "taint_use_count",
     "taint_kill_count",
@@ -541,7 +542,7 @@ TAINT_FEATURE_NAMES: List[str] = [
 ]
 
 
-def extract_taint_features(handler: Dict[str, Any]) -> List[float]:
+def extract_taint_features(handler: dict[str, Any]) -> list[float]:
     """Extract taint-analysis features from handler data.
 
     The handler dict may contain ``taint`` (a dict from
@@ -577,7 +578,7 @@ def extract_taint_features(handler: Dict[str, Any]) -> List[float]:
 # Combined extended feature names (all groups)
 # ═══════════════════════════════════════════════════════════════════════════
 
-EXTENDED_FEATURE_NAMES: List[str] = (
+EXTENDED_FEATURE_NAMES: list[str] = (
     list(HANDLER_FEATURE_NAMES)
     + BIGRAM_FEATURE_NAMES
     + REGISTER_FEATURE_NAMES
@@ -589,7 +590,7 @@ EXTENDED_FEATURE_NAMES: List[str] = (
 )
 
 
-def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
+def extract_extended_features(handler: dict[str, Any]) -> FeatureVector:
     """Extract a rich feature vector for ML training.
 
     Combines the base 17 handler features with mnemonic bigrams (25),
@@ -600,7 +601,7 @@ def extract_extended_features(handler: Dict[str, Any]) -> FeatureVector:
     base = extract_handler_features(handler)
 
     # Recover mnemonics for n-gram extraction
-    mnemonics: List[str] = handler.get("mnemonics", [])
+    mnemonics: list[str] = handler.get("mnemonics", [])
     if not mnemonics:
         for insn in handler.get("instructions", []):
             m = insn.get("mnemonic", "")
