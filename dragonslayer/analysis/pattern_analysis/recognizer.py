@@ -32,7 +32,7 @@ class Match:
     end_offset: int
     confidence: float
     matched_bytes: str
-    context: dict[str, Any] = None
+    context: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.context is None:
@@ -778,6 +778,7 @@ class SequenceRecognizer:
             # The match offsets are byte-level from the combined hex string;
             # store the window index separately so callers know the context.
             for match in matches:
+                assert match.context is not None  # set in __post_init__
                 match.context['window_start'] = i
                 match.context['window_size'] = window_size
 
@@ -808,7 +809,7 @@ class SequenceRecognizer:
         matches.sort(key=lambda m: m.confidence, reverse=True)
 
         unique = []
-        used_ranges = []
+        used_ranges: list[tuple[int, int]] = []
 
         for match in matches:
             match_range = (match.start_offset, match.end_offset)

@@ -36,7 +36,7 @@ import logging
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ class ClusteringResult:
 def _extract_summary_fields(summary: Any) -> dict[str, Any] | None:
     """Accept both dataclass and dict forms of HandlerSymbolicSummary."""
     if hasattr(summary, "to_dict"):
-        return summary.to_dict()
+        return cast("dict[str, Any] | None", summary.to_dict())
     if isinstance(summary, dict):
         return summary
     return None
@@ -335,7 +335,7 @@ def normalize_symbolic_effect(
             rn = m.group(1)
             if rn in slot_map:
                 return f"slot_{slot_map[rn]}"
-            return m.group(0)
+            return cast("str", m.group(0))
         return _INIT_RE.sub(_sub, expr)
 
     canonical_parts: list[str] = []
@@ -594,10 +594,10 @@ def cluster_handlers_by_semantics(
     cluster_id = 0
 
     for sig, addrs in sorted(merged_sig_groups.items()):
-        ne = sig_effects.get(sig)
-        op = ne.operation if ne else _OP_UNKNOWN
-        width = ne.operand_width if ne else 0
-        conf = ne.confidence if ne else 0.0
+        eff = sig_effects.get(sig)
+        op = eff.operation if eff else _OP_UNKNOWN
+        width = eff.operand_width if eff else 0
+        conf = eff.confidence if eff else 0.0
 
         bindings: dict[int, dict[int, str]] = {}
         for addr in addrs:
@@ -642,7 +642,7 @@ def cluster_handlers_by_semantics(
             unclustered.append(addr)
 
     # Operation counts
-    op_counts: dict[str, int] = Counter()
+    op_counts: Counter[str] = Counter()
     for c in clusters:
         op_counts[c.operation] += len(c.members)
 

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _HAS_BLACKFYRE = False
 try:
     from blackfyre.datatypes.contexts.binarycontext import (
-        BinaryContext,  # type: ignore[import-untyped]
+        BinaryContext,
     )
 
     _HAS_BLACKFYRE = True

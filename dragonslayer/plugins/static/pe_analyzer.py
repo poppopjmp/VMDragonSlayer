@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 _HAS_PEFILE = False
 try:
-    import pefile  # type: ignore[import-untyped]
+    import pefile
     _HAS_PEFILE = True
 except ImportError:
     pass

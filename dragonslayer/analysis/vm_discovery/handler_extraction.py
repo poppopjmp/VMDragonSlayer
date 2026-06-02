@@ -32,7 +32,7 @@ import logging
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -528,7 +528,7 @@ def _infer_category(mnemonics: Sequence[str]) -> str:
     if counts.get("branch", 0) >= 1 and total <= 3:
         return "vm_exit" if "ret" in mnemonics else "vm_branch"
 
-    return top_cat
+    return str(top_cat)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -583,8 +583,6 @@ def _compute_register_deltas(
             continue
         after = regs_exit.get(reg)
         if after is None:
-            continue
-        if not isinstance(before, int) or not isinstance(after, int):
             continue
         if before != after:
             deltas.append(RegisterDelta(
@@ -646,13 +644,13 @@ def _classify_memory_access(
 
 def _get_insn_address(insn: Any) -> int:
     if isinstance(insn, dict):
-        return insn.get("address", 0)
+        return int(insn.get("address", 0))
     return getattr(insn, "address", 0)
 
 
 def _get_disassembly(insn: Any) -> str:
     if isinstance(insn, dict):
-        return insn.get("disassembly", "")
+        return str(insn.get("disassembly", ""))
     return getattr(insn, "disassembly", "")
 
 
@@ -664,14 +662,14 @@ def _get_raw_bytes(insn: Any) -> bytes:
                 return bytes.fromhex(raw)
             except ValueError:
                 return b""
-        return raw
+        return cast(bytes, raw)
     raw = getattr(insn, "raw_bytes", b"")
     if isinstance(raw, str):
         try:
             return bytes.fromhex(raw)
         except ValueError:
             return b""
-    return raw
+    return cast(bytes, raw)
 
 
 def _get_registers(insn: Any) -> dict[str, int]:
@@ -684,7 +682,7 @@ def _insn_to_dict(insn: Any) -> dict[str, Any]:
     if isinstance(insn, dict):
         return dict(insn)
     if hasattr(insn, "to_dict"):
-        return insn.to_dict()
+        return cast("dict[str, Any]", insn.to_dict())
     return {
         "address": getattr(insn, "address", 0),
         "disassembly": getattr(insn, "disassembly", ""),
@@ -698,29 +696,29 @@ def _insn_to_dict(insn: Any) -> dict[str, Any]:
 
 def _get_vip_value(boundary: Any) -> int:
     if isinstance(boundary, dict):
-        return boundary.get("vip_value", 0)
+        return int(boundary.get("vip_value", 0))
     return getattr(boundary, "vip_value", 0)
 
 
 def _get_handler_address(boundary: Any) -> int:
     if isinstance(boundary, dict):
-        return boundary.get("handler_address", 0)
+        return int(boundary.get("handler_address", 0))
     return getattr(boundary, "handler_address", 0)
 
 
 def _get_trace_start(boundary: Any) -> int:
     if isinstance(boundary, dict):
-        return boundary.get("trace_start", 0)
+        return int(boundary.get("trace_start", 0))
     return getattr(boundary, "trace_start", 0)
 
 
 def _get_trace_end(boundary: Any) -> int:
     if isinstance(boundary, dict):
-        return boundary.get("trace_end", 0)
+        return int(boundary.get("trace_end", 0))
     return getattr(boundary, "trace_end", 0)
 
 
 def _get_vip_delta(boundary: Any) -> int:
     if isinstance(boundary, dict):
-        return boundary.get("vip_delta", 0)
+        return int(boundary.get("vip_delta", 0))
     return getattr(boundary, "vip_delta", 0)

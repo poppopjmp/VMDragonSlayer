@@ -680,8 +680,8 @@ def devirtualize_themida(
                 "opcode": opcode,
                 "category": category,
                 "handler_address": (
-                    result.opcode_table.get_handler(opcode).handler_address
-                    if result.opcode_table.get_handler(opcode) else 0
+                    h.handler_address
+                    if (h := result.opcode_table.get_handler(opcode)) else 0
                 ),
             })
             offset += profile.opcode_width

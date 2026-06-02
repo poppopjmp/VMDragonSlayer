@@ -34,7 +34,7 @@ try:
     import capstone
     CAPSTONE_AVAILABLE = True
 except ImportError:
-    capstone = None  # type: ignore[assignment]
+    capstone = None
     CAPSTONE_AVAILABLE = False
 
 

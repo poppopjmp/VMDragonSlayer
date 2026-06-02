@@ -52,7 +52,7 @@ class BaseModel:
         if not _P(path).exists():
             raise FileNotFoundError(f"Model file not found: {path}")
         try:
-            import joblib  # type: ignore[import-untyped]
+            import joblib
             obj = joblib.load(path)
         except ImportError:
             raise ImportError(
@@ -81,7 +81,7 @@ class BaseModel:
         from pathlib import Path as _P
         _P(path).parent.mkdir(parents=True, exist_ok=True)
         try:
-            import joblib  # type: ignore[import-untyped]
+            import joblib
             joblib.dump(artifact, path)
         except ImportError:
             raise ImportError(
@@ -402,7 +402,7 @@ class VMHandlerModel(BaseModel):
         legacy raw models for backward compatibility.
         """
         try:
-            import joblib  # type: ignore[import-untyped]
+            import joblib
             obj = joblib.load(path)
         except ImportError:
             raise ImportError(
@@ -454,7 +454,7 @@ class VMHandlerModel(BaseModel):
             "created_utc": _time.time(),
         }
         try:
-            import joblib  # type: ignore[import-untyped]
+            import joblib
             joblib.dump(envelope, path)
             logger.info("Saved sklearn model v%d to %s (joblib)", self._MODEL_SCHEMA_VERSION, path)
         except ImportError:
@@ -539,7 +539,7 @@ class VMHandlerModel(BaseModel):
         )
 
     def _predict_sklearn(self, values: list[float]) -> PredictionResult:
-        import numpy as np  # type: ignore[import-untyped]
+        import numpy as np
         X = np.array([values])
         label = self._sklearn_model.predict(X)[0]
         probs: dict[str, float] = {}

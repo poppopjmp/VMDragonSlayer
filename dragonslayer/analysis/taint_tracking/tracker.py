@@ -615,12 +615,8 @@ class TaintTracker:
                 return_byte_taint[canonical] = list(arr)
 
         ctx = self._context_stack.pop()
-        # B78: Unpack 3-tuple (reg, byte, pointer) or legacy 2-tuple
-        if len(ctx) == 3:
-            caller_reg, caller_bytes, caller_pointers = ctx
-        else:
-            caller_reg, caller_bytes = ctx
-            caller_pointers = None
+        # B78: 3-tuple (reg, byte, pointer) snapshots — see _save_context.
+        caller_reg, caller_bytes, caller_pointers = ctx
         self._call_depth = max(0, self._call_depth - 1)
 
         # Restore caller register taint

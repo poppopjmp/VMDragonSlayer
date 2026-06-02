@@ -23,7 +23,7 @@ try:
 
     _Z3_AVAILABLE = True
 except ImportError:
-    z3 = None  # type: ignore[assignment]
+    z3 = None
     _Z3_AVAILABLE = False
 
 # B87: Named exception tuples — narrows former blanket ``except Exception``.
@@ -31,8 +31,8 @@ if _Z3_AVAILABLE:
     _Z3_EVAL_ERRORS: tuple = (z3.Z3Exception, ValueError, TypeError, AttributeError)
     _Z3_SOLVE_ERRORS: tuple = (z3.Z3Exception, ValueError, ArithmeticError)
 else:
-    _Z3_EVAL_ERRORS: tuple = (ValueError, TypeError, AttributeError)
-    _Z3_SOLVE_ERRORS: tuple = (ValueError, ArithmeticError)
+    _Z3_EVAL_ERRORS = (ValueError, TypeError, AttributeError)
+    _Z3_SOLVE_ERRORS = (ValueError, ArithmeticError)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +214,7 @@ class SymbolicState:
         # B54: Priority for coverage-guided scheduling (lower = higher prio)
         self.priority: float = 0.0
         self._seq: int = 0  # tie-breaker for heapq
+        self._speculative: bool = False  # marked when produced by speculative fork
         # B54: Symbolic call stack for call/return tracking
         self.call_stack: list[int] = []
 
@@ -675,7 +676,7 @@ class SymbolicState:
             s2.add(*self.constraints)
             s2.add(address != z3.BitVecVal(concrete, address.sort().size()))
             if s2.check() == z3.unsat:
-                return concrete
+                return int(concrete)
             return None  # multiple concrete values possible
         except _Z3_SOLVE_ERRORS:
             return None
@@ -945,12 +946,12 @@ class SymbolicState:
                     inc_solver.add(c)
                 result = inc_solver.check() == z3.sat
                 inc_solver.pop()
-                return result
+                return bool(result)
             except _Z3_SOLVE_ERRORS:
                 pass
         solver = z3.Solver()
         solver.add(*self.constraints)
-        return solver.check() == z3.sat
+        return bool(solver.check() == z3.sat)
 
     def attach_solver(self, solver: Any) -> None:
         """Attach a Z3 solver for incremental satisfiability checks (B52).
@@ -1002,7 +1003,7 @@ class SymbolicState:
         if _Z3_AVAILABLE:
             try:
                 if z3.is_expr(a) and z3.is_expr(b):
-                    return z3.eq(a, b)
+                    return bool(z3.eq(a, b))
             except _Z3_EVAL_ERRORS:
                 pass
         return False

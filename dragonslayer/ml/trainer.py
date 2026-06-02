@@ -49,25 +49,25 @@ _CAT_TO_OP: dict[str, str] = {
 _HAS_SKLEARN = False
 _HAS_GB = False
 try:
-    import numpy as np  # type: ignore[import-untyped]
+    import numpy as np
     from sklearn.ensemble import (
-        GradientBoostingClassifier,  # type: ignore[import-untyped]
-        RandomForestClassifier,  # type: ignore[import-untyped]
+        GradientBoostingClassifier,
+        RandomForestClassifier,
     )
     from sklearn.metrics import (
-        classification_report as _sklearn_report,  # type: ignore[import-untyped]
+        classification_report as _sklearn_report,
     )
-    from sklearn.model_selection import cross_val_score  # type: ignore[import-untyped]
+    from sklearn.model_selection import cross_val_score
     _HAS_SKLEARN = True
     _HAS_GB = True
 except ImportError:
     try:
-        import numpy as np  # type: ignore[import-untyped]
+        import numpy as np
         from sklearn.ensemble import (
-            RandomForestClassifier,  # type: ignore[import-untyped]
+            RandomForestClassifier,
         )
         from sklearn.model_selection import (
-            cross_val_score,  # type: ignore[import-untyped]
+            cross_val_score,
         )
         _HAS_SKLEARN = True
     except ImportError:
@@ -81,7 +81,7 @@ class TrainingResult:
     epochs: int = 0
     final_loss: float = 0.0
     accuracy: float = 0.0
-    metrics: dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
     model_path: str = ""
 
 
@@ -456,6 +456,8 @@ class ModelTrainer:
         Returns list of ``(feature_name, importance)`` descending.
         Empty list if no sklearn model is attached.
         """
+        if not isinstance(self._model, VMHandlerModel):
+            return []
         return feature_importance(self._model)
 
 

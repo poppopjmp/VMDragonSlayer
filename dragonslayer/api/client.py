@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -131,7 +131,7 @@ class MetroplexGatewayClient:
             )
 
         try:
-            return resp.json()
+            return cast("dict[str, Any]", resp.json())
         except (ValueError, TypeError) as exc:
             raise APIError(f"Gateway returned non-JSON response: {exc}") from exc
 
@@ -170,7 +170,7 @@ class MetroplexGatewayClient:
             )
 
         try:
-            return resp.json()
+            return cast("dict[str, Any]", resp.json())
         except (ValueError, TypeError) as exc:
             raise APIError(f"Plugin {plugin_name} returned non-JSON response: {exc}") from exc
 
@@ -181,7 +181,7 @@ class MetroplexGatewayClient:
             with httpx.Client(verify=self.verify_ssl, timeout=10) as client:
                 resp = client.get(url)
             resp.raise_for_status()
-            return resp.json()
+            return cast("list[dict[str, Any]]", resp.json())
         except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
             raise GatewayError(f"Failed to list plugins: {exc}") from exc
 
@@ -192,7 +192,7 @@ class MetroplexGatewayClient:
             with httpx.Client(verify=self.verify_ssl, timeout=5) as client:
                 resp = client.get(url)
             resp.raise_for_status()
-            return resp.json()
+            return cast("dict[str, Any]", resp.json())
         except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
             raise GatewayError(f"Gateway health check failed: {exc}") from exc
 
@@ -243,7 +243,7 @@ class APIClient:
                 f"Server returned HTTP {resp.status_code}",
                 status_code=resp.status_code,
             )
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())
 
     def health(self) -> dict[str, Any]:
         """``GET /health``."""
@@ -251,7 +251,7 @@ class APIClient:
         with httpx.Client(timeout=5) as client:
             resp = client.get(url)
         resp.raise_for_status()
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())
 
     def status(self) -> dict[str, Any]:
         """``GET /status``."""
@@ -259,7 +259,7 @@ class APIClient:
         with httpx.Client(timeout=5) as client:
             resp = client.get(url)
         resp.raise_for_status()
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())
 
 
 def create_client(base_url: str = "http://127.0.0.1:8000", **kwargs: Any) -> APIClient:

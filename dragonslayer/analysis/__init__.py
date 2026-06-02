@@ -180,7 +180,7 @@ def _try_import(module: str, names: list[str]) -> None:
             globals()[name] = getattr(mod, name)
     except (ImportError, AttributeError):
         for name in names:
-            globals()[name] = None  # type: ignore[assignment]
+            globals()[name] = None
 
 
 _try_import("expr_simplify", [

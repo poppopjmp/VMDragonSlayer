@@ -75,9 +75,13 @@ class TraceExporter(Protocol):
 _FORMAT_REGISTRY: dict[OutputFormat, Callable[[ExecutionTrace], str]] = {}
 
 
-def _register_format(fmt: OutputFormat):
+def _register_format(
+    fmt: OutputFormat,
+) -> Callable[[Callable[[ExecutionTrace], str]], Callable[[ExecutionTrace], str]]:
     """Decorator to register a render function for a format."""
-    def decorator(fn: Callable[[ExecutionTrace], str]):
+    def decorator(
+        fn: Callable[[ExecutionTrace], str],
+    ) -> Callable[[ExecutionTrace], str]:
         _FORMAT_REGISTRY[fmt] = fn
         return fn
     return decorator

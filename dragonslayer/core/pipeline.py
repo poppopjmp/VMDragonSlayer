@@ -37,7 +37,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from .exceptions import VMDragonSlayerError
 from .pipeline_state import PipelineState, validate_stage_order
@@ -154,7 +154,7 @@ class StageResult:
     plugins_succeeded: int = 0
 
     def to_dict(self) -> StageResultDict:
-        return asdict(self)
+        return cast("StageResultDict", asdict(self))
 
 
 @dataclass
@@ -179,7 +179,7 @@ class PipelineResult:
     def to_dict(self) -> PipelineResultDict:
         d = asdict(self)
         d["stages"] = [s.to_dict() for s in self.stages]
-        return d
+        return cast("PipelineResultDict", d)
 
 
 # ---------------------------------------------------------------------------
@@ -321,11 +321,11 @@ class AnalysisPipeline:
         ctx = PluginContext(
             storage=storage,
             config=dict(self._cfg._config) if hasattr(self._cfg, "_config") else {},
-            shared_data=PipelineState(
+            shared_data=cast("dict[str, Any]", PipelineState(
                 binary_size=len(binary_data),
                 sha256=sha256,
                 metadata=metadata,
-            ),
+            )),
             sample_hash=sha256,
             work_dir=work_dir,
         )
@@ -430,7 +430,7 @@ class AnalysisPipeline:
     def _run_stage(
         self,
         stage_name: str,
-        fn: Callable[[], dict[str, Any]],
+        fn: Callable[[], dict[str, Any] | StageResult],
         ctx: Any | None = None,
     ) -> StageResult:
         """Execute *fn* and wrap its return value in a :class:`StageResult`.
@@ -660,7 +660,7 @@ class AnalysisPipeline:
 
             max_w = getattr(self, "_current_max_workers", 4)
 
-            def _exec_one(plugin):
+            def _exec_one(plugin: Any) -> tuple[str, Any]:
                 return plugin.name, plugin.safe_execute(file_path, binary_data, ctx)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_w) as pool:
@@ -748,7 +748,7 @@ class AnalysisPipeline:
                     "hook_names": [h.name for h in hook_set.hooks],
                 }
                 ctx.shared_data["runtime_hook_set"] = hook_set
-            except (*_STAGE_ERRORS, RuntimeError, ValueError) as exc:
+            except _STAGE_ERRORS + (RuntimeError, ValueError) as exc:
                 logger.debug("Runtime hook-set generation skipped: %s", exc)
 
             return result_data
@@ -798,7 +798,7 @@ class AnalysisPipeline:
         provides virtual register mapping and handler boundary detection.
         Otherwise falls back to the generic :class:`TaintAnalyzer`.
         """
-        def _do():
+        def _do() -> dict:
             from ..analysis.symbolic_execution.lifter import InstructionLifter
             from ..analysis.taint_tracking.analyzer import TaintAnalyzer
             from ..analysis.taint_tracking.dtt_executor import DTTExecutor
@@ -920,8 +920,6 @@ class AnalysisPipeline:
             # Annotate result with trace provenance.
             if isinstance(result, dict):
                 result["trace_source"] = trace_source
-            elif hasattr(result, "to_dict"):
-                pass  # provenance added by caller if needed
 
             return result
         return self._run_stage("taint_analysis", _do)
@@ -940,7 +938,7 @@ class AnalysisPipeline:
         constraints they are forwarded to the Z3 solver as seed
         constraints, giving the explorer a head start.
         """
-        def _do() -> dict:
+        def _do() -> dict[str, Any]:
             from ..analysis.symbolic_execution.executor import SymbolicExecutor
             from ..analysis.trace_ingestion import from_shared_data
 
@@ -1017,7 +1015,9 @@ class AnalysisPipeline:
                 seed_constraints=seed_constraints or None,
             )
 
-            result_data = result.to_dict() if hasattr(result, "to_dict") else {
+            result_data: dict[str, Any] = cast(
+                "dict[str, Any]", result.to_dict()
+            ) if hasattr(result, "to_dict") else {
                 "handlers": [
                     h.to_dict() if hasattr(h, "to_dict") else {
                         "address": getattr(h, "address", 0),
@@ -1183,7 +1183,7 @@ class AnalysisPipeline:
         2. Deobfuscation hints if VM is detected.
         3. Code recovery if instruction traces are available.
         """
-        def _do():
+        def _do() -> dict[str, Any] | StageResult:
             from ..llm import get_llm_analyzer
 
             llm = get_llm_analyzer()
@@ -1257,7 +1257,7 @@ class AnalysisPipeline:
         """
         Generate an executive summary of all analysis results using LLM.
         """
-        def _do():
+        def _do() -> dict[str, Any] | StageResult:
             from ..llm import get_llm_analyzer
 
             llm = get_llm_analyzer()

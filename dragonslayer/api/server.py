@@ -14,7 +14,7 @@ import os as _os
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -37,6 +37,9 @@ from ..core.exceptions import (
     ResourceLimitError,
     VMDragonSlayerError,
 )
+
+#: Type of the ``call_next`` callable passed to ASGI HTTP middleware.
+_CallNext = Callable[[Request], Awaitable[Response]]
 
 #: Module-level version constant (single source of truth).
 _API_VERSION: str = "2025.10"
@@ -73,7 +76,7 @@ class _JSONFormatter(logging.Formatter):
         if record.exc_info and record.exc_info[1] is not None:
             payload["exception"] = self.formatException(record.exc_info)
         if hasattr(record, "request_id"):
-            payload["request_id"] = record.request_id  # type: ignore[attr-defined]
+            payload["request_id"] = record.request_id
         return _json.dumps(payload, default=str)
 
 
@@ -125,7 +128,7 @@ class AnalysisRequest(BaseModel):
 
     @field_validator('sample_data')
     @classmethod
-    def validate_base64(cls, v) -> str:
+    def validate_base64(cls, v: str) -> str:
         """Validate base64 encoding."""
         try:
             base64.b64decode(v)
@@ -232,7 +235,7 @@ _SHUTDOWN_DRAIN_SECONDS: float = float(
 
 
 @asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncIterator[None]:  # type: ignore[override]
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle for the FastAPI app.
 
     On shutdown the server waits up to ``_SHUTDOWN_DRAIN_SECONDS`` for
@@ -299,7 +302,7 @@ MAX_REQUEST_BODY_BYTES: int = 100 * 1024 * 1024  # 100 MB
 
 
 @app.middleware("http")
-async def body_size_limit_middleware(request: Request, call_next) -> Response:
+async def body_size_limit_middleware(request: Request, call_next: _CallNext) -> Response:
     """Reject requests with Content-Length exceeding MAX_REQUEST_BODY_BYTES.
 
     This catches oversized uploads *before* the body is fully read, avoiding
@@ -324,7 +327,7 @@ async def body_size_limit_middleware(request: Request, call_next) -> Response:
 # --- Request-ID middleware ---------------------------------------------------
 
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next) -> Response:
+async def request_id_middleware(request: Request, call_next: _CallNext) -> Response:
     """Attach a unique X-Request-ID header to every request/response.
 
     B70: Also injects ``request_id`` into all log records emitted during
@@ -354,7 +357,7 @@ class _RequestIDFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = _request_id_var.get("-")  # type: ignore[attr-defined]
+        record.request_id = _request_id_var.get("-")
         return True
 
 
@@ -368,7 +371,7 @@ REQUEST_TIMEOUT_SECONDS: float = 300.0  # 5 minutes default
 
 
 @app.middleware("http")
-async def timeout_middleware(request: Request, call_next) -> Response:
+async def timeout_middleware(request: Request, call_next: _CallNext) -> Response:
     """Cancel requests that exceed REQUEST_TIMEOUT_SECONDS."""
     try:
         response = await asyncio.wait_for(
@@ -401,7 +404,7 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
 
 
 @app.middleware("http")
-async def api_key_middleware(request: Request, call_next) -> Response:
+async def api_key_middleware(request: Request, call_next: _CallNext) -> Response:
     """Reject requests without a valid API key (when API_KEY is set)."""
     if API_KEY and request.url.path not in _PUBLIC_PATHS:
         provided = request.headers.get("x-api-key", "")
@@ -493,7 +496,7 @@ circuit_breaker = CircuitBreaker()
 
 
 @app.middleware("http")
-async def circuit_breaker_middleware(request: Request, call_next) -> Response:
+async def circuit_breaker_middleware(request: Request, call_next: _CallNext) -> Response:
     """Reject requests when the circuit breaker is open."""
     # Health/status endpoints bypass the circuit breaker
     if request.url.path in ("/health", "/status", "/metrics"):
@@ -607,7 +610,7 @@ async def check_rate_limit(request: Request) -> bool:
 
 # Middleware for request counting
 @app.middleware("http")
-async def count_requests(request: Request, call_next) -> Response:
+async def count_requests(request: Request, call_next: _CallNext) -> Response:
     """Count active and total requests (async-safe)."""
     async with _counter_lock:
         server_state.total_requests += 1
@@ -888,7 +891,7 @@ async def analyze_binary(
                 detail="Analysis API not initialised. Server is starting up.",
             )
 
-        result = await api.analyze_binary_data_async(
+        result: dict[str, Any] = await api.analyze_binary_data_async(
             binary_data,
             analysis_type=analysis_request.analysis_type,
             metadata=analysis_request.metadata,
@@ -942,6 +945,11 @@ async def upload_and_analyze(
         )
 
     api = server_state.api
+    if api is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Analysis API is not available.",
+        )
 
     try:
         # Read file data
@@ -963,7 +971,7 @@ async def upload_and_analyze(
         }
 
         # Perform analysis (async to avoid blocking the ASGI event loop)
-        result = await api.analyze_binary_data_async(
+        result: dict[str, Any] = await api.analyze_binary_data_async(
             binary_data,
             analysis_type=analysis_type,
             metadata=metadata
@@ -1035,7 +1043,7 @@ async def run_pipeline(
                 detail="Analysis API not initialised. Server is starting up.",
             )
 
-        result = await api.run_pipeline_async(
+        result: dict[str, Any] = await api.run_pipeline_async(
             binary_data,
             stages=pipeline_request.stages,
             llm_enabled=pipeline_request.llm_enabled,

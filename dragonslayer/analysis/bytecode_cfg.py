@@ -67,7 +67,7 @@ try:
 
     NX_AVAILABLE = True
 except ImportError:  # pragma: no cover
-    nx = None  # type: ignore[assignment]
+    nx = None
     NX_AVAILABLE = False
 
 _GRAPH_ERRORS: tuple[type[Exception], ...] = (
@@ -370,8 +370,8 @@ def walk_trace_bytecode(
     """
     # Build reverse lookup: handler_address → OpcodeTableEntry.
     handler_map: dict[int, OpcodeTableEntry] = {}
-    for entry in opcode_table.entries:
-        handler_map[entry.handler_address] = entry
+    for te in opcode_table.entries:
+        handler_map[te.handler_address] = te
 
     instructions: list[VMInstruction] = []
     for idx, boundary in enumerate(boundaries):
@@ -1030,8 +1030,8 @@ def walk_static_bytecode(
 
     # Build opcode → entry lookup.
     opcode_map: dict[int, OpcodeTableEntry] = {}
-    for entry in opcode_table.entries:
-        opcode_map[entry.opcode] = entry
+    for te in opcode_table.entries:
+        opcode_map[te.opcode] = te
 
     # Determine opcode width from the table entries.
     max_opcode = max(opcode_map.keys(), default=0)

@@ -45,7 +45,7 @@ from dragonslayer.analysis.vm_discovery.handler_boundaries import (
 # Lazy import for ParsedBinary to avoid circular deps
 _ParsedBinary = None
 
-def _get_parsed_binary_type():
+def _get_parsed_binary_type() -> Any:
     global _ParsedBinary
     if _ParsedBinary is None:
         try:
@@ -357,7 +357,7 @@ def _build_from_boundaries_only(
             width = 1
 
         real_bytes: bytes | None = None
-        if can_read_binary:
+        if can_read_binary and parsed_binary is not None:
             try:
                 real_bytes = parsed_binary.read_va(binary_data, vip, width)
             except (ValueError, TypeError, IndexError, OSError, RuntimeError):

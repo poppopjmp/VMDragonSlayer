@@ -23,7 +23,7 @@ try:
 
     _CAPSTONE_AVAILABLE = True
 except ImportError:
-    capstone = None  # type: ignore[assignment]
+    capstone = None
     _CAPSTONE_AVAILABLE = False
 
 

@@ -52,7 +52,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +474,7 @@ def _infer_key_reg(dispatcher_match: Any) -> str:
     if isinstance(ctx, dict):
         for reg, role in ctx.items():
             if isinstance(role, str) and "key" in role.lower():
-                return reg.lower()
+                return cast("str", reg.lower())
 
     transforms = _get_attr(dispatcher_match, "decode_transforms", [])
     if transforms:
@@ -489,13 +489,13 @@ def _infer_vip_reg(dispatcher_match: Any) -> str:
     """Infer vIP register from dispatcher match."""
     vreg = _get_attr(dispatcher_match, "vip_register", "")
     if vreg:
-        return vreg.lower()
+        return cast("str", vreg.lower())
 
     ctx = _get_attr(dispatcher_match, "context_registers", {})
     if isinstance(ctx, dict):
         for reg, role in ctx.items():
             if isinstance(role, str) and "vip" in role.lower():
-                return reg.lower()
+                return cast("str", reg.lower())
 
     return ""
 
@@ -508,5 +508,5 @@ def _get_attr(obj: Any, name: str, default: Any = None) -> Any:
 
 def _get_addr(insn: Any) -> int:
     if isinstance(insn, dict):
-        return insn.get("address", 0)
+        return cast("int", insn.get("address", 0))
     return getattr(insn, "address", 0)

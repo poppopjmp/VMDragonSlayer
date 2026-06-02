@@ -285,26 +285,26 @@ class VMDetector:
         if vm_sections_found:
             score += 0.35
             # Identify protector from section names
-            for sec in vm_sections_found:
-                if "vmp" in sec.lower():
+            for found_sec in vm_sections_found:
+                if "vmp" in found_sec.lower():
                     protector = "VMProtect"
-                elif "themida" in sec.lower() or "winlice" in sec.lower():
+                elif "themida" in found_sec.lower() or "winlice" in found_sec.lower():
                     protector = "Themida"
-                elif "enigma" in sec.lower():
+                elif "enigma" in found_sec.lower():
                     protector = "Enigma"
-                elif "cvirt" in sec.lower():
+                elif "cvirt" in found_sec.lower():
                     protector = "Code Virtualizer"
 
         if found_watermarks:
             score += 0.25
-            for wm in found_watermarks:
-                if "VMProtect" in wm or "vmp_" in wm:
+            for wm_name in found_watermarks:
+                if "VMProtect" in wm_name or "vmp_" in wm_name:
                     protector = "VMProtect"
-                elif "Themida" in wm or "WinLicense" in wm:
+                elif "Themida" in wm_name or "WinLicense" in wm_name:
                     protector = "Themida"
-                elif "Enigma" in wm:
+                elif "Enigma" in wm_name:
                     protector = "Enigma"
-                elif "Code Virtualizer" in wm:
+                elif "Code Virtualizer" in wm_name:
                     protector = "Code Virtualizer"
 
         if entropy_stats["ratio"] > 0.6:

@@ -6,7 +6,7 @@ VMDragonSlayer API Module
 try:
     from .server import CircuitBreaker, CircuitState, app, circuit_breaker
 except (ImportError, OSError):  # server has heavy deps (fastapi)
-    app = None  # type: ignore[assignment]
+    app = None
     CircuitBreaker = None  # type: ignore[assignment,misc]
     circuit_breaker = None  # type: ignore[assignment]
     CircuitState = None  # type: ignore[assignment,misc]
@@ -16,7 +16,7 @@ try:
 except (ImportError, AttributeError):
     APIClient = None  # type: ignore[assignment,misc]
     MetroplexGatewayClient = None  # type: ignore[assignment,misc]
-    create_client = None  # type: ignore[assignment,misc]
+    create_client = None  # type: ignore[assignment]
 
 __all__ = [
     'app',

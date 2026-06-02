@@ -22,7 +22,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from dragonslayer.core.exceptions import AnalysisError, ResourceLimitError
 
@@ -36,7 +36,7 @@ try:
     import z3 as _z3  # noqa: F401
     _HAS_Z3 = True
 except ImportError:
-    _z3 = None  # type: ignore[assignment]
+    _z3 = None
     _HAS_Z3 = False
 
 # B87: Named exception tuples — narrows former blanket ``except Exception``.
@@ -47,9 +47,9 @@ if _HAS_Z3:
         _z3.Z3Exception, ValueError, TypeError, KeyError, IndexError, AttributeError,
     )
 else:
-    _Z3_EVAL_ERRORS: tuple = (ValueError, TypeError, AttributeError)
-    _Z3_SOLVE_ERRORS: tuple = (ValueError, ArithmeticError)
-    _INSN_ERRORS: tuple = (ValueError, TypeError, KeyError, IndexError, AttributeError)
+    _Z3_EVAL_ERRORS = (ValueError, TypeError, AttributeError)
+    _Z3_SOLVE_ERRORS = (ValueError, ArithmeticError)
+    _INSN_ERRORS = (ValueError, TypeError, KeyError, IndexError, AttributeError)
 
 logger = logging.getLogger(__name__)
 
@@ -473,9 +473,9 @@ class SymbolicExecutor:
                     if self._vmprotect_dispatcher else None
                 ),
                 cfg=cfg,
-                loops_detected=[
+                loops_detected=cast("list[dict[str, Any]]", [
                     li.to_dict() for li in self._detected_loops.values()
-                ],
+                ]),
                 speculative_paths_explored=self._speculative_fork_count,
             )
 
@@ -671,7 +671,7 @@ class SymbolicExecutor:
 
             for e in edges:
                 src, tgt = e["source"], e["target"]
-                if tgt != 0 and tgt in dom_set.get(src, set()):
+                if tgt != 0 and tgt in dom_set.get(cast(int, src), set()):
                     back_edges.append(e)
 
         tail_call_count = sum(1 for e in edges if e["type"] == "tail_call")
@@ -1088,7 +1088,7 @@ class SymbolicExecutor:
                 all_writes.update(insn.writes)
 
             # Determine dominant category
-            dominant = max(cat_counts, key=cat_counts.get) if cat_counts else InstructionCategory.UNKNOWN
+            dominant = max(cat_counts, key=lambda c: cat_counts[c]) if cat_counts else InstructionCategory.UNKNOWN
 
             # Filter out trivial blocks (single NOP, etc.)
             if len(block) <= 1 and dominant == InstructionCategory.NOP:
@@ -2675,7 +2675,7 @@ class SymbolicExecutor:
     _SIB_RE = None  # lazily compiled
 
     @classmethod
-    def _sib_regex(cls):
+    def _sib_regex(cls) -> re.Pattern[str]:
         """Return compiled regex for SIB-style memory operands.
 
         Matches patterns like:
@@ -3064,7 +3064,7 @@ class SymbolicExecutor:
             input_symbols={rname: str(sym) for rname, sym in sym_regs.items()},
         )
         # Attach memory effects as extra attribute for downstream consumers.
-        summary.memory_effects = memory_effects  # type: ignore[attr-defined]
+        summary.memory_effects = memory_effects
         return summary
 
     def execute_handler_from_trace(

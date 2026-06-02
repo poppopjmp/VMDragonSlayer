@@ -290,6 +290,16 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# Click (cli) and FastAPI (api.server) route/command decorators are
+# dynamically typed by design; disallow_untyped_decorators would flag every
+# @command / @app.post. This is standard practice for these frameworks.
+module = [
+    "dragonslayer.cli",
+    "dragonslayer.api.server",
+]
+disallow_untyped_decorators = false
+
 # Pytest configuration
 [tool.pytest.ini_options]
 minversion = "7.0"

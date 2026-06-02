@@ -34,7 +34,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 if TYPE_CHECKING:
     from dragonslayer.api.storage import StorageBackend
@@ -101,7 +101,7 @@ class PluginResult:
     confidence: float = 0.0
 
     def to_dict(self) -> PluginResultDict:
-        return asdict(self)
+        return cast("PluginResultDict", asdict(self))
 
 
 @dataclass

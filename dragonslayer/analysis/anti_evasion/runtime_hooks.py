@@ -580,7 +580,7 @@ def apply_hooks_to_angr(
 def _install_angr_api_hook(proj: Any, hook: HookDescriptor) -> None:
     """Create and hook an angr SimProcedure for an API."""
     try:
-        import angr  # type: ignore
+        import angr
 
         ret_val = hook.return_value if hook.return_value is not None else 0
 
@@ -645,7 +645,7 @@ def apply_hooks_to_triton(
 def _install_triton_rdtsc(tc: Any, timing: TimingState, is_64: bool) -> None:
     """Install Triton RDTSC callback."""
     try:
-        from triton import CALLBACK, OPCODE  # type: ignore
+        from triton import CALLBACK, OPCODE
 
         def _rdtsc_cb(ctx: Any, insn: Any) -> None:
             if insn.getType() == OPCODE.X86.RDTSC:
@@ -665,7 +665,7 @@ def _install_triton_rdtsc(tc: Any, timing: TimingState, is_64: bool) -> None:
 def _install_triton_cpuid(tc: Any, hook: HookDescriptor, is_64: bool) -> None:
     """Install Triton CPUID callback."""
     try:
-        from triton import CALLBACK, OPCODE  # type: ignore
+        from triton import CALLBACK, OPCODE
 
         def _cpuid_cb(ctx: Any, insn: Any) -> None:
             if insn.getType() == OPCODE.X86.CPUID:

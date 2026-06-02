@@ -54,7 +54,7 @@ import struct
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,8 @@ def _apply_cipher_step(value: int, step: CipherStep, key: int, width: int) -> in
     if step.op == CipherOp.BSWAP:
         byte_count = width // 8
         return int.from_bytes(value.to_bytes(byte_count, "little"), "big")
-    return value
+    # Defensive fallback for unknown ops (mypy proves the enum exhaustive).
+    return value  # type: ignore[unreachable]
 
 
 def auto_detect_cipher_chain(
@@ -683,7 +684,7 @@ def _infer_key_register(dispatcher_match: Any) -> str:
     if isinstance(ctx, dict):
         for reg, role in ctx.items():
             if isinstance(role, str) and "key" in role.lower():
-                return reg
+                return cast("str", reg)
 
     # Parse decode_transforms to find which register is XORed
     transforms = _get_attr_or_key(dispatcher_match, "decode_transforms", [])

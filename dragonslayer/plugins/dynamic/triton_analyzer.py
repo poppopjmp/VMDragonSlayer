@@ -28,9 +28,9 @@ logger = logging.getLogger(__name__)
 
 _HAS_TRITON = False
 try:
-    import capstone  # type: ignore[import-untyped]  # noqa: F401  (availability probe)
-    import lief  # type: ignore[import-untyped]
-    from triton import (  # type: ignore[import-untyped]
+    import capstone  # noqa: F401  (availability probe)
+    import lief
+    from triton import (
         ARCH,
         AST_REPRESENTATION,
         CALLBACK,

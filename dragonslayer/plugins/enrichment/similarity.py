@@ -29,29 +29,29 @@ logger = logging.getLogger(__name__)
 # Optional imports ---------------------------------------------------------
 _HAS_PEFILE = False
 try:
-    import pefile  # type: ignore[import-untyped]
+    import pefile
     _HAS_PEFILE = True
 except ImportError:
     pass
 
 _HAS_ELFTOOLS = False
 try:
-    from elftools.elf.elffile import ELFFile  # type: ignore[import-untyped]
-    from elftools.elf.sections import SymbolTableSection  # type: ignore[import-untyped]
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.sections import SymbolTableSection
     _HAS_ELFTOOLS = True
 except ImportError:
     pass
 
 _HAS_MACHOLIB = False
 try:
-    from macholib.MachO import MachO  # type: ignore[import-untyped]
+    from macholib.MachO import MachO
     _HAS_MACHOLIB = True
 except ImportError:
     pass
 
 _HAS_SSDEEP = False
 try:
-    import ssdeep  # type: ignore[import-untyped]
+    import ssdeep
     _HAS_SSDEEP = True
 except ImportError:
     pass

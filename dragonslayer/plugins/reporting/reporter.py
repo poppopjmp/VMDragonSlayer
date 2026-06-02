@@ -17,7 +17,7 @@ import hashlib
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, cast
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _HAS_REQUESTS = False
 try:
-    import requests  # type: ignore[import-untyped]
+    import requests
     _HAS_REQUESTS = True
 except ImportError:
     pass
@@ -59,7 +59,7 @@ def generate_markdown(
     """Build a structured Markdown report from aggregated plugin data."""
 
     def _get(name: str) -> dict[str, Any]:
-        return plugins_data.get(name, {})
+        return cast("dict[str, Any]", plugins_data.get(name, {}))
 
     # --- Hashes ---
     fileinfo = _get("fileinfo")
@@ -153,7 +153,7 @@ def generate_markdown(
             for imp in imps:
                 if isinstance(imp, dict):
                     dll = imp.get("dll") or imp.get("name", "")
-                    count = len(imp.get("functions", imp.get("imports", [])))
+                    count = len(imp.get("functions", imp.get("imports", [])) or [])
                     imports_summary.append(f"{dll}: {count} functions")
 
     # --- Network ---
@@ -421,7 +421,7 @@ def enrich_with_ollama(
     try:
         resp = requests.post(f"{ollama_url}/api/generate", json=payload, timeout=600)
         resp.raise_for_status()
-        return resp.json().get("response", "")
+        return cast("str | None", resp.json().get("response", ""))
     except (ConnectionError, ValueError, TypeError, RuntimeError, OSError, TimeoutError) as exc:
         logger.warning("Ollama enrichment failed: %s", exc)
         return None

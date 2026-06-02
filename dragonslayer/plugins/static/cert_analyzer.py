@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 _HAS_LIEF = False
 try:
-    import lief  # type: ignore[import-untyped]
+    import lief
     _HAS_LIEF = True
 except ImportError:
     pass

@@ -51,7 +51,7 @@ import re
 import struct
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict, cast
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ def _get_max_trace_len() -> int:
         logger.warning(
             "dispatcher.max_trace_length=%r clamped to %d", raw, clamped,
         )
-    return clamped
+    return int(clamped)
 
 
 def _get_early_exit_confidence() -> float:
@@ -151,7 +151,7 @@ def _get_early_exit_confidence() -> float:
         logger.warning(
             "dispatcher.early_exit_confidence=%r clamped to %.4f", raw, clamped,
         )
-    return clamped
+    return float(clamped)
 
 
 # Module-level sentinel to avoid log-flooding on repeated subsamples.
@@ -778,10 +778,10 @@ def _find_advance_candidates(instructions: list, gp_regs: set) -> list[_AdvanceC
             mem_match = _MEM_DEREF_RE.search(src)
             if mem_match:
                 inner = mem_match.group(1).strip()
-                delta = _parse_lea_delta(inner, reg)
-                if delta is not None and 0 < abs(delta) <= 8:
+                lea_delta = _parse_lea_delta(inner, reg)
+                if lea_delta is not None and 0 < abs(lea_delta) <= 8:
                     candidates.append(_AdvanceCandidate(
-                        address=_get_address(insn), reg=reg, delta=delta, insn_index=idx))
+                        address=_get_address(insn), reg=reg, delta=lea_delta, insn_index=idx))
     return candidates
 
 
@@ -1169,7 +1169,8 @@ def _identify_vip_from_trace_registers(
         values = [vr.get(reg) for vr in visit_regs if reg in vr]
         if len(values) < 3 or not all(isinstance(v, (int, float)) for v in values):
             continue
-        diffs = [values[i + 1] - values[i] for i in range(len(values) - 1)]
+        nums = cast("list[float]", values)
+        diffs = [nums[i + 1] - nums[i] for i in range(len(nums) - 1)]
         if not diffs:
             continue
         if all(d > 0 for d in diffs) or all(d < 0 for d in diffs):
@@ -1219,7 +1220,7 @@ def _get_operands(insn: Any) -> list[str]:
 
 def _get_operands_raw(insn: Any) -> str:
     if hasattr(insn, "operands") and insn.operands:
-        return insn.operands
+        return str(insn.operands)
     if hasattr(insn, "disassembly") and insn.disassembly:
         parts = insn.disassembly.strip().split(None, 1)
         return parts[1] if len(parts) > 1 else ""

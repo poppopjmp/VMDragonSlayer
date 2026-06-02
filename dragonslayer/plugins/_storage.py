@@ -27,7 +27,7 @@ import os
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,7 @@ class ElasticsearchBackend(StorageBackend):
     def get(self, index: str, doc_id: str) -> dict[str, Any] | None:
         try:
             res = self._es.get(index=index, id=doc_id)
-            return res["_source"]
+            return cast("dict[str, Any] | None", res["_source"])
         except (ConnectionError, ValueError, TypeError, KeyError, RuntimeError, OSError):
             return None
 

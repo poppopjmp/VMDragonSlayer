@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 _HAS_MACHOLIB = False
 try:
-    from macholib import mach_o  # type: ignore[import-untyped]
-    from macholib.MachO import MachO  # type: ignore[import-untyped]
+    from macholib import mach_o
+    from macholib.MachO import MachO
     _HAS_MACHOLIB = True
 except ImportError:
     pass

@@ -41,7 +41,7 @@ import statistics
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -822,13 +822,13 @@ def _extract_regs_from_transforms(
 
 def _get_registers(rec: Any) -> dict[str, int]:
     if isinstance(rec, dict):
-        return rec.get("registers", {})
+        return cast("dict[str, int]", rec.get("registers", {}))
     return getattr(rec, "registers", {})
 
 
 def _get_disassembly(rec: Any) -> str:
     if isinstance(rec, dict):
-        return rec.get("disassembly", "")
+        return cast("str", rec.get("disassembly", ""))
     return getattr(rec, "disassembly", "")
 
 
@@ -840,5 +840,5 @@ def _get_val(obj: Any, attr: str, default: Any = None) -> Any:
 
 def _get_final_registers(summary: Any) -> dict[str, str]:
     if isinstance(summary, dict):
-        return summary.get("final_registers", {})
+        return cast("dict[str, str]", summary.get("final_registers", {}))
     return getattr(summary, "final_registers", {})

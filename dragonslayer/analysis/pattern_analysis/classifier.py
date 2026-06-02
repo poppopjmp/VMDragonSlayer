@@ -375,7 +375,7 @@ class PatternClassifier:
             key = r.handler_type.value
             category_counts[key] = category_counts.get(key, 0) + 1
 
-        dominant = max(category_counts, key=category_counts.get, default=None) if category_counts else None
+        dominant = max(category_counts, key=lambda k: category_counts[k], default=None) if category_counts else None
         dominant_type = HandlerType(dominant) if dominant else None
 
         complexity = self._compute_complexity(results, category_counts)

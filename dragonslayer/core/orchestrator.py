@@ -32,13 +32,17 @@ from typing import (
     Any,
     Protocol,
     TypedDict,
+    cast,
     runtime_checkable,
 )
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from ..analysis.pattern_analysis.database import PatternDatabase
     from ..analysis.pattern_analysis.recognizer import PatternRecognizer
     from ..api.client import MetroplexGatewayClient
+    from ..plugins import Stage
 
 from ..utils.metrics import AnalysisMetrics
 from .config import get_config
@@ -246,7 +250,7 @@ class AnalysisResult:
         d = asdict(self)
         # asdict() already recursively converted engine_results;
         # no need to re-convert.
-        return d
+        return cast("AnalysisResultDict", d)
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +261,9 @@ class _EngineRegistry:
     """Lazy-loads analysis engines so we only import what's actually used."""
 
     def __init__(self) -> None:
-        self._pattern_db = None
-        self._pattern_recognizer = None
-        self._gateway_client = None
+        self._pattern_db: PatternDatabase | None = None
+        self._pattern_recognizer: PatternRecognizer | None = None
+        self._gateway_client: MetroplexGatewayClient | None = None
 
     # -- Pattern Analysis (local, always available) -------------------------
 
@@ -385,7 +389,12 @@ class Orchestrator:
     def __enter__(self) -> Orchestrator:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         self.shutdown()
         return None
 
@@ -394,7 +403,12 @@ class Orchestrator:
     async def __aenter__(self) -> Orchestrator:
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         self.shutdown()
         return None
 
@@ -467,8 +481,13 @@ class Orchestrator:
             handler = self._get_engine_handler(engine_name)
             if handler is None:
                 continue
+            handler_bound: EngineHandler = handler  # narrowed; bind for closure
 
-            def _run_engine(h=handler, r=request, en=engine_name):
+            def _run_engine(
+                h: EngineHandler = handler_bound,
+                r: AnalysisRequest = request,
+                en: str = engine_name,
+            ) -> EngineResult:
                 with self.metrics.phase(en):
                     return h(r)
 
@@ -529,7 +548,7 @@ class Orchestrator:
             execution_time=elapsed,
             errors=errors,
             confidence_scores=confidence_scores,
-            metrics=self.metrics.to_dict(),
+            metrics=cast("dict[str, Any]", self.metrics.to_dict()),
         )
 
     # ------------------------------------------------------------------
@@ -651,7 +670,7 @@ class Orchestrator:
             execution_time=elapsed,
             errors=errors,
             confidence_scores=confidence_scores,
-            metrics=self.metrics.to_dict(),
+            metrics=cast("dict[str, Any]", self.metrics.to_dict()),
         )
 
     # ------------------------------------------------------------------
@@ -782,7 +801,7 @@ class Orchestrator:
     def _run_local_plugins(
         self,
         request: AnalysisRequest,
-        stage: int,
+        stage: Stage,
         label: str,
     ) -> EngineResult:
         """
@@ -908,9 +927,11 @@ class Orchestrator:
     ) -> EngineResult:
         def _do() -> tuple[dict[str, Any], float]:
             client = self._engines.gateway_client
+            file_info = request.file_info
+            filename = (file_info.path or file_info.sha256) if file_info else None
             gw_response = client.scan(
                 file_bytes=request.binary_data,
-                filename=request.file_info.path or request.file_info.sha256 or "sample.bin",
+                filename=filename or "sample.bin",
                 plugins=plugins,
                 stage=stage,
                 timeout=self.config.get("metroplex.timeout", 120),
@@ -1053,14 +1074,14 @@ class VMDragonSlayerAPI:
         if stages is not None:
             config_kwargs["stages"] = stages
 
-        pipeline = AnalysisPipeline(config=self._orchestrator._config)
+        pipeline = AnalysisPipeline(config=self._orchestrator.config)
         pipeline_config = PipelineConfig(**config_kwargs)
         result = pipeline.run(
             binary_data,
             pipeline_config=pipeline_config,
             metadata=metadata or {},
         )
-        return result.to_dict()
+        return cast("dict[str, Any]", result.to_dict())
 
     async def run_pipeline_async(
         self,

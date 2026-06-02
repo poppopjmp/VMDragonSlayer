@@ -31,11 +31,11 @@ except (ImportError, AttributeError):
     TaintResult = None  # type: ignore[assignment,misc]
     ByteTaintMap = None  # type: ignore[assignment,misc]
     MemoryAliasTracker = None  # type: ignore[assignment,misc]
-    subreg_canonical = None  # type: ignore[assignment,misc]
-    subreg_aliases = None  # type: ignore[assignment,misc]
-    subreg_info = None  # type: ignore[assignment,misc]
-    is_eflags_producer = None  # type: ignore[assignment,misc]
-    is_eflags_consumer = None  # type: ignore[assignment,misc]
+    subreg_canonical = None  # type: ignore[assignment]
+    subreg_aliases = None  # type: ignore[assignment]
+    subreg_info = None  # type: ignore[assignment]
+    is_eflags_producer = None  # type: ignore[assignment]
+    is_eflags_consumer = None  # type: ignore[assignment]
 
 try:
     from .analyzer import TaintAnalyzer
@@ -46,7 +46,7 @@ try:
     from .vm_taint_tracker import VM_REG_PRESETS, VMTaintTracker
 except (ImportError, AttributeError):
     VMTaintTracker = None  # type: ignore[assignment,misc]
-    VM_REG_PRESETS = {}  # type: ignore[assignment]
+    VM_REG_PRESETS = {}
 
 try:
     from .dtt_executor import DTTExecutor
@@ -68,9 +68,9 @@ except (ImportError, AttributeError):
     InterHandlerFlowResult = None  # type: ignore[assignment,misc]
     InterHandlerFlowEdge = None  # type: ignore[assignment,misc]
     HandlerTaintSummary = None  # type: ignore[assignment,misc]
-    build_handler_summary = None  # type: ignore[assignment,misc]
-    canonicalize_reg = None  # type: ignore[assignment,misc]
-    compose_summaries = None  # type: ignore[assignment,misc]
+    build_handler_summary = None  # type: ignore[assignment]
+    canonicalize_reg = None  # type: ignore[assignment]
+    compose_summaries = None  # type: ignore[assignment]
 
 __all__ = [
     "TaintTracker",

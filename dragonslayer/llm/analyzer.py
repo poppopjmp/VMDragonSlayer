@@ -42,7 +42,7 @@ import logging
 import os
 import re
 import threading
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -50,27 +50,26 @@ logger = logging.getLogger(__name__)
 # Lazy litellm import (optional dependency)
 # ---------------------------------------------------------------------------
 
-_litellm = None
+_litellm: Any = None
 _LITELLM_AVAILABLE = False
 _litellm_lock = threading.Lock()
 
 
-def _ensure_litellm():
+def _ensure_litellm() -> bool:
     global _litellm, _LITELLM_AVAILABLE
     if _litellm is not None:
         return _LITELLM_AVAILABLE
     with _litellm_lock:
-        # Double-check after acquiring the lock
-        if _litellm is not None:
-            return _LITELLM_AVAILABLE
-        try:
-            import litellm as _ll
-            _litellm = _ll
-            _LITELLM_AVAILABLE = True
-            # Suppress litellm's noisy logger unless user wants it
-            logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-        except ImportError:
-            _LITELLM_AVAILABLE = False
+        # Double-check after acquiring the lock: only import if still unset.
+        if _litellm is None:
+            try:
+                import litellm as _ll
+                _litellm = _ll
+                _LITELLM_AVAILABLE = True
+                # Suppress litellm's noisy logger unless user wants it
+                logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+            except ImportError:
+                _LITELLM_AVAILABLE = False
     return _LITELLM_AVAILABLE
 
 
@@ -397,7 +396,7 @@ class LLMAnalyzer:
                     r"\n?\s*```\s*$", "", content,
                 )
                 try:
-                    return json.loads(content)
+                    return cast("dict[str, Any]", json.loads(content))
                 except json.JSONDecodeError:
                     logger.warning("LLM returned non-JSON; wrapping raw text")
                     return {"raw": content}
@@ -546,13 +545,15 @@ def get_llm_analyzer(**kwargs: Any) -> LLMAnalyzer:
     with provided **kwargs**.  Thread-safe via double-checked locking.
     """
     global _analyzer
-    if _analyzer is not None:
-        return _analyzer
+    existing = _analyzer
+    if existing is not None:
+        return existing
 
     with _analyzer_lock:
         # Double-check after acquiring the lock
-        if _analyzer is not None:
-            return _analyzer
+        existing = _analyzer
+        if existing is not None:
+            return existing
 
         # Try to merge config
         try:

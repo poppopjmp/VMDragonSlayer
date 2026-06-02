@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 _HAS_ELFTOOLS = False
 try:
-    from elftools.elf.dynamic import DynamicSection  # type: ignore[import-untyped]
-    from elftools.elf.elffile import ELFFile  # type: ignore[import-untyped]
-    from elftools.elf.sections import SymbolTableSection  # type: ignore[import-untyped]
+    from elftools.elf.dynamic import DynamicSection
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.sections import SymbolTableSection
     _HAS_ELFTOOLS = True
 except ImportError:
     pass

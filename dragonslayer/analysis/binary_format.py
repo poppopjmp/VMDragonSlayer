@@ -22,7 +22,7 @@ import math
 import struct
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 # Optional LIEF import
 # ---------------------------------------------------------------------------
 try:
-    import lief  # type: ignore[import-untyped]
+    import lief
 
     LIEF_AVAILABLE = True
 except ImportError:
-    lief = None  # type: ignore[assignment]
+    lief = None
     LIEF_AVAILABLE = False
 
 _LIEF_ERRORS: tuple[type[Exception], ...] = (
@@ -319,9 +319,9 @@ def _lief_arch(binary: Any) -> Architecture:
 def _lief_image_base(binary: Any, fmt: BinaryFormat) -> int:
     try:
         if fmt == BinaryFormat.PE:
-            return binary.optional_header.imagebase
+            return cast("int", binary.optional_header.imagebase)
         if fmt == BinaryFormat.ELF:
-            return binary.imagebase
+            return cast("int", binary.imagebase)
     except _LIEF_ERRORS:
         pass
     return 0
@@ -329,7 +329,7 @@ def _lief_image_base(binary: Any, fmt: BinaryFormat) -> int:
 
 def _lief_entry_point(binary: Any, fmt: BinaryFormat) -> int:
     try:
-        return binary.entrypoint
+        return cast("int", binary.entrypoint)
     except _LIEF_ERRORS:
         return 0
 

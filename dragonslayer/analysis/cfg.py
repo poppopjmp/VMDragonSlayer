@@ -25,13 +25,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import TypedDict, cast
 
 try:
     import networkx as nx
     NX_AVAILABLE = True
 except ImportError:  # pragma: no cover
-    nx = None  # type: ignore[assignment]
+    nx = None
     NX_AVAILABLE = False
 
 from dragonslayer.analysis.trace_ingestion import (
@@ -328,4 +328,4 @@ def find_dominators(
     if entry is None:
         entries = [n for n in G.nodes if G.in_degree(n) == 0]
         entry = min(G.nodes) if not entries else min(entries)
-    return nx.immediate_dominators(G, entry)
+    return cast("dict[int, int]", nx.immediate_dominators(G, entry))

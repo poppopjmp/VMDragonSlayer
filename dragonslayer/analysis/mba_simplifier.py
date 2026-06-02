@@ -36,12 +36,13 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import cast
 
 try:
     import z3
     _Z3_AVAILABLE = True
 except ImportError:
-    z3 = None  # type: ignore[assignment]
+    z3 = None
     _Z3_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ def verify_equivalence(
     s = z3.Solver()
     s.set("timeout", timeout_ms)
     s.add(expr_a != expr_b)
-    return s.check() == z3.unsat
+    return cast("bool", s.check() == z3.unsat)
 
 
 def _ast_size(expr: z3.ExprRef) -> int:
@@ -673,7 +674,7 @@ def _free_bitvec_vars(expr: z3.ExprRef) -> list[z3.BitVecRef]:
             name = str(e)
             if name not in seen:
                 seen.add(name)
-                result.append(e)  # type: ignore[arg-type]
+                result.append(e)
         else:
             for child in e.children():
                 _walk(child)
@@ -684,7 +685,7 @@ def _free_bitvec_vars(expr: z3.ExprRef) -> list[z3.BitVecRef]:
 
 def _z3_eq(a: z3.ExprRef, b: z3.ExprRef) -> bool:
     """Structural equality check via z3's ``eq``."""
-    return z3.eq(a, b)
+    return cast("bool", z3.eq(a, b))
 
 
 def _parse_expr(

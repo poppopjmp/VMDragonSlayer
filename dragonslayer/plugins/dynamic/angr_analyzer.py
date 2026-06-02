@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 _HAS_ANGR = False
 try:
-    import angr  # type: ignore[import-untyped]
+    import angr
 
     _HAS_ANGR = True
 except (ImportError, OSError):

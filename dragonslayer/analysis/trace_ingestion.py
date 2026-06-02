@@ -165,7 +165,7 @@ class ExecutionTrace:
             addr = tf.get("address", 0)
             taint_by_addr[addr] = tf.get("is_tainted", False)
 
-        results = []
+        results: list[Any] = []
         for ti in self.instructions:
             if ti.raw_bytes:
                 lifted = lifter.lift(

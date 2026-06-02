@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 # Optional import – graceful degradation
 # ---------------------------------------------------------------------------
 try:
-    import yara  # type: ignore[import-untyped]
+    import yara
 
     YARA_AVAILABLE = True
 except ImportError:
-    yara = None  # type: ignore[assignment]
+    yara = None
     YARA_AVAILABLE = False
 
 

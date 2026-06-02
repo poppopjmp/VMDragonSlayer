@@ -126,7 +126,7 @@ class NormalizationReport:
 # ---------------------------------------------------------------------------
 
 # Import names that indicate anti-debug behaviour
-_ANTI_DEBUG_IMPORTS: dict[str, tuple[str, str]] = {
+_ANTI_DEBUG_IMPORTS: dict[bytes, tuple[str, str]] = {
     b"IsDebuggerPresent": ("IsDebuggerPresent", "Direct debugger detection"),
     b"CheckRemoteDebuggerPresent": ("CheckRemoteDebugger", "Remote debugger detection"),
     b"NtQueryInformationProcess": ("NtQueryInformationProcess", "NT process info query (debug flags)"),

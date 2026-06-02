@@ -250,12 +250,17 @@ def _collect_unicorn(
     config: TraceConfig,
 ) -> ExecutionTrace:
     """Collect trace using the built-in Unicorn engine."""
+    from dragonslayer.analysis.trace_engine import (
+        TraceConfig as EngineTraceConfig,
+    )
     from dragonslayer.analysis.trace_engine import TraceEngine
 
     engine = TraceEngine(
         arch=config.arch,
-        capture_registers=config.capture_registers,
-        capture_memory=config.capture_memory,
+        config=EngineTraceConfig(
+            capture_registers=config.capture_registers,
+            capture_memory=config.capture_memory,
+        ),
     )
     trace = engine.trace(
         binary_data,
@@ -330,7 +335,6 @@ def _collect_via_plugin(
 
     # Build a lightweight plugin context
     ctx = PluginContext(
-        binary_data=binary_data,
         shared_data={
             "vm_discovery": {"dispatcher_addresses": [entry] if entry else []},
         },
@@ -346,7 +350,7 @@ def _collect_via_plugin(
         return _collect_external_stub(binary_data, entry, config, backend)
 
     # Convert deposited shared_data → ExecutionTrace
-    plugin_data = ctx.shared_data.get(target_name, {})
+    plugin_data = ctx.shared_data.get(target_name or "", {})
     if not plugin_data:
         return _collect_external_stub(binary_data, entry, config, backend)
 

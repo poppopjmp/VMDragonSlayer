@@ -32,7 +32,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from dragonslayer.analysis.handler_semantics import (
     OpcodeTableEntry,
@@ -49,7 +49,7 @@ try:
     import networkx as nx
     NX_AVAILABLE = True
 except ImportError:
-    nx = None  # type: ignore[assignment]
+    nx = None
     NX_AVAILABLE = False
 
 _GRAPH_ERRORS: tuple[type[Exception], ...] = (
@@ -579,7 +579,9 @@ def _block_lines(
             fake_bnd = HandlerBoundary(
                 handler_address=handler_addr,
                 vip_value=vip,
-                trace_index=0,
+                trace_start=0,
+                trace_end=0,
+                instruction_count=1,
             )
             line = _format_instruction_ssa(entry, fake_bnd, 0, namer)
         lines.append(line)
@@ -686,7 +688,7 @@ def _compute_immediate_postdominator(
     try:
         lengths = nx.single_source_shortest_path_length(cfg_graph, block_id)
         best = min(common, key=lambda n: lengths.get(n, 10**9))
-        return best
+        return cast("int | None", best)
     except _GRAPH_ERRORS:
         return min(common) if common else None
 
@@ -872,19 +874,19 @@ def structure_cfg(
 
     # Loop headers
     loop_headers: set[int] = set()
-    with contextlib.suppress(_GRAPH_ERRORS):
+    with contextlib.suppress(*_GRAPH_ERRORS):
         loop_headers = set(cfg.loop_headers())
 
     # Natural loops: header → body set
     loop_bodies: dict[int, set[int]] = {}
     try:
         from dragonslayer.analysis.bytecode_cfg import detect_natural_loops
-        loops = detect_natural_loops(cfg)
+        loops = detect_natural_loops(cfg.blocks, cfg.edges)
         for lp in loops:
             hdr = lp.get("header") if isinstance(lp, dict) else getattr(lp, "header", None)
             body = lp.get("body") if isinstance(lp, dict) else getattr(lp, "body", set())
             if hdr is not None:
-                loop_bodies[hdr] = set(body)
+                loop_bodies[hdr] = set(body or [])
     except _GRAPH_ERRORS:
         pass
 
@@ -1231,13 +1233,13 @@ def _extract_cluster_summary(clustering: Any) -> dict[str, int]:
             if isinstance(cl, dict):
                 name = cl.get("canonical_operation", cl.get("name", "unknown"))
                 count = cl.get("handler_count", len(cl.get("members", [])))
-                result[name] = count
+                result[str(name)] = count
     else:
         # ClusteringResult object.
         for cl in getattr(clustering, "clusters", []):
             name = getattr(cl, "canonical_operation", "unknown")
             count = len(getattr(cl, "members", []))
-            result[name] = count
+            result[str(name)] = count
 
     return result
 

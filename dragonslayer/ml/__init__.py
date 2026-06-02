@@ -19,12 +19,12 @@ try:
 except (ImportError, AttributeError):
     FeatureExtractor = None  # type: ignore[assignment,misc]
     FeatureVector = None  # type: ignore[assignment,misc]
-    extract_extended_features = None  # type: ignore[assignment,misc]
-    extract_bigram_features = None  # type: ignore[assignment,misc]
-    extract_register_effects = None  # type: ignore[assignment,misc]
-    extract_operand_pattern_features = None  # type: ignore[assignment,misc]
-    EXTENDED_FEATURE_NAMES = None  # type: ignore[assignment,misc]
-    VMPROTECT_BIGRAMS = None  # type: ignore[assignment,misc]
+    extract_extended_features = None  # type: ignore[assignment]
+    extract_bigram_features = None  # type: ignore[assignment]
+    extract_register_effects = None  # type: ignore[assignment]
+    extract_operand_pattern_features = None  # type: ignore[assignment]
+    EXTENDED_FEATURE_NAMES = None  # type: ignore[assignment]
+    VMPROTECT_BIGRAMS = None  # type: ignore[assignment]
 
 try:
     from .trainer import (
@@ -44,16 +44,16 @@ try:
 except (ImportError, AttributeError):
     ModelTrainer = None  # type: ignore[assignment,misc]
     TrainingResult = None  # type: ignore[assignment,misc]
-    prepare_training_data = None  # type: ignore[assignment,misc]
-    prepare_extended_training_data = None  # type: ignore[assignment,misc]
-    generate_synthetic_handlers = None  # type: ignore[assignment,misc]
-    generate_multi_protector_data = None  # type: ignore[assignment,misc]
-    feature_importance = None  # type: ignore[assignment,misc]
-    train_full_pipeline = None  # type: ignore[assignment,misc]
-    train_and_save_model = None  # type: ignore[assignment,misc]
-    PROTECTOR_VMPROTECT = None  # type: ignore[assignment,misc]
-    PROTECTOR_THEMIDA = None  # type: ignore[assignment,misc]
-    PROTECTOR_CV = None  # type: ignore[assignment,misc]
+    prepare_training_data = None  # type: ignore[assignment]
+    prepare_extended_training_data = None  # type: ignore[assignment]
+    generate_synthetic_handlers = None  # type: ignore[assignment]
+    generate_multi_protector_data = None  # type: ignore[assignment]
+    feature_importance = None  # type: ignore[assignment]
+    train_full_pipeline = None  # type: ignore[assignment]
+    train_and_save_model = None  # type: ignore[assignment]
+    PROTECTOR_VMPROTECT = None  # type: ignore[assignment]
+    PROTECTOR_THEMIDA = None  # type: ignore[assignment]
+    PROTECTOR_CV = None  # type: ignore[assignment]
 
 try:
     from .model import (
@@ -76,10 +76,10 @@ try:
         is_canonical,
     )
 except (ImportError, AttributeError):
-    CANONICAL_CATEGORIES = None  # type: ignore[assignment,misc]
-    CANONICAL_SET = None  # type: ignore[assignment,misc]
-    canonicalize = None  # type: ignore[assignment,misc]
-    is_canonical = None  # type: ignore[assignment,misc]
+    CANONICAL_CATEGORIES = None  # type: ignore[assignment]
+    CANONICAL_SET = None  # type: ignore[assignment]
+    canonicalize = None  # type: ignore[assignment]
+    is_canonical = None  # type: ignore[assignment]
 
 try:
     from .evaluate import (
@@ -93,8 +93,8 @@ except (ImportError, AttributeError):
     EvaluationReport = None  # type: ignore[assignment,misc]
     GroundTruthEntry = None  # type: ignore[assignment,misc]
     ClassMetrics = None  # type: ignore[assignment,misc]
-    evaluate_model = None  # type: ignore[assignment,misc]
-    load_ground_truth = None  # type: ignore[assignment,misc]
+    evaluate_model = None  # type: ignore[assignment]
+    load_ground_truth = None  # type: ignore[assignment]
 
 try:
     from .ensemble import EnsembleClassifier, StackedEnsemble, WeightedEnsemble
@@ -118,9 +118,9 @@ try:
     )
 except (ImportError, AttributeError):
     TrainedHandlerModel = None  # type: ignore[assignment,misc]
-    classify_handlers = None  # type: ignore[assignment,misc]
-    build_handler_classifier = None  # type: ignore[assignment,misc]
-    HANDLER_CATEGORIES = None  # type: ignore[assignment,misc]
+    classify_handlers = None  # type: ignore[assignment]
+    build_handler_classifier = None  # type: ignore[assignment]
+    HANDLER_CATEGORIES = None  # type: ignore[assignment]
 
 try:
     from .active_learning import (
@@ -138,10 +138,10 @@ except (ImportError, AttributeError):
     UncertaintyStrategy = None  # type: ignore[assignment,misc]
     FeedbackStore = None  # type: ignore[assignment,misc]
     FeedbackEntry = None  # type: ignore[assignment,misc]
-    select_uncertain_samples = None  # type: ignore[assignment,misc]
-    compute_entropy = None  # type: ignore[assignment,misc]
-    compute_margin = None  # type: ignore[assignment,misc]
-    export_training_set = None  # type: ignore[assignment,misc]
+    select_uncertain_samples = None  # type: ignore[assignment]
+    compute_entropy = None  # type: ignore[assignment]
+    compute_margin = None  # type: ignore[assignment]
+    export_training_set = None  # type: ignore[assignment]
 
 __all__ = [
     'FeatureExtractor',

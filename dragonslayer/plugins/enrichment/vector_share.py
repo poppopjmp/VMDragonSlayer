@@ -21,7 +21,7 @@ import hashlib
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, cast
 
 from .. import Plugin, PluginContext, PluginResult, Stage, register_plugin
 
@@ -29,14 +29,14 @@ logger = logging.getLogger(__name__)
 
 _HAS_NUMPY = False
 try:
-    import numpy as np  # type: ignore[import-untyped]
+    import numpy as np
     _HAS_NUMPY = True
 except ImportError:
     pass
 
 _HAS_REQUESTS = False
 try:
-    import requests  # type: ignore[import-untyped]
+    import requests
     _HAS_REQUESTS = True
 except ImportError:
     pass
@@ -176,7 +176,7 @@ class VectorSharePlugin(Plugin):
 
         for func in functions:
             name = func.get("name", "")
-            mnemonics: list[str] = func.get("mnemonics", [])
+            mnemonics: Any = func.get("mnemonics", [])
 
             # Flatten Counter-style mnemonics dicts to lists
             if isinstance(mnemonics, dict):
@@ -271,7 +271,7 @@ class VectorSharePlugin(Plugin):
                 "vectorshare_kb", vec.tolist(), field="vector", size=1
             )
             if hits and hits[0].get("_score", 0) > 0.95:
-                return hits[0].get("name")
+                return cast("str | None", hits[0].get("name"))
             return None
 
         # Brute-force fallback for memory / local backends

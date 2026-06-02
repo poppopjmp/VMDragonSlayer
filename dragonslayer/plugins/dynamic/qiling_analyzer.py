@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 _HAS_QILING = False
 try:
-    from qiling import Qiling  # type: ignore[import-untyped]
-    from qiling.const import QL_VERBOSE  # type: ignore[import-untyped]
+    from qiling import Qiling
+    from qiling.const import QL_VERBOSE
 
     _HAS_QILING = True
 except (ImportError, OSError):

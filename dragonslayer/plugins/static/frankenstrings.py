@@ -34,12 +34,12 @@ logger = logging.getLogger(__name__)
 # Optional heavyweight dependencies -------------------------------------------
 _HAS_MULTIDECODER = False
 try:
-    from multidecoder.decoders.codec import find_utf16  # type: ignore[import-untyped]
+    from multidecoder.decoders.codec import find_utf16
     from multidecoder.decoders.pe_file import (
-        find_pe_files,  # type: ignore[import-untyped]
+        find_pe_files,
     )
-    from multidecoder.multidecoder import Multidecoder  # type: ignore[import-untyped]
-    from multidecoder.registry import build_registry  # type: ignore[import-untyped]
+    from multidecoder.multidecoder import Multidecoder
+    from multidecoder.registry import build_registry
     _HAS_MULTIDECODER = True
 except ImportError:
     pass
@@ -47,7 +47,7 @@ except ImportError:
 _HAS_BBCRACK = False
 try:
     from assemblyline_service_utilities.common.balbuzard.bbcrack import (
-        bbcrack,  # type: ignore[import-untyped]
+        bbcrack,
     )
     _HAS_BBCRACK = True
 except ImportError:
@@ -248,7 +248,7 @@ class _FrankenStringsEngine:
                 except (ValueError, TypeError, UnicodeDecodeError, AttributeError):  # noqa: BLE001
                     continue
         if results:
-            self.strings["unicode_encoded"] = results  # type: ignore[assignment]
+            self.strings["unicode_encoded"] = results
 
     @staticmethod
     def _decode_enc(data: bytes, enc: bytes) -> str | None:

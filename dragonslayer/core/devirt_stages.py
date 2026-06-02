@@ -197,8 +197,13 @@ def step_identify_dispatcher(ws: DevirtWorkspace) -> None:
                     "vmprotect_dispatcher", ws.vmprotect_match,
                 )
         else:
-            # Legacy fallback: VMProtect-specific binary scan
-            disp_match = find_vmprotect_dispatcher(ws.binary_data)
+            # Legacy fallback: VMProtect-specific binary scan. ``binary_data``
+            # is a keyword arg used for handler-table extraction; dispatcher
+            # detection itself needs lifted instructions (none here at this
+            # stage), so this returns None unless instructions were supplied.
+            disp_match = find_vmprotect_dispatcher(
+                [], binary_data=ws.binary_data,
+            )
             if disp_match is not None:
                 ws.vmprotect_match = disp_match.to_dict()
                 ws.dispatcher_match = ws.vmprotect_match
@@ -541,13 +546,14 @@ def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
     """Detect and recursively deobfuscate nested VM layers (B100)."""
     from ..analysis.handler_semantics import analyse_handler_semantics
     from ..analysis.pseudocode import emit_pseudocode
+
+    # These helpers are defined in pipeline.py at module level
+    from ..analysis.trace_ingestion import ExecutionTrace
     from ..analysis.vm_discovery.dispatcher import find_dispatcher
     from ..analysis.vm_discovery.handler_boundaries import (
         identify_vip_register,
         segment_trace,
     )
-
-    # These helpers are defined in pipeline.py at module level
     from .pipeline import _detect_inner_vm_entries, _extract_inner_trace
 
     max_nesting = int(ws.shared_data.get("max_nesting_depth", 3))
@@ -577,18 +583,21 @@ def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
                 inner_disp_addrs = inner_match.to_dict().get(
                     "handler_addresses", [],
                 )
+                # Wrap the sliced instruction list as an ExecutionTrace for the
+                # boundary/semantics helpers (which read ``trace.instructions``).
+                inner_exec = ExecutionTrace(instructions=inner_trace)
                 inner_vip = identify_vip_register(
-                    inner_trace, inner_disp_addrs,
+                    inner_exec, inner_disp_addrs,
                 )
                 if inner_vip is None:
                     continue
                 inner_seg = segment_trace(
-                    inner_trace, inner_vip, inner_disp_addrs,
+                    inner_exec, inner_vip, inner_disp_addrs,
                 )
                 if not inner_seg.boundaries:
                     continue
                 inner_opcode = analyse_handler_semantics(
-                    inner_trace, inner_seg.boundaries,
+                    inner_exec, inner_seg.boundaries,
                 )
                 inner_pseudo = emit_pseudocode(
                     inner_opcode, inner_seg.boundaries, None,

@@ -22,7 +22,7 @@ from typing import Any
 
 
 # Late import to avoid circular dependency
-def _get_taint_tag():
+def _get_taint_tag() -> Any:
     from .tracker import TaintTag
     return TaintTag
 

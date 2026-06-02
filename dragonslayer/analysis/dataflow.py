@@ -44,7 +44,7 @@ try:
     import networkx as nx
     _NX = True
 except ImportError:
-    nx = None  # type: ignore[assignment]
+    nx = None
     _NX = False
 
 _GRAPH_ERRORS: tuple[type[Exception], ...] = (

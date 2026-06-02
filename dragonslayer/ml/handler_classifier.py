@@ -29,7 +29,7 @@ import json
 import logging
 import math
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from dragonslayer.analysis.vm_discovery.handler_boundaries import (
     HandlerBoundary,
@@ -46,7 +46,7 @@ try:
     from sklearn.ensemble import RandomForestClassifier as _RFC
     SKLEARN_AVAILABLE = True
 except ImportError:
-    _RFC = None  # type: ignore[assignment, misc]
+    _RFC = None
     SKLEARN_AVAILABLE = False
 
 
@@ -146,7 +146,7 @@ class TrainedHandlerModel(VMHandlerModel):
         Raises ``FileNotFoundError`` or ``json.JSONDecodeError`` on failure.
         """
         with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+            return cast("dict[str, Any]", json.load(fh))
 
     # ---- load -----------------------------------------------------------
 
@@ -188,10 +188,13 @@ class TrainedHandlerModel(VMHandlerModel):
         return self._predict_heuristic(values, names)
 
     def _predict_sklearn(
-        self, values: list[float], names: list[str],
+        self, values: list[float], names: list[str] | None = None,
     ) -> PredictionResult:
         """Prediction via trained sklearn model."""
         import numpy as np
+
+        if self._sklearn_model is None:
+            return self._predict_heuristic(values, names or [])
 
         X = np.array(values).reshape(1, -1)
         proba = self._sklearn_model.predict_proba(X)[0]

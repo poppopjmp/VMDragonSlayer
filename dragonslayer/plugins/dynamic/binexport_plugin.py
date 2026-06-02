@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _HAS_BINEXPORT = False
 try:
-    from binexport import ProgramBinExport  # type: ignore[import-untyped]
+    from binexport import ProgramBinExport
 
     _HAS_BINEXPORT = True
 except (ImportError, OSError):

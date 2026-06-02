@@ -22,6 +22,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any, cast
 
 import click
 
@@ -207,7 +208,7 @@ def analyze(
     if json_output:
         click.echo(json.dumps(result_dict, indent=2, default=str))
     else:
-        _print_analysis_summary(result_dict, elapsed)
+        _print_analysis_summary(cast("dict[Any, Any]", result_dict), elapsed)
 
     # Non-zero exit when VM protection is detected (useful in CI).
     vm_info = result_dict.get("results", {}).get("vm_discovery", {})
@@ -374,7 +375,7 @@ def export_cmd(
     trace = ExecutionTrace(
         handlers=handlers_list,
         metadata={
-            **result_dict.get("metadata", {}),
+            **cast("dict[str, Any]", result_dict.get("metadata", {})),
             "analysis_type": analysis_type,
             "source_file": file,
         },

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ def _const_fold_replace(m: re.Match) -> str:
             return str(result)
     except (ValueError, OverflowError):
         pass
-    return m.group(0)
+    return cast("str", m.group(0))
 
 
 # ---------------------------------------------------------------------------

@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # Try to import capstone for refined disassembly-based validation.
 _HAS_CAPSTONE = False
 try:
-    import capstone  # type: ignore[import-untyped]  # noqa: F401  (availability probe)
+    import capstone  # noqa: F401  (availability probe)
     _HAS_CAPSTONE = True
 except ImportError:
     pass

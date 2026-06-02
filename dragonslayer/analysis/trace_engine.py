@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import struct
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 from dragonslayer.analysis.trace_ingestion import (
     ExecutionTrace,
@@ -87,7 +88,7 @@ if UNICORN_AVAILABLE:
     _UC_ERRORS = (*_UC_ERRORS, UcError)
 
 try:
-    import capstone  # type: ignore[import-untyped]  # noqa: F401  (availability probe)
+    import capstone  # noqa: F401  (availability probe)
     CAPSTONE_AVAILABLE = True
 except ImportError:
     CAPSTONE_AVAILABLE = False
@@ -96,16 +97,16 @@ except ImportError:
 # Disassembler helper — delegates to unified Disassembler
 # ---------------------------------------------------------------------------
 
-def _make_disassembler(arch: str):
+def _make_disassembler(arch: str) -> Any:
     """Create a unified Disassembler for the given architecture."""
     arch_str = "x64" if "64" in arch else "x86"
     return _create_disasm(arch_str)
 
 
-def _disassemble_one(dis, code: bytes, address: int) -> tuple[str, int]:
+def _disassemble_one(dis: Any, code: bytes, address: int) -> tuple[str, int]:
     """Disassemble one instruction, return (disasm_text, size)."""
     if dis is not None:
-        return dis.disassemble_to_text(code, address)
+        return cast("tuple[str, int]", dis.disassemble_to_text(code, address))
     # Fallback — no disassembler
     return f"db 0x{code[0]:02x}" if code else "db 0x00", max(len(code), 1)
 
@@ -311,7 +312,7 @@ class TraceEngine:
 
     def trace_parsed(
         self,
-        parsed_binary,
+        parsed_binary: Any,
         data: bytes,
         *,
         entry_va: int | None = None,
@@ -378,7 +379,7 @@ class TraceEngine:
     def _read_reg(self, name: str) -> int:
         uc_id = self._reg_map.get(name)
         if uc_id is not None:
-            return self._uc.reg_read(uc_id)
+            return int(self._uc.reg_read(uc_id))
         return 0
 
     def _write_reg(self, name: str, value: int) -> None:
@@ -393,7 +394,7 @@ class TraceEngine:
     # Hooks
     # ------------------------------------------------------------------
 
-    def _hook_code(self, uc, address: int, size: int, user_data) -> None:
+    def _hook_code(self, uc: Any, address: int, size: int, user_data: Any) -> None:
         """Called before each instruction executes."""
         self._insn_count += 1
         if self._insn_count > self.config.max_instructions:
@@ -442,17 +443,17 @@ class TraceEngine:
                 ))
         self._prev_addr = address
 
-    def _hook_mem_read(self, uc, access, address: int, size: int, value, user_data) -> None:
+    def _hook_mem_read(self, uc: Any, access: Any, address: int, size: int, value: Any, user_data: Any) -> None:
         self._mem_accesses.append(TraceMemoryAccess(
             type="R", address=address, size=size, value=0,
         ))
 
-    def _hook_mem_write(self, uc, access, address: int, size: int, value, user_data) -> None:
+    def _hook_mem_write(self, uc: Any, access: Any, address: int, size: int, value: Any, user_data: Any) -> None:
         self._mem_accesses.append(TraceMemoryAccess(
             type="W", address=address, size=size, value=value,
         ))
 
-    def _hook_unmapped(self, uc, access, address: int, size: int, value, user_data) -> bool:
+    def _hook_unmapped(self, uc: Any, access: Any, address: int, size: int, value: Any, user_data: Any) -> bool:
         """Auto-map unmapped memory regions on access."""
         aligned = address & ~0xFFF
         map_size = max(_AUTO_MAP_SIZE, ((size + 0xFFF) & ~0xFFF))

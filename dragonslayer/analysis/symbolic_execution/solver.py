@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ try:
     import z3
     _Z3_AVAILABLE = True
 except ImportError:
-    z3 = None  # type: ignore[assignment]
+    z3 = None
     _Z3_AVAILABLE = False
 
 # B57: Import resource-limit exceptions for raising on solver exhaustion.
@@ -194,7 +194,7 @@ class Z3Solver:
             if extra_constraints:
                 self._solver.add(*extra_constraints)
             result = self._solver.check()
-            return result == z3.sat
+            return cast("bool", result == z3.sat)
         except (z3.Z3Exception, ValueError):
             return False
         finally:

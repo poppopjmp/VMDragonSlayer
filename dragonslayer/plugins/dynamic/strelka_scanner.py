@@ -28,28 +28,28 @@ logger = logging.getLogger(__name__)
 # Optional dependency imports
 _HAS_PEFILE = False
 try:
-    import pefile  # type: ignore[import-untyped]
+    import pefile
     _HAS_PEFILE = True
 except ImportError:
     pass
 
 _HAS_YARA = False
 try:
-    import yara  # type: ignore[import-untyped]
+    import yara
     _HAS_YARA = True
 except ImportError:
     pass
 
 _HAS_OLETOOLS = False
 try:
-    from oletools.olevba import VBA_Parser  # type: ignore[import-untyped]
+    from oletools.olevba import VBA_Parser
     _HAS_OLETOOLS = True
 except ImportError:
     pass
 
 _HAS_MAGIC = False
 try:
-    import magic as _magic  # type: ignore[import-untyped]
+    import magic as _magic
     _HAS_MAGIC = True
 except ImportError:
     pass

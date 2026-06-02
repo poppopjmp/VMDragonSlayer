@@ -208,7 +208,7 @@ def evaluate_model(
     per_class: dict[str, ClassMetrics] = {
         c: ClassMetrics(label=c) for c in CANONICAL_CATEGORIES
     }
-    confusion: dict[str, dict[str, int]] = defaultdict(lambda: Counter())  # type: ignore[arg-type]
+    confusion: dict[str, dict[str, int]] = defaultdict(lambda: Counter())
     predictions: list[tuple[str, str, float]] = []
     correct = 0
 
