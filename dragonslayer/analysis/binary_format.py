@@ -34,7 +34,7 @@ try:
 
     LIEF_AVAILABLE = True
 except ImportError:
-    lief = None
+    lief = None  # type: ignore[assignment]
     LIEF_AVAILABLE = False
 
 _LIEF_ERRORS: tuple[type[Exception], ...] = (

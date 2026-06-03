@@ -171,7 +171,7 @@ class TritonAnalyzer(Plugin):
                     guidance.append(blk)
 
         # Determine entry addresses
-        entry = binary.entrypoint
+        entry = int(getattr(binary, "entrypoint", 0))
         if isinstance(binary, lief.PE.Binary):
             entry += binary.optional_header.imagebase
 

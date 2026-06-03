@@ -89,7 +89,8 @@ class CertAnalyzer(Plugin):
             result["error"] = "Unknown or unsupported file format"
             return result
 
-        result["format"] = binary.format.name
+        fmt = getattr(binary, "format", None)
+        result["format"] = fmt.name if fmt is not None else "unknown"
 
         # PE Authenticode ---------------------------------------------------
         if isinstance(binary, lief.PE.Binary):

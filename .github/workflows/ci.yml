@@ -35,7 +35,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          # Test framework + optional deps the (non-emulation) suite imports
+          # at collection time. The heavy emulation backends (unicorn/triton/
+          # angr/qiling) are exercised separately in the 'emulation' job.
+          pip install pytest pytest-cov pytest-asyncio hypothesis jsonschema
+          pip install fastapi "uvicorn[standard]" python-multipart requests
+          pip install scikit-learn joblib
           pip install -e .
 
       - name: Run tests with coverage
