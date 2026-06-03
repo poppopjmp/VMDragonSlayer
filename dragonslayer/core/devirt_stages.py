@@ -263,13 +263,14 @@ def step_decrypt_bytecode(ws: DevirtWorkspace) -> None:
             make_decryptor_from_dispatcher,
             make_generic_decryptor,
         )
+        trace_records = ws.trace.instructions if ws.trace is not None else []
         if ws.vmprotect_match is not None:
             ws.bytecode_decryptor = make_decryptor_from_dispatcher(
-                ws.vmprotect_match, ws.trace,
+                ws.vmprotect_match, trace_records,
             )
         elif ws.dispatcher_match is not None:
             ws.bytecode_decryptor = make_generic_decryptor(
-                ws.dispatcher_match, ws.trace,
+                ws.dispatcher_match, trace_records,
             )
 
         if ws.bytecode_decryptor is not None:
@@ -348,6 +349,24 @@ def step_segment_handlers(ws: DevirtWorkspace) -> bool:
                 ws.dispatcher_addrs.append(addr)
                 ht_addrs.add(addr)
 
+    # Fallback: when no dispatcher was identified (e.g. a non-jump-table
+    # interpreter that the dispatcher heuristics don't recognise), derive a
+    # dispatch anchor straight from the trace. The dispatcher / loop head is
+    # the most frequently re-executed address, so the addresses revisited
+    # most often are good segmentation anchors.
+    if not ws.dispatcher_addrs and ws.trace is not None and ws.trace.instructions:
+        from collections import Counter
+
+        addr_counts = Counter(ti.address for ti in ws.trace.instructions)
+        revisited = sorted(
+            (a for a, c in addr_counts.items() if c >= 2),
+            key=lambda a: addr_counts[a],
+            reverse=True,
+        )
+        if revisited:
+            ws.dispatcher_addrs = revisited[:8]
+            ws.shared_data.setdefault("dispatcher_addresses_inferred", revisited[:8])
+
     ws.vip_candidate = identify_vip_register(ws.trace, ws.dispatcher_addrs)
     if ws.vip_candidate is None:
         return False
@@ -368,7 +387,7 @@ def step_extract_handlers(ws: DevirtWorkspace) -> None:
             extract_handler_bodies,
         )
         extraction = extract_handler_bodies(
-            ws.trace, ws.boundaries, ws.vip_candidate.name,
+            ws.trace.instructions, ws.boundaries, ws.vip_candidate.name,
             dispatcher_addresses=tuple(ws.dispatcher_addrs),
         )
         ws.extraction_data = extraction.to_dict()
@@ -388,7 +407,7 @@ def step_identify_context(ws: DevirtWorkspace) -> None:
             identify_vm_context,
         )
         context_layout = identify_vm_context(
-            ws.trace, ws.dispatcher_addrs, ws.boundaries,
+            ws.trace.instructions, ws.dispatcher_addrs, ws.boundaries,
             vip_register=ws.vip_candidate.name,
         )
         ws.context_layout_data = context_layout.to_dict()
@@ -437,7 +456,7 @@ def step_analyze_semantics(ws: DevirtWorkspace) -> None:
             refine_opcode_table,
         )
         clustering_result = cluster_handlers_by_semantics(
-            ws.opcode_table,
+            ws.opcode_table.entries,
             symbolic_summaries=sym_summaries,
         )
         ws.clustering_data = clustering_result.to_dict()

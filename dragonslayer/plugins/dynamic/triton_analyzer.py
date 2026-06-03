@@ -34,6 +34,7 @@ try:
         ARCH,
         AST_REPRESENTATION,
         CALLBACK,
+        EXCEPTION,
         OPERAND,
         Instruction,
         TritonContext,
@@ -95,15 +96,14 @@ class TritonAnalyzer(Plugin):
         if binary is None:
             raise ValueError(f"lief could not parse {file_path}")
 
-        # Determine architecture
+        # Determine architecture (version-tolerant across LIEF releases:
+        # the ELF/PE enum paths have changed names over time, so rely on the
+        # stable ELFCLASS64==2 value and a string check on the PE machine).
         is_64 = False
         if isinstance(binary, lief.PE.Binary):
-            is_64 = binary.header.machine in (
-                lief.PE.Header.MACHINE_TYPES.AMD64,
-                lief.PE.Header.MACHINE_TYPES.ARM64,
-            )
+            is_64 = "64" in str(binary.header.machine)
         elif isinstance(binary, lief.ELF.Binary):
-            is_64 = binary.header.identity_class == lief.ELF.ELF_CLASS.CLASS64
+            is_64 = int(binary.header.identity_class) == 2  # ELFCLASS64
 
         # Init Triton
         tc = TritonContext()
@@ -113,7 +113,10 @@ class TritonAnalyzer(Plugin):
             tc.setArchitecture(ARCH.X86)
         tc.setAstRepresentationMode(AST_REPRESENTATION.PYTHON)
 
-        # Load sections
+        # Load code into Triton's concrete memory. Prefer sections, but fall
+        # back to PT_LOAD segments when section headers are absent/stripped —
+        # which is common for packed and VM-protected binaries.
+        loaded = 0
         for section in binary.sections:
             content = bytes(section.content)
             if not content:
@@ -122,6 +125,17 @@ class TritonAnalyzer(Plugin):
             if isinstance(binary, lief.PE.Binary):
                 vaddr += binary.optional_header.imagebase
             tc.setConcreteMemoryAreaValue(vaddr, content)
+            loaded += len(content)
+
+        if loaded == 0 and isinstance(binary, lief.ELF.Binary):
+            for segment in binary.segments:
+                # PT_LOAD == 1; compare by value to stay LIEF-version-tolerant.
+                if int(getattr(segment, "type", 0)) != 1:
+                    continue
+                content = bytes(segment.content)
+                if content:
+                    tc.setConcreteMemoryAreaValue(segment.virtual_address, content)
+                    loaded += len(content)
 
         # --- Taint engine: taint VM context registers -----------------------
         # Taint registers commonly used as VM context pointers
@@ -277,7 +291,10 @@ class TritonAnalyzer(Plugin):
                 inst = Instruction(pc, opcode)
                 mem_before = len(mem_accesses)
                 try:
-                    if not tc.processing(inst):
+                    # Triton's processing() returns an EXCEPTION code; NO_FAULT
+                    # (== 0) means success. (Older releases returned a bool, so
+                    # the previous ``if not processing()`` broke on success.)
+                    if tc.processing(inst) != EXCEPTION.NO_FAULT:
                         break
                 except (ValueError, TypeError, RuntimeError):
                     break

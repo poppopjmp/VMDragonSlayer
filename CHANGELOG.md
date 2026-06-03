@@ -4,6 +4,40 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Dynamic backends wired + devirt pipeline runs end-to-end
+
+Got the dynamic-analysis backends working and made the orchestrated
+devirtualization pipeline produce real output on a compiled VM binary.
+
+- **Triton** (3 real bugs fixed): the `lief.ELF.ELF_CLASS` arch check used a
+  removed LIEF API; code was loaded only from sections (so section-less /
+  packed binaries mapped no code) → added PT_LOAD segment fallback; and
+  `processing()` now returns an `EXCEPTION` code (`NO_FAULT == 0` on success)
+  so the old `if not processing()` broke after the first instruction. Triton
+  now executes and its trace ingests into the pipeline.
+- **angr**: verified wired — loads the binary, recovers functions/CFG and
+  explores handler targets supplied by `vm_discovery`.
+- **qiling**: wired; requires a rootfs to emulate (the plugin reports this
+  clearly). Operational requirement, not a code bug.
+- **vIP fallback (b)**: `step_segment_handlers` now derives a dispatch anchor
+  from the trace's most-revisited addresses when no dispatcher is detected,
+  so non-jump-table interpreters can still be segmented and devirtualised.
+- **Devirt pipeline trace-typing fixes**: several stages passed an
+  `ExecutionTrace` where a list of trace records was expected
+  (`find_dispatcher`, `extract_handler_bodies`, `identify_vm_context`,
+  the decryptors, `cluster_handlers_by_semantics`). These were latent (the
+  trace was always `None` before) and surfaced once the built-in trace
+  fallback populated it; all normalised. The CLI
+  `analyze --type vmprotect_devirt` now succeeds end-to-end (recovers the
+  vIP, opcode table, and emits pseudocode).
+- **Jump-table fixture (a)**: `tests/fixtures/build_vm_sample_jumptable.py`
+  builds a valid ELF whose VM uses `jmp [table + opcode*8]` dispatch — the
+  canonical shape `find_dispatcher` targets (now covered by an e2e test).
+- **Tests/CI**: added `tests/test_e2e_dynamic_backends.py` (jump-table
+  detection, full devirt pipeline, Triton, angr); the `emulation` CI job runs
+  both e2e suites.
+
+
 ### End-to-end emulation/devirtualization wiring + fixture
 
 Made the dynamic-analysis path actually run end to end and proved it on a

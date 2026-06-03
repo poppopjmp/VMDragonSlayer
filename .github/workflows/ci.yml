@@ -63,8 +63,13 @@ jobs:
           pip install pytest "unicorn>=2.0.1" "keystone-engine>=0.9.2" "pefile>=2024.8.26"
           pip install -e .
 
-      - name: Run end-to-end emulation/devirtualization test
-        run: python -m pytest tests/test_e2e_vm_sample.py -v --tb=short
+      - name: Run end-to-end emulation/devirtualization tests
+        # The Triton/angr/qiling-specific tests skip unless those heavier
+        # backends are installed; the Unicorn-driven trace, jump-table
+        # dispatcher detection, and full devirt-pipeline tests run here.
+        run: |
+          python -m pytest tests/test_e2e_vm_sample.py \
+            tests/test_e2e_dynamic_backends.py -v --tb=short
 
   lint:
     runs-on: ubuntu-latest
