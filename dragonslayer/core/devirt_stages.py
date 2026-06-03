@@ -348,12 +348,24 @@ def step_segment_handlers(ws: DevirtWorkspace) -> bool:
     if src_disp is not None:
         _merge(_table_addrs(src_disp.get("handler_table", [])))
 
-    # Always add the revisit-frequency dispatch chain: the fetch/decode/
-    # dispatch loop runs once per handler invocation, so it's the most
-    # re-executed code.  This makes branch-dispatch VMs (whose dispatcher
-    # heuristics may not fire) segment correctly even when no explicit
-    # dispatcher address is supplied.
+    # Structurally-localised dispatch loop.  This isolates the *outermost*
+    # interpreter's fetch/decode/dispatch block even when the trace contains
+    # multiple interleaved dispatchers (nested VMs) or a hot startup decrypt
+    # loop — both of which would otherwise pollute a naive global hot-address
+    # chain and mis-identify the vIP (e.g. picking the opcode/decrypt scratch
+    # register).  Used as the authoritative dispatcher set for vIP
+    # identification and segmentation; the merged table addresses above remain
+    # in ``ws.dispatcher_addrs`` for downstream consumers.
+    struct_loop: list[int] = []
     if ws.trace is not None and ws.trace.instructions:
+        from ..analysis.vm_discovery.structural import localized_outer_dispatch
+
+        struct_loop = localized_outer_dispatch(ws.trace)
+        _merge(struct_loop)
+
+    # Fallback revisit-frequency chain (branch-dispatch VMs whose structural
+    # loop may be empty): the dispatch loop runs once per handler invocation.
+    if not struct_loop and ws.trace is not None and ws.trace.instructions:
         from collections import Counter
 
         counts = Counter(ti.address for ti in ws.trace.instructions)
@@ -368,11 +380,13 @@ def step_segment_handlers(ws: DevirtWorkspace) -> bool:
             _merge(chain)
             ws.shared_data.setdefault("dispatcher_addresses_inferred", chain[:8])
 
-    ws.vip_candidate = identify_vip_register(ws.trace, ws.dispatcher_addrs)
+    # Prefer the localised outer dispatch loop; fall back to the merged set.
+    seg_disp = struct_loop if struct_loop else ws.dispatcher_addrs
+    ws.vip_candidate = identify_vip_register(ws.trace, seg_disp)
     if ws.vip_candidate is None:
         return False
 
-    seg = segment_trace(ws.trace, ws.vip_candidate, ws.dispatcher_addrs)
+    seg = segment_trace(ws.trace, ws.vip_candidate, seg_disp)
     ws.boundaries = seg.boundaries
     return bool(ws.boundaries)
 

@@ -101,16 +101,17 @@ def test_virtual_loop_vip_not_confused_with_accumulator():
     assert report["vip_register"] == "rsi", report
 
 
-@pytest.mark.xfail(
-    reason="A hot startup decrypt loop out-weighs the real dispatch loop, so "
-    "analyse_vm_structure localises the decryptor (no indirect dispatch in the "
-    "hot set). Detection (is_vm) and vIP are still correct; dispatcher "
-    "localisation is masked. Tracked as a known limitation.",
-    strict=True,
-)
 def test_self_decrypting_locates_real_dispatcher():
-    """Documents the boundary: a startup decrypt loop masks the dispatcher."""
+    """A hot startup decrypt loop must not mask the real dispatcher: the
+    detector relocates the dispatch loop around the repeated indirect-dispatch
+    site, so indirect dispatch is reported and the handler estimate reflects
+    the interpreter (a handful), not the decryptor's iteration count."""
     from dragonslayer.analysis.vm_discovery.structural import analyse_vm_structure
 
     trace, _ = _trace_adv("self_decrypting")
-    assert analyse_vm_structure(trace)["indirect_dispatch"] is True
+    report = analyse_vm_structure(trace)
+    assert report["is_vm"]
+    assert report["vip_register"] == "rsi"
+    assert report["indirect_dispatch"] is True, report
+    # 4 opcodes (LOAD/ADD/XOR/HALT), not the ~16-iteration decrypt loop.
+    assert report["estimated_handlers"] <= 8, report
