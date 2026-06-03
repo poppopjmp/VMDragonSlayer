@@ -4,6 +4,29 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Generic / unknown-VM support + z3 equivalence
+
+Extends analysis beyond signatured protectors (VMProtect/Themida/CV) to
+**unknown and custom VMs**, and uses z3 more broadly for generality.
+
+- **Structural VM detection** (`analysis/vm_discovery/structural.py`):
+  protector-agnostic detection from an execution trace — a tight dispatch
+  loop (revisit frequency), a monotonic vIP register, and indirect/
+  handler-table dispatch.  `VMDetector.detect` now runs this as a fallback
+  (via the built-in Unicorn engine) whenever signature scoring is weak, so
+  custom VMs are flagged as ``generic_vm`` with a real confidence instead of
+  ``vm_detected: False``.  Both custom fixtures now detect at 0.75 / 1.0.
+- **z3-proven handler equivalence**: `handler_clustering.are_semantically_
+  equivalent` gained a z3 fallback that parses two handlers' canonical
+  expressions over shared slot variables and proves equality for all inputs.
+  This merges MBA-obfuscated variants (``(s0^s1)+2*(s0&s1) ≡ s0+s1``) that
+  differ structurally — robust to per-handler obfuscation in unknown VMs.
+
+z3 audit: bitvector symbolic execution, MBA simplification with proven
+equivalence (`verify_equivalence`), three opaque-predicate detectors, and
+incremental path-feasibility pruning with unsat-core diagnostics — all
+correct and effective; the new equivalence check broadens its use.
+
 ### Semantic labeling overhaul (handler classification)
 
 Handlers were collapsing onto a single ``vm_load`` label because the

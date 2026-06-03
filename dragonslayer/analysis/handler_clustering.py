@@ -437,6 +437,39 @@ def _normalize_commutative(expr: str) -> str:
 # Equivalence comparison
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _z3_prove_equivalent(a: NormalizedEffect, b: NormalizedEffect) -> bool:
+    """Prove two handlers compute the same transfer function with z3.
+
+    Parses both canonical expressions over *shared* slot variables and asks
+    z3 whether they are equal for all inputs.  This catches MBA-obfuscated
+    variants (e.g. ``(s0 ^ s1) + 2*(s0 & s1)`` ≡ ``s0 + s1``) that differ
+    structurally but are semantically identical — the key to merging handler
+    variants of unknown/custom VMs.  Returns ``False`` on any parse/solver
+    failure (best-effort).
+    """
+    expr_a, expr_b = a.canonical_expression, b.canonical_expression
+    if not expr_a or not expr_b or expr_a == expr_b:
+        return expr_a == expr_b and bool(expr_a)
+    try:
+        import z3
+
+        from .mba_simplifier import _parse_expr, verify_equivalence
+    except ImportError:
+        return False
+    slots = sorted(set(re.findall(r"slot_\d+", expr_a))
+                   | set(re.findall(r"slot_\d+", expr_b)))
+    if not slots:
+        return False
+    bit_width = (a.operand_width or 8) * 8
+    variables = {s: z3.BitVec(s, bit_width) for s in slots}
+    try:
+        za = _parse_expr(expr_a, variables, bit_width)
+        zb = _parse_expr(expr_b, variables, bit_width)
+        return verify_equivalence(za, zb, 250)
+    except (ValueError, TypeError, AttributeError, z3.Z3Exception):
+        return False
+
+
 def are_semantically_equivalent(
     a: NormalizedEffect,
     b: NormalizedEffect,
@@ -483,6 +516,10 @@ def are_semantically_equivalent(
     if a_abstract == b_abstract:
         # Same algebraic structure, just different slot assignment
         return True, conf * 0.90
+
+    # z3 proof: structurally different but semantically identical (MBA).
+    if _z3_prove_equivalent(a, b):
+        return True, conf * 0.92
 
     return False, 0.0
 

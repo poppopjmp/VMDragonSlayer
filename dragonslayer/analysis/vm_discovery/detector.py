@@ -332,6 +332,23 @@ class VMDetector:
             score += 0.05
 
         score = min(score, 1.0)
+
+        # Protector-agnostic structural fallback: when the signature-based
+        # score is weak (i.e. no known protector matched), emulate the binary
+        # and look for generic VM-interpreter structure (dispatch loop +
+        # monotonic vIP + indirect dispatch).  This is what lets the system
+        # flag *unknown / custom* VMs.
+        structural: dict[str, Any] = {}
+        if score < 0.5:
+            structural = self._structural_scan(data)
+            if structural.get("is_vm"):
+                score = max(score, float(structural["confidence"]))
+                if protector == "unknown":
+                    protector = "generic_vm"
+                for ev in structural.get("evidence", []):
+                    indicators.append({"check": "structural", "detail": ev})
+
+        score = min(score, 1.0)
         vm_detected = score >= 0.30
 
         return {
@@ -343,4 +360,32 @@ class VMDetector:
             "sections": sections,
             "entropy": entropy_stats,
             "dispatchers": dispatchers[:10],
+            "structural": structural,
         }
+
+    def _structural_scan(self, data: bytes) -> dict[str, Any]:
+        """Best-effort generic VM-structure detection via built-in emulation.
+
+        Returns ``{}`` when the Unicorn backend is unavailable or the binary
+        can't be traced.
+        """
+        try:
+            from ..trace_engine import UNICORN_AVAILABLE, TraceConfig, TraceEngine
+
+            if not UNICORN_AVAILABLE:
+                return {}
+            from ..binary_format import parse_binary
+            from .structural import analyse_vm_structure
+
+            pb = parse_binary(data)
+            entry = int(getattr(pb, "entry_point", 0) or 0)
+            base = int(getattr(pb, "image_base", 0) or 0) or 0x400000
+            arch = "x86_64" if "64" in str(getattr(pb, "architecture", "")) else "x86"
+            if not entry:
+                return {}
+            trace = TraceEngine(arch=arch, config=TraceConfig(max_instructions=4000)).trace(
+                data, entry_va=entry, image_base=base,
+            )
+            return analyse_vm_structure(trace)
+        except Exception:  # best-effort: emulating arbitrary input
+            return {}
