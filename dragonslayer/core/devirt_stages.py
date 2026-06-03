@@ -100,15 +100,18 @@ def step_ingest_trace(ws: DevirtWorkspace) -> None:
     from ..analysis.trace_ingestion import from_shared_data
 
     try:
-        ws.trace = from_shared_data(ws.shared_data)
+        plugin_trace = from_shared_data(ws.shared_data)
     except _STAGE_ERRORS:
-        ws.trace = None
+        plugin_trace = None
+    ws.trace = plugin_trace
 
-    # Fallback: when no dynamic-analysis plugin (Qiling/Triton/angr) supplied a
-    # trace, produce one with the built-in Unicorn engine straight from the
-    # binary's entry point. Best-effort and bounded by max_instructions; only
-    # runs when the optional 'unicorn' backend is installed.
-    if (ws.trace is None or not getattr(ws.trace, "instructions", None)) and ws.binary_data:
+    # Also produce a built-in Unicorn trace from the binary's entry point and
+    # keep whichever trace is *richer* (more instructions). A dynamic plugin
+    # (Qiling/Triton/angr) may only cover a short prefix, so the built-in
+    # whole-program emulation often segments more handlers. Best-effort and
+    # bounded by max_instructions; only when the optional 'unicorn' backend
+    # is installed.
+    if ws.binary_data:
         try:
             from ..analysis.trace_engine import UNICORN_AVAILABLE, TraceEngine
 
@@ -120,14 +123,17 @@ def step_ingest_trace(ws: DevirtWorkspace) -> None:
                 base = int(getattr(pb, "image_base", 0) or 0) or 0x400000
                 arch = "x86_64" if "64" in str(getattr(pb, "architecture", "")) else "x86"
                 if entry:
-                    ws.trace = TraceEngine(arch=arch).trace(
+                    builtin = TraceEngine(arch=arch).trace(
                         ws.binary_data, entry_va=entry, image_base=base,
                     )
-                    if not ws.base_address:
-                        ws.base_address = base
-                    ws.shared_data["entry_point"] = entry
-                    ws.shared_data["image_base"] = base
-                    ws.shared_data["trace_source"] = "builtin_unicorn"
+                    plugin_n = len(plugin_trace.instructions) if plugin_trace else 0
+                    if builtin and len(builtin.instructions) > plugin_n:
+                        ws.trace = builtin
+                        if not ws.base_address:
+                            ws.base_address = base
+                        ws.shared_data["entry_point"] = entry
+                        ws.shared_data["image_base"] = base
+                        ws.shared_data["trace_source"] = "builtin_unicorn"
         except Exception as exc:  # best-effort: emulating arbitrary input
             logger.debug("Built-in trace fallback failed: %s", exc)
 
@@ -316,56 +322,51 @@ def step_segment_handlers(ws: DevirtWorkspace) -> bool:
     )
 
     ws.dispatcher_addrs = list(
-        ws.shared_data.get("vm_discovery", {}).get(
-            "dispatcher_addresses", [],
-        )
+        ws.shared_data.get("vm_discovery", {}).get("dispatcher_addresses", [])
     )
 
-    # Supplement from DispatcherAnalyzer handler_table
-    handler_table = ws.shared_data.get("handler_table", [])
-    if handler_table:
-        ht_addrs = set(ws.dispatcher_addrs)
-        for entry in handler_table:
-            addr = (
-                entry.get("handler_address")
-                if isinstance(entry, dict)
-                else getattr(entry, "handler_address", None)
-            )
-            if addr and addr not in ht_addrs:
-                ws.dispatcher_addrs.append(addr)
-                ht_addrs.add(addr)
+    def _merge(addrs: list[int]) -> None:
+        existing = set(ws.dispatcher_addrs)
+        for a in addrs:
+            if a and a not in existing:
+                ws.dispatcher_addrs.append(a)
+                existing.add(a)
 
-    # Supplement from the dispatcher match
+    # Supplement from DispatcherAnalyzer / dispatcher-match handler tables.
+    def _table_addrs(table: Any) -> list[int]:
+        out: list[int] = []
+        for e in table or []:
+            a = e.get("handler_address") if isinstance(e, dict) else getattr(
+                e, "handler_address", None
+            )
+            if a:
+                out.append(a)
+        return out
+
+    _merge(_table_addrs(ws.shared_data.get("handler_table", [])))
     src_disp = ws.dispatcher_match or ws.vmprotect_match
     if src_disp is not None:
-        ht_addrs = set(ws.dispatcher_addrs)
-        for ht_entry in src_disp.get("handler_table", []):
-            addr = (
-                ht_entry.get("handler_address")
-                if isinstance(ht_entry, dict)
-                else getattr(ht_entry, "handler_address", None)
-            )
-            if addr and addr not in ht_addrs:
-                ws.dispatcher_addrs.append(addr)
-                ht_addrs.add(addr)
+        _merge(_table_addrs(src_disp.get("handler_table", [])))
 
-    # Fallback: when no dispatcher was identified (e.g. a non-jump-table
-    # interpreter that the dispatcher heuristics don't recognise), derive a
-    # dispatch anchor straight from the trace. The dispatcher / loop head is
-    # the most frequently re-executed address, so the addresses revisited
-    # most often are good segmentation anchors.
-    if not ws.dispatcher_addrs and ws.trace is not None and ws.trace.instructions:
+    # Always add the revisit-frequency dispatch chain: the fetch/decode/
+    # dispatch loop runs once per handler invocation, so it's the most
+    # re-executed code.  This makes branch-dispatch VMs (whose dispatcher
+    # heuristics may not fire) segment correctly even when no explicit
+    # dispatcher address is supplied.
+    if ws.trace is not None and ws.trace.instructions:
         from collections import Counter
 
-        addr_counts = Counter(ti.address for ti in ws.trace.instructions)
-        revisited = sorted(
-            (a for a, c in addr_counts.items() if c >= 2),
-            key=lambda a: addr_counts[a],
-            reverse=True,
-        )
-        if revisited:
-            ws.dispatcher_addrs = revisited[:8]
-            ws.shared_data.setdefault("dispatcher_addresses_inferred", revisited[:8])
+        counts = Counter(ti.address for ti in ws.trace.instructions)
+        max_c = max(counts.values()) if counts else 0
+        if max_c >= 2:
+            thr = max(2, int(max_c * 0.7))
+            chain = sorted(
+                (a for a, c in counts.items() if c >= thr),
+                key=lambda a: counts[a],
+                reverse=True,
+            )
+            _merge(chain)
+            ws.shared_data.setdefault("dispatcher_addresses_inferred", chain[:8])
 
     ws.vip_candidate = identify_vip_register(ws.trace, ws.dispatcher_addrs)
     if ws.vip_candidate is None:
@@ -447,6 +448,8 @@ def step_analyze_semantics(ws: DevirtWorkspace) -> None:
     ws.opcode_table = analyse_handler_semantics(
         ws.trace, ws.boundaries,
         symbolic_summaries=sym_summaries,
+        vip_register=ws.vip_candidate.name if ws.vip_candidate else None,
+        dispatcher_addresses=tuple(ws.dispatcher_addrs),
     )
 
     # Cluster semantically-equivalent handler variants
@@ -624,12 +627,16 @@ def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
             )
             for inner_entry in inner_entries:
                 inner_trace = _extract_inner_trace(
-                    ws.trace, inner_entry, ws.boundaries,
+                    ws.trace.instructions, inner_entry, ws.boundaries,
                 )
                 if not inner_trace:
                     continue
+                inner_records = [
+                    ti.to_dict() if hasattr(ti, "to_dict") else ti
+                    for ti in inner_trace
+                ]
                 inner_match = find_dispatcher(
-                    inner_trace, bit_width=64,
+                    inner_records, bit_width=64,
                 )
                 if inner_match is None:
                     continue

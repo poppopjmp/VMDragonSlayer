@@ -4,6 +4,39 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### Semantic labeling overhaul (handler classification)
+
+Handlers were collapsing onto a single ``vm_load`` label because the
+classifier was fed dispatch/plumbing noise. Five complementary
+improvements now recover distinct operations end-to-end.
+
+1. **Symbolic transfer-function classification (preferred)**: a handler's
+   symbolic output expression (``out = in ^ imm`` → XOR) is matched before
+   the histogram — robust to junk and segmentation noise.
+2. **Infrastructure-aware filtering**: `_strip_vm_infrastructure` removes the
+   fetch/decode/dispatch chain (identified by trace revisit frequency) and
+   the vIP advance before the mnemonic histogram is built.
+3. **Operand-aware scoring**: a concrete ALU transform (add/xor/shl/…)
+   out-weights mov-based load/store operand-staging.
+4. **Body-address segmentation**: handlers are keyed by their body entry
+   (first non-dispatch instruction) so branch-dispatch (cmp/je) VMs yield
+   distinct handlers instead of collapsing onto the dispatch-loop head; the
+   devirt pipeline now anchors segmentation on the revisit-frequency dispatch
+   chain (not handler-table bodies) and prefers the richest available trace.
+   Result: both fixtures devirtualise to ``vm_load``/``vm_add``/``vm_xor``.
+5. **ML classifier + synthetic corpus**: new `ml/synthetic.py` generates a
+   large, obfuscation-augmented corpus (12 categories × 4 protector flavours,
+   with junk/opaque-predicate/dead-arith/register-rename transforms; ~9.6k
+   samples). On 146-D features a RandomForest reaches **~95% accuracy /
+   0.95 macro-F1** held-out (GradientBoosting ~97.5%, 3-model soft-vote
+   ~97%); `scripts/train_handler_classifier.py` prints the full picture.
+   Cross-handler consistency voting via `handler_clustering.refine_opcode_table`
+   harmonises labels across equivalent handler variants.
+
+Also fixed remaining ``ExecutionTrace``-vs-list mismatches in the nested-VM
+devirt path (``_extract_inner_trace``, ``find_dispatcher``,
+``identify_vm_context``, the decryptors, ``cluster_handlers_by_semantics``).
+
 ### Dynamic backends wired + devirt pipeline runs end-to-end
 
 Got the dynamic-analysis backends working and made the orchestrated

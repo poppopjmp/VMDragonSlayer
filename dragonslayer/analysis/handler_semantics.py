@@ -498,6 +498,8 @@ def analyse_handler_semantics(
     *,
     opcode_assignments: dict[int, int] | None = None,
     symbolic_summaries: dict[int, Any] | None = None,
+    vip_register: str | None = None,
+    dispatcher_addresses: tuple[int, ...] = (),
 ) -> SemanticOpcodeTable:
     """Analyse handler semantics from trace instruction slices.
 
@@ -528,19 +530,47 @@ def analyse_handler_semantics(
     seen_handlers: dict[int, HandlerSemantic] = {}
     boundary_by_handler: dict[int, HandlerBoundary] = {}
 
-    for boundary in boundaries:
-        addr = boundary.handler_address
-        if addr in seen_handlers:
-            continue
+    # Dispatch-chain addresses = the fetch/decode/dispatch loop, which runs
+    # once per handler invocation and is therefore the most re-executed code
+    # in the trace.  Deriving it from revisit frequency is robust regardless
+    # of what the caller's ``dispatcher_addresses`` actually contains (which
+    # for jump-table VMs may be handler-table targets, not the loop itself).
+    _disp_set: set[int] = set(dispatcher_addresses)
+    if (vip_register or dispatcher_addresses) and trace.instructions:
+        _counts = Counter(ti.address for ti in trace.instructions)
+        _max_c = max(_counts.values()) if _counts else 0
+        if _max_c >= 2:
+            _thr = max(2, int(_max_c * 0.7))
+            _disp_set = {a for a, c in _counts.items() if c >= _thr}
 
+    for boundary in boundaries:
         # Extract the trace slice for this handler.
         start = boundary.trace_start
         end = boundary.trace_end
         handler_insns = trace.instructions[start:end] if trace.instructions else []
 
+        # #4: key handlers by their body entry (first non-dispatch, non-vIP
+        # instruction) when we know the VM layout, so branch-dispatch handlers
+        # don't all collapse onto the shared dispatch-loop head.
+        addr = boundary.handler_address
+        if vip_register or dispatcher_addresses:
+            body = _handler_body_address(handler_insns, vip_register, _disp_set)
+            if body is not None:
+                addr = body
+
+        if addr in seen_handlers:
+            continue
+
+        sym = None
+        if symbolic_summaries:
+            sym = symbolic_summaries.get(addr) or symbolic_summaries.get(
+                boundary.handler_address
+            )
         semantic = _classify_handler(
             addr, handler_insns,
-            symbolic_summary=symbolic_summaries.get(addr) if symbolic_summaries else None,
+            symbolic_summary=sym,
+            vip_register=vip_register,
+            dispatcher_addresses=tuple(_disp_set),
         )
         seen_handlers[addr] = semantic
         boundary_by_handler[addr] = boundary
@@ -709,12 +739,19 @@ def _classify_handler(
     instructions: list[TraceInstruction],
     *,
     symbolic_summary: Any | None = None,
+    vip_register: str | None = None,
+    dispatcher_addresses: tuple[int, ...] = (),
 ) -> HandlerSemantic:
     """Classify a single handler from its native instruction trace.
 
     When *symbolic_summary* is provided, the symbolic expression tree
     is pattern-matched first.  The traditional histogram-based heuristic
     is used as a fallback.
+
+    *vip_register* and *dispatcher_addresses* let the heuristic strip VM
+    dispatch infrastructure (fetch/decode/dispatch + vIP advance) before
+    building the mnemonic histogram, so the handler's real operation is
+    not drowned out by plumbing.
     """
 
     # ---- Symbolic classification (high-confidence) ----
@@ -735,6 +772,13 @@ def _classify_handler(
     # (opaque predicates, alignment nops, etc.).
     filtered = _filter_junk(instructions)
     effective = filtered if filtered else instructions
+
+    # Strip VM dispatch infrastructure (#2): fetch/decode/dispatch chain
+    # (by dispatcher address), control flow, and the vIP advance.
+    if vip_register or dispatcher_addresses:
+        effective = _strip_vm_infrastructure(
+            effective, vip_register, set(dispatcher_addresses),
+        )
 
     # Apply taint-based semantic slicing: keep only instructions that
     # contribute to the handler's output (data-flow from VM context).
@@ -801,6 +845,15 @@ def _classify_handler(
             scores[VMOperation.PUSH] = scores.get(VMOperation.PUSH, 0) + 0.2
         elif hist.get("pop", 0) > hist.get("push", 0):
             scores[VMOperation.POP] = scores.get(VMOperation.POP, 0) + 0.2
+
+    # #3 Operand-aware: a concrete data transform (add/xor/shl/cmp/…) is the
+    # handler's real operation; mov-based load/store are just operand staging
+    # around it.  When a transform is present, suppress the staging ops so a
+    # ``mov``/memory-read doesn't out-score the actual ALU operation.
+    if scores.keys() & _TRANSFORM_OPS:
+        for staging in _STAGING_OPS:
+            if staging in scores:
+                scores[staging] *= 0.25
 
     if not scores:
         # Can't determine — check if it's a nop (very short, no
@@ -950,6 +1003,111 @@ def _filter_junk(
 
     # Safety net: never return empty
     return filtered if filtered else instructions
+
+
+# Full-width → sub-register alias groups so a vIP like ``rsi`` also matches
+# ``esi``/``si``/``sil`` when checking which instruction advances the vIP.
+_REG_ALIAS_GROUPS: list[set[str]] = [
+    {"rax", "eax", "ax", "al", "ah"},
+    {"rbx", "ebx", "bx", "bl", "bh"},
+    {"rcx", "ecx", "cx", "cl", "ch"},
+    {"rdx", "edx", "dx", "dl", "dh"},
+    {"rsi", "esi", "si", "sil"},
+    {"rdi", "edi", "di", "dil"},
+    {"rbp", "ebp", "bp", "bpl"},
+    {"rsp", "esp", "sp", "spl"},
+    *[{f"r{n}", f"r{n}d", f"r{n}w", f"r{n}b"} for n in range(8, 16)],
+]
+
+
+def _register_aliases(reg: str) -> set[str]:
+    """Return the sub/super-register aliases of *reg* (lower-cased)."""
+    reg = (reg or "").lower().strip()
+    for group in _REG_ALIAS_GROUPS:
+        if reg in group:
+            return group
+    return {reg} if reg else set()
+
+
+def _writes_register(disasm: str, reg_aliases: set[str]) -> bool:
+    """Heuristic: does *disasm*'s destination operand write one of
+    *reg_aliases*?  The destination is the first operand for x86 ops
+    (or the sole operand for ``inc``/``dec``/``push``/``pop``)."""
+    if not reg_aliases:
+        return False
+    parts = disasm.strip().split(None, 1)
+    if len(parts) < 2:
+        return False
+    dest = parts[1].split(",")[0].strip().strip("[]").split()[0] if parts[1] else ""
+    return dest.lower() in reg_aliases
+
+
+def _strip_vm_infrastructure(
+    instructions: list[TraceInstruction],
+    vip_register: str | None,
+    dispatcher_addrs: set[int],
+) -> list[TraceInstruction]:
+    """Remove VM plumbing so the handler's core operation dominates.
+
+    Strips three classes of instruction that are *dispatch infrastructure*,
+    not handler semantics:
+
+    * instructions whose address is a known dispatcher address (the
+      fetch/decode/dispatch chain, identified by trace revisit frequency);
+    * control-flow / dispatch branches (``jmp``, ``jcc``, ``ret``);
+    * the vIP advance (any instruction writing the vIP register).
+
+    Returns the original list when filtering would empty it.
+    """
+    vip_aliases = _register_aliases(vip_register or "")
+    out: list[TraceInstruction] = []
+    for ti in instructions:
+        if dispatcher_addrs and ti.address in dispatcher_addrs:
+            continue
+        mnem = _extract_mnemonic(ti.disassembly)
+        if mnem in _JCC_PREFIXES or mnem in ("jmp", "ret", "retn", "retf", "iret"):
+            continue
+        if vip_aliases and _writes_register(ti.disassembly, vip_aliases):
+            continue
+        out.append(ti)
+    return out if out else instructions
+
+
+def _handler_body_address(
+    instructions: list[TraceInstruction],
+    vip_register: str | None,
+    dispatcher_addrs: set[int],
+) -> int | None:
+    """Return the address of the handler's *body* — the first instruction
+    that is neither dispatch infrastructure nor the vIP advance.
+
+    Branch-dispatch VMs (``cmp/je`` chains) reach every handler through the
+    same dispatch-loop head, so keying handlers by their body entry lets
+    distinct operations be told apart instead of collapsing onto one address.
+    """
+    vip_aliases = _register_aliases(vip_register or "")
+    for ti in instructions:
+        if dispatcher_addrs and ti.address in dispatcher_addrs:
+            continue
+        mnem = _extract_mnemonic(ti.disassembly)
+        if mnem in _JCC_PREFIXES or mnem in ("jmp", "ret", "retn", "retf", "iret"):
+            continue
+        if vip_aliases and _writes_register(ti.disassembly, vip_aliases):
+            continue
+        return ti.address
+    return None
+
+
+# Operations that represent a concrete data transform (as opposed to pure
+# data staging via mov/load/store).  When one of these is present in a
+# handler it is the "real" operation; load/store are operand plumbing.
+_TRANSFORM_OPS: set[str] = {
+    VMOperation.ADD, VMOperation.SUB, VMOperation.MUL, VMOperation.DIV,
+    VMOperation.AND, VMOperation.OR, VMOperation.XOR, VMOperation.NOT,
+    VMOperation.NEG, VMOperation.SHL, VMOperation.SHR, VMOperation.ROL,
+    VMOperation.ROR, VMOperation.CMP, VMOperation.TEST,
+}
+_STAGING_OPS: set[str] = {VMOperation.LOAD, VMOperation.STORE}
 
 
 def _mnemonic_to_vm_op(mnem: str, disasm: str = "") -> str:

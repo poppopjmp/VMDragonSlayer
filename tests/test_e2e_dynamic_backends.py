@@ -83,6 +83,11 @@ def test_devirt_pipeline_recovers_vip_and_pseudocode():
 
     step_analyze_semantics(ws)
     assert ws.opcode_table is not None and ws.opcode_table.entries
+    # Semantic labeling (#2-#4): the LOAD/ADD/XOR handlers must be told apart,
+    # not collapsed onto a single ``vm_load`` as they were before.
+    ops = {e.semantic.operation for e in ws.opcode_table.entries}
+    assert ws.opcode_table.unique_operations >= 3, f"ops collapsed: {ops}"
+    assert "vm_add" in ops and "vm_xor" in ops, f"ADD/XOR not recovered: {ops}"
 
     step_emit_pseudocode(ws)
     assert ws.pseudocode_result is not None
