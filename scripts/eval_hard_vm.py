@@ -153,6 +153,34 @@ def main() -> int:
     print(result.text)
     print()
     print(f"  pseudocode lines    = {result.line_count}")
+    print()
+
+    # ---- 7. Nested-VM recovery (structural) ----
+    print("STEP 7 — Nested-VM detection + recovery (structural)")
+    _line()
+    from dragonslayer.analysis.trace_ingestion import ExecutionTrace
+    from dragonslayer.analysis.vm_discovery.structural import find_nested_vms
+
+    nested = find_nested_vms(trace, seg.boundaries, vip.name)
+    print(f"  nested VMs found    = {len(nested)}  (ground truth: 1, via VMCALL)")
+    for nv in nested:
+        print(f"  inside outer handler {nv.outer_handler_address:#x}: "
+              f"inner vIP={nv.vip_register} conf={nv.confidence}")
+        print(f"    evidence: {nv.evidence}")
+        sub = ExecutionTrace(instructions=trace.instructions[nv.trace_start:nv.trace_end])
+        ivip = identify_vip_register(sub, nv.dispatch_addresses)
+        iseg = segment_trace(sub, ivip, nv.dispatch_addresses)
+        itab = analyse_handler_semantics(
+            sub, iseg.boundaries, vip_register=ivip.name,
+            dispatcher_addresses=tuple(nv.dispatch_addresses),
+        )
+        iops = sorted({e.semantic.operation for e in itab.entries})
+        print(f"    inner handlers    = {len(iseg.boundaries)}  ops = {iops}")
+        recovered_mul = any("mul" in o.lower() for o in iops)
+        print(f"    INNER MUL RECOVERED = {recovered_mul}  "
+              f"(single-layer analysis dropped this entirely)")
+        print("    inner pseudocode:")
+        print("      " + emit_linear(itab, iseg.boundaries).text.replace("\n", "\n      "))
     return 0
 
 

@@ -21,6 +21,7 @@ even when no protector signature matches.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any
 
 from .handler_boundaries import identify_vip_register
@@ -129,3 +130,86 @@ def analyse_vm_structure(trace: Any) -> dict[str, Any]:
         evidence=evidence,
     )
     return report
+
+
+@dataclass
+class NestedVM:
+    """A nested (inner) VM discovered *inside* an outer handler slice.
+
+    Real protectors (notably Themida/WinLicense) virtualise code with more
+    than one interpreter layer: an outer handler does not perform an
+    arithmetic op, it *enters another VM*.  A single-vIP model collapses
+    that inner interpreter into one opaque handler and mislabels it.  This
+    record marks a handler slice that is itself a VM so the pipeline can
+    recurse into it.
+    """
+
+    outer_handler_address: int
+    trace_start: int
+    trace_end: int
+    vip_register: str
+    dispatch_addresses: tuple[int, ...] = ()
+    confidence: float = 0.0
+    evidence: list[str] = field(default_factory=list)
+
+
+def find_nested_vms(
+    trace: Any,
+    boundaries: Any,
+    outer_vip_register: str | None,
+    *,
+    min_slice_insns: int = 8,
+) -> list[NestedVM]:
+    """Detect nested VMs by asking of each handler slice: *is this a VM?*
+
+    For every outer handler boundary, the corresponding trace slice is run
+    back through :func:`analyse_vm_structure`.  A slice that exhibits its
+    own dispatch loop **and** a monotonic vIP in a register *different* from
+    the outer vIP is a nested interpreter — regardless of its dispatch shape
+    (``cmp/je`` chain, jump table or ``ret``-trampoline).  This is purely
+    structural, so it fires even when the outer handler was mislabelled
+    (e.g. as ``vm_cmp``) by opcode classification.
+
+    Args:
+        trace: The full execution trace (needs ``.instructions``).
+        boundaries: Outer handler boundaries from :func:`segment_trace`.
+        outer_vip_register: Name of the outer vIP, to require a *distinct*
+            inner vIP (a real second interpreter, not the same loop).
+        min_slice_insns: Minimum slice length to bother analysing
+            (``analyse_vm_structure`` itself needs at least 8 instructions).
+
+    Returns:
+        A list of :class:`NestedVM`, one per handler slice that is itself a
+        VM, in trace order.
+    """
+    from ..trace_ingestion import ExecutionTrace
+
+    insns = getattr(trace, "instructions", None) or []
+    nested: list[NestedVM] = []
+    outer = (outer_vip_register or "").lower()
+
+    for b in boundaries:
+        start = getattr(b, "trace_start", None)
+        end = getattr(b, "trace_end", None)
+        if start is None or end is None:
+            continue
+        slice_insns = insns[start:end]
+        if len(slice_insns) < min_slice_insns:
+            continue
+
+        sub = ExecutionTrace(instructions=list(slice_insns))
+        report = analyse_vm_structure(sub)
+        inner_vip = (report.get("vip_register") or "").lower()
+        # A genuine nested VM: the slice is a VM in its own right and its
+        # vIP is a *different* register than the enclosing interpreter's.
+        if report.get("is_vm") and inner_vip and inner_vip != outer:
+            nested.append(NestedVM(
+                outer_handler_address=int(getattr(b, "handler_address", 0)),
+                trace_start=int(start),
+                trace_end=int(end),
+                vip_register=report["vip_register"],
+                dispatch_addresses=tuple(report.get("loop_addresses", ())),
+                confidence=float(report.get("confidence", 0.0)),
+                evidence=list(report.get("evidence", [])),
+            ))
+    return nested

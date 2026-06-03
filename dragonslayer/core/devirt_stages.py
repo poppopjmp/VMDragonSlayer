@@ -598,6 +598,80 @@ def step_emit_pseudocode(ws: DevirtWorkspace) -> None:
 # Sub-step 9: Nested VM detection
 # ---------------------------------------------------------------------------
 
+def _recover_nested_structural(
+    trace_insns: list[Any],
+    boundaries: list[Any],
+    outer_vip: str,
+    depth: int,
+    max_depth: int,
+    out_layers: list[dict[str, Any]],
+    seen: set[int],
+) -> None:
+    """Structurally detect & recover nested VMs inside *boundaries*.
+
+    Unlike the semantic-label path, this fires on any handler slice that is
+    *itself* a VM (its own dispatch loop + a distinct monotonic vIP), so it
+    catches nested interpreters that opcode classification mislabelled and
+    inner dispatchers of any shape (``cmp/je`` chains, jump tables, …).
+    Recurses up to *max_depth* for VM-in-VM-in-VM.
+    """
+    from ..analysis.handler_semantics import analyse_handler_semantics
+    from ..analysis.pseudocode import emit_pseudocode
+    from ..analysis.trace_ingestion import ExecutionTrace
+    from ..analysis.vm_discovery.handler_boundaries import (
+        identify_vip_register,
+        segment_trace,
+    )
+    from ..analysis.vm_discovery.structural import find_nested_vms
+
+    if depth > max_depth or not boundaries:
+        return
+
+    full = ExecutionTrace(instructions=list(trace_insns))
+    for nv in find_nested_vms(full, boundaries, outer_vip):
+        if nv.outer_handler_address in seen:
+            continue
+        seen.add(nv.outer_handler_address)
+
+        sub_insns = trace_insns[nv.trace_start:nv.trace_end]
+        sub = ExecutionTrace(instructions=sub_insns)
+        # Inner dispatch may be a cmp/je chain (no indirect jump), so segment
+        # using the structurally-detected loop addresses; segment_trace also
+        # falls back to vIP-change boundaries if these are empty.
+        inner_vip = identify_vip_register(sub, nv.dispatch_addresses)
+        if inner_vip is None:
+            continue
+        inner_seg = segment_trace(sub, inner_vip, nv.dispatch_addresses)
+        if not inner_seg.boundaries:
+            continue
+        inner_opcode = analyse_handler_semantics(
+            sub, inner_seg.boundaries,
+            vip_register=inner_vip.name,
+            dispatcher_addresses=tuple(nv.dispatch_addresses),
+        )
+        inner_pseudo = emit_pseudocode(
+            inner_opcode, inner_seg.boundaries, None, style="c_like",
+        )
+        out_layers.append({
+            "depth": depth,
+            "entry_address": nv.outer_handler_address,
+            "detection": "structural",
+            "vip_register": inner_vip.name,
+            "handler_count": len(inner_seg.boundaries),
+            "unique_operations": inner_opcode.unique_operations,
+            "operations": sorted({
+                e.semantic.operation for e in inner_opcode.entries
+            }),
+            "pseudocode": inner_pseudo.text,
+            "confidence": nv.confidence,
+        })
+        # Recurse: a nested VM may itself enter a deeper VM.
+        _recover_nested_structural(
+            sub_insns, inner_seg.boundaries, inner_vip.name,
+            depth + 1, max_depth, out_layers, seen,
+        )
+
+
 def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
     """Detect and recursively deobfuscate nested VM layers (B100)."""
     from ..analysis.handler_semantics import analyse_handler_semantics
@@ -678,6 +752,21 @@ def step_detect_nested_vms(ws: DevirtWorkspace) -> None:
                 )
             else:
                 break
+
+        # Structural pass: catch nested VMs that opcode classification
+        # mislabelled (so the semantic-label trigger above missed) and inner
+        # dispatchers of any shape.  Recurses for VM-in-VM and dedupes against
+        # whatever the semantic path already recorded.
+        if ws.vip_candidate is not None and ws.boundaries:
+            seen: set[int] = {
+                int(layer.get("entry_address", 0))
+                for layer in ws.nested_layers
+            }
+            _recover_nested_structural(
+                ws.trace.instructions, ws.boundaries,
+                ws.vip_candidate.name, 1, max_nesting,
+                ws.nested_layers, seen,
+            )
     except _STAGE_ERRORS as exc:
         logger.debug("Nested VM detection skipped: %s", exc)
 

@@ -78,7 +78,8 @@ jobs:
           python -m pytest tests/test_e2e_vm_sample.py \
             tests/test_e2e_dynamic_backends.py \
             tests/test_ml_synthetic_classifier.py \
-            tests/test_generic_vm.py -v --tb=short
+            tests/test_generic_vm.py \
+            tests/test_nested_vm_recovery.py -v --tb=short
 
   lint:
     runs-on: ubuntu-latest
