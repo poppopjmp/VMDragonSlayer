@@ -453,10 +453,13 @@ class AnalysisPipeline:
         -------
         StageResult
         """
-        t0 = time.monotonic()
+        # perf_counter (not monotonic): on Windows monotonic has ~15 ms
+        # resolution, so a trivial stage completes within a single tick and
+        # records duration == 0.0. perf_counter is sub-microsecond.
+        t0 = time.perf_counter()
         try:
             out = fn()
-            elapsed = time.monotonic() - t0
+            elapsed = time.perf_counter() - t0
             if isinstance(out, StageResult):
                 out.duration = elapsed
                 return out
@@ -468,7 +471,7 @@ class AnalysisPipeline:
             logger.exception("%s stage failed", stage_name)
             return StageResult(
                 stage=stage_name, success=False, error=str(exc),
-                duration=time.monotonic() - t0,
+                duration=time.perf_counter() - t0,
             )
 
     # -- built-in engine stages --------------------------------------------
