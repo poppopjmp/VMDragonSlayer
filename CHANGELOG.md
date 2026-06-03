@@ -4,6 +4,31 @@ All notable changes to VMDragonSlayer are documented here.
 
 ## [Unreleased] — dev-0.9.1
 
+### End-to-end emulation/devirtualization wiring + fixture
+
+Made the dynamic-analysis path actually run end to end and proved it on a
+real compiled binary.
+
+- **Built-in trace fallback**: `devirt_stages.step_ingest_trace` now falls
+  back to the built-in Unicorn `TraceEngine` (parsing the binary for its
+  entry point) when no dynamic-analysis plugin supplied a trace. Previously
+  the devirt pipeline produced empty output unless Qiling/Triton/angr were
+  installed.
+- **Dispatcher input fix**: `step_identify_dispatcher` passed a whole
+  `ExecutionTrace` to `find_dispatcher` (which expects a list of trace-record
+  dicts and calls `len()`), crashing once a trace was actually present. Now
+  normalised to records.
+- **Test fixture**: added `tests/fixtures/build_vm_sample.py` — generates a
+  valid x86-64 ELF containing a real fetch→decode→dispatch bytecode VM
+  (no real protector/malware) — plus `tests/test_e2e_vm_sample.py`, which
+  drives the Unicorn engine over it and asserts the trace executes, the vIP
+  (`rsi`) is recovered, handlers are segmented, and pseudocode is emitted.
+- **CI**: new `emulation` job installs the Unicorn backend and runs the
+  end-to-end test (the core `test` job can't, as it installs core deps only).
+- **Dependency fix**: `triton-library>=1.0` was unsatisfiable (only
+  `1.0.0rcN` wheels are published) → relaxed to `>=1.0.0rc4`.
+
+
 ### CI Green-Up: Test / Lint / Security Quality Gate
 
 End-to-end pass to make the CI quality gate green and fix the issues it

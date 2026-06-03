@@ -42,6 +42,30 @@ jobs:
         run: |
           python -m pytest --tb=short -q --cov=dragonslayer --cov-report=term-missing --cov-fail-under=80
 
+  # Exercises the dynamic-analysis path that the core 'test' job cannot:
+  # installs the built-in Unicorn trace backend and runs the end-to-end
+  # devirtualization test over a real compiled bytecode-VM ELF.
+  emulation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+
+      - name: Install deps + Unicorn backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest "unicorn>=2.0.1" "keystone-engine>=0.9.2" "pefile>=2024.8.26"
+          pip install -e .
+
+      - name: Run end-to-end emulation/devirtualization test
+        run: python -m pytest tests/test_e2e_vm_sample.py -v --tb=short
+
   lint:
     runs-on: ubuntu-latest
     steps:

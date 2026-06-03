@@ -104,6 +104,33 @@ def step_ingest_trace(ws: DevirtWorkspace) -> None:
     except _STAGE_ERRORS:
         ws.trace = None
 
+    # Fallback: when no dynamic-analysis plugin (Qiling/Triton/angr) supplied a
+    # trace, produce one with the built-in Unicorn engine straight from the
+    # binary's entry point. Best-effort and bounded by max_instructions; only
+    # runs when the optional 'unicorn' backend is installed.
+    if (ws.trace is None or not getattr(ws.trace, "instructions", None)) and ws.binary_data:
+        try:
+            from ..analysis.trace_engine import UNICORN_AVAILABLE, TraceEngine
+
+            if UNICORN_AVAILABLE:
+                from ..analysis.binary_format import parse_binary
+
+                pb = parse_binary(ws.binary_data)
+                entry = int(getattr(pb, "entry_point", 0) or 0)
+                base = int(getattr(pb, "image_base", 0) or 0) or 0x400000
+                arch = "x86_64" if "64" in str(getattr(pb, "architecture", "")) else "x86"
+                if entry:
+                    ws.trace = TraceEngine(arch=arch).trace(
+                        ws.binary_data, entry_va=entry, image_base=base,
+                    )
+                    if not ws.base_address:
+                        ws.base_address = base
+                    ws.shared_data["entry_point"] = entry
+                    ws.shared_data["image_base"] = base
+                    ws.shared_data["trace_source"] = "builtin_unicorn"
+        except Exception as exc:  # best-effort: emulating arbitrary input
+            logger.debug("Built-in trace fallback failed: %s", exc)
+
     # Resolve base address from PE/shared_data
     if not ws.base_address:
         ws.base_address = ws.shared_data.get("image_base", 0)
@@ -178,10 +205,17 @@ def step_identify_dispatcher(ws: DevirtWorkspace) -> None:
             find_vmprotect_dispatcher,
         )
 
-        # B100: Try VMProtect → Themida → Code Virtualizer → generic
+        # B100: Try VMProtect → Themida → Code Virtualizer → generic.
+        # find_dispatcher expects trace *records* (list of dicts with
+        # ``address``/``disassembly``), so normalise the ExecutionTrace.
         protector_hint = ws.shared_data.get("detected_protector")
+        trace_records: list[dict[str, Any]] = []
+        if ws.trace is not None:
+            insns = getattr(ws.trace, "instructions", ws.trace)
+            for ti in insns:
+                trace_records.append(ti.to_dict() if hasattr(ti, "to_dict") else ti)
         generic_match = find_dispatcher(
-            ws.trace, bit_width=64,
+            trace_records, bit_width=64,
             protector_hint=protector_hint,
         )
 

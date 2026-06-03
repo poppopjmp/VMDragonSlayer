@@ -96,7 +96,9 @@ emulation = [
     "pefile>=2024.8.26",
     "angr>=9.2.0",
     "qiling>=1.4.6",
-    "triton-library>=1.0",
+    # triton-library only publishes pre-release wheels (1.0.0rcN); the bare
+    # ">=1.0" pin is unsatisfiable, so allow the release candidates.
+    "triton-library>=1.0.0rc4",
 ]
 
 # Web API dependencies
