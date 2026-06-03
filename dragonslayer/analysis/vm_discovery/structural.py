@@ -65,6 +65,7 @@ def analyse_vm_structure(trace: Any) -> dict[str, Any]:
         "confidence": 0.0,
         "dispatch_loop": False,
         "indirect_dispatch": False,
+        "threaded_dispatch": False,
         "vip_register": None,
         "estimated_handlers": 0,
         "loop_addresses": [],
@@ -88,22 +89,39 @@ def analyse_vm_structure(trace: Any) -> dict[str, Any]:
         and loop_density >= 0.30
     )
 
-    # Indirect dispatch executed from within the loop.
-    indirect = False
+    # Indirect dispatch sites across the whole trace (jmp/call through a
+    # register or table, or a ret-trampoline).  We track *where* each one is
+    # so we can distinguish a single hot dispatcher from threaded dispatch.
+    indirect_sites: set[int] = set()
+    indirect_in_loop = False
     for ti in insns:
-        if ti.address not in loop:
-            continue
         mnem, ops = _mnem_ops(ti)
-        if mnem in ("ret", "retn"):
-            indirect = True
-            break
-        if mnem in ("jmp", "call") and _is_indirect_target(ops):
-            indirect = True
-            break
+        is_ind = mnem in ("ret", "retn") or (
+            mnem in ("jmp", "call") and _is_indirect_target(ops)
+        )
+        if not is_ind:
+            continue
+        indirect_sites.add(ti.address)
+        if ti.address in loop:
+            indirect_in_loop = True
 
     # Monotonic virtual instruction pointer walking a bytecode stream.
     vip = identify_vip_register(trace, list(loop))
     has_vip = vip is not None and getattr(vip, "monotonic_ratio", 0.0) >= 0.6
+
+    # Direct-threaded dispatch: the fetch/decode/dispatch is *inlined* at the
+    # end of every handler, so no single address dominates the trace (no tight
+    # loop) — but a monotonic vIP is still threaded through several distinct
+    # indirect-dispatch sites.  This is the classic defeat of hot-loop
+    # heuristics; the monotonic-vIP requirement guards against mistaking
+    # ordinary indirect-call-heavy code (no walking pointer) for a VM.
+    threaded = (
+        not has_loop
+        and has_vip
+        and len(indirect_sites) >= 2
+    )
+
+    indirect = indirect_in_loop or threaded
 
     evidence: list[str] = []
     score = 0.0
@@ -112,6 +130,11 @@ def analyse_vm_structure(trace: Any) -> dict[str, Any]:
         evidence.append(
             f"tight dispatch loop ({len(loop)} addrs, {loop_density:.0%} of trace)"
         )
+    elif threaded:
+        score += 0.30
+        evidence.append(
+            f"direct-threaded dispatch ({len(indirect_sites)} inline sites)"
+        )
     if has_vip and vip is not None:
         score += 0.35
         evidence.append(f"monotonic vIP={vip.name} (ratio={vip.monotonic_ratio:.2f})")
@@ -119,14 +142,22 @@ def analyse_vm_structure(trace: Any) -> dict[str, Any]:
         score += 0.25
         evidence.append("indirect/handler-table dispatch")
 
+    if has_loop:
+        est_handlers = max_c
+    elif threaded:
+        est_handlers = len(indirect_sites)
+    else:
+        est_handlers = 0
+
     report.update(
         is_vm=score >= 0.50,
         confidence=round(min(score, 1.0), 3),
         dispatch_loop=has_loop,
         indirect_dispatch=indirect,
+        threaded_dispatch=threaded,
         vip_register=vip.name if vip else None,
-        estimated_handlers=max_c if has_loop else 0,
-        loop_addresses=sorted(loop)[:16],
+        estimated_handlers=est_handlers,
+        loop_addresses=sorted(loop)[:16] if has_loop else sorted(indirect_sites)[:16],
         evidence=evidence,
     )
     return report
