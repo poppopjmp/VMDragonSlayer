@@ -80,7 +80,8 @@ jobs:
             tests/test_ml_synthetic_classifier.py \
             tests/test_generic_vm.py \
             tests/test_nested_vm_recovery.py \
-            tests/test_structural_zoo.py -v --tb=short
+            tests/test_structural_zoo.py \
+            tests/test_structural_zoo_advanced.py -v --tb=short
 
   lint:
     runs-on: ubuntu-latest

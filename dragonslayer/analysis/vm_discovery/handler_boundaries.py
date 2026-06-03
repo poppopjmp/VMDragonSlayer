@@ -208,6 +208,14 @@ def identify_vip_register(
 
     disp_set = set(dispatcher_addresses)
 
+    # Registers used as the *base* of a memory operand at a dispatcher
+    # address — i.e. the pointer dereferenced to fetch the opcode.  The vIP
+    # is by definition such a pointer; a data register (accumulator) is not.
+    # This disambiguates the vIP from a register that merely happens to
+    # advance monotonically (e.g. an accumulator in a loop-free program, or
+    # one that out-scores a non-monotonic vIP across a virtual loop).
+    fetch_bases = _fetch_base_registers(trace.instructions, disp_set)
+
     # Pre-compute symbolic scores if summaries are provided.
     sym_scores: dict[str, float] = {}
     if symbolic_summaries:
@@ -220,6 +228,7 @@ def identify_vip_register(
         cand = _score_register(
             trace.instructions, reg, disp_set,
             symbolic_bonus=sym_scores.get(reg.lower(), 0.0),
+            is_fetch_base=reg.lower() in fetch_bases,
         )
         if cand is not None:
             results.append(cand)
@@ -238,12 +247,47 @@ def identify_vip_register(
     return best
 
 
+_MEM_OPERAND_RE = _re.compile(r"\[([^\]]+)\]")
+_REG_TOKEN_RE = _re.compile(r"[a-z][a-z0-9]+")
+
+
+def _fetch_base_registers(
+    instructions: list[TraceInstruction],
+    dispatcher_addrs: set[int],
+) -> set[str]:
+    """Registers used as a memory *base* at any dispatcher address.
+
+    Parses ``[...]`` memory operands of instructions executed at a dispatcher
+    address and returns the base registers (the first additive term that is
+    not a scaled index like ``rax*8``).  These are the pointers the
+    dispatcher dereferences — the vIP is one of them.
+    """
+    bases: set[str] = set()
+    if not dispatcher_addrs:
+        return bases
+    for ti in instructions:
+        if ti.address not in dispatcher_addrs:
+            continue
+        disasm = (ti.disassembly or "").lower()
+        for inner in _MEM_OPERAND_RE.findall(disasm):
+            for term in inner.split("+"):
+                term = term.strip()
+                if "*" in term:          # scaled index (e.g. rax*8), not base
+                    continue
+                m = _REG_TOKEN_RE.match(term)
+                if m:
+                    bases.add(m.group(0))
+                    break  # first non-index term is the base
+    return bases
+
+
 def _score_register(
     instructions: list[TraceInstruction],
     reg: str,
     dispatcher_addrs: set[int],
     *,
     symbolic_bonus: float = 0.0,
+    is_fetch_base: bool = False,
 ) -> VIPCandidate | None:
     """Score a single register as vIP candidate."""
 
@@ -313,6 +357,13 @@ def _score_register(
             + 0.25 * disp_corr
             + 0.15 * min(change_count / max(len(instructions) * 0.1, 1), 1.0)
         ) * prior
+
+    # The register dereferenced to fetch the opcode at the dispatcher is the
+    # vIP (a pointer), not an accumulator.  Additive bonus so it only *raises*
+    # a fetch pointer — decisive when a non-monotonic vIP (virtual loop) would
+    # otherwise lose to a monotonically-advancing data register.
+    if is_fetch_base:
+        score += 0.30
 
     return VIPCandidate(
         name=reg,
